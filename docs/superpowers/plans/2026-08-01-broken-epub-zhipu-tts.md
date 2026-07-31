@@ -45,6 +45,10 @@ test('ignores missing non-reading resources while parsing the spine', () async {
 });
 ```
 
+Also add `missingSpineDocument` to make `chapter2.xhtml` absent while its
+linear spine entry remains, and assert `parse` throws `FormatException`. This
+distinguishes ignorable auxiliary damage from missing reading content.
+
 - [ ] **Step 2: Run the focused test and verify RED**
 
 Run:
@@ -72,6 +76,8 @@ final html = await contentRef?.readContentAsText();
 ```
 
 Do not read `Content.Images`, `Content.Fonts`, the cover, or the table-of-contents chapter tree.
+Throw `FormatException('EPUB spine document is missing: $href')` when a linear
+spine item cannot resolve to an XHTML content reference.
 
 - [ ] **Step 4: Run EPUB tests and verify GREEN**
 
@@ -84,6 +90,9 @@ Run the external diagnostic fixture and assert `title=完美世界 chapters=2005
 ```powershell
 & .\tool\flutter.ps1 test C:\Users\Administrator\Documents\Codex\2026-07-31\ru\work\repro_epub_test.dart --concurrency=1 -r expanded
 ```
+
+The diagnostic test must call `EpubBookParser.parse` directly and report the
+returned `ParsedBook`, not call `EpubReader.openBook` itself.
 
 - [ ] **Step 6: Commit**
 
@@ -161,6 +170,7 @@ git commit -m "feat: model Zhipu voice profiles securely"
 **Files:**
 - Create: `test/features/speech/zhipu_tts_client_test.dart`
 - Modify: `test/features/speech/speech_provider_factory_test.dart`
+- Modify: `test/features/downloads/audio_cache_repository_test.dart`
 - Create: `lib/features/speech/data/zhipu_tts_client.dart`
 - Modify: `lib/features/speech/data/speech_provider_factory.dart`
 
@@ -190,10 +200,14 @@ Also test missing credentials, empty successful audio, one 429 followed by succe
 
 Create `VoiceProfile.zhipu()` through `SpeechProviderFactory` and assert the returned `CachedAudioSpeechProvider.cache.synthesizer` is a `ZhipuTtsClient`.
 
+Add a cache regression using RIFF/WAVE fixture bytes and
+`VoiceProfile.zhipu()`; assert the published cache path ends in `.wav` and the
+bytes are preserved.
+
 - [ ] **Step 3: Run focused tests and verify RED**
 
 ```powershell
-& .\tool\flutter.ps1 test test\features\speech\zhipu_tts_client_test.dart test\features\speech\speech_provider_factory_test.dart --concurrency=1 -r expanded
+& .\tool\flutter.ps1 test test\features\speech\zhipu_tts_client_test.dart test\features\speech\speech_provider_factory_test.dart test\features\downloads\audio_cache_repository_test.dart --concurrency=1 -r expanded
 ```
 
 Expected: compile failures because `ZhipuTtsClient` and the factory branch do not exist.
@@ -228,7 +242,7 @@ Add `SpeechProviderType.zhipu => _cached(ZhipuTtsClient(...))`, run the command 
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add test/features/speech/zhipu_tts_client_test.dart test/features/speech/speech_provider_factory_test.dart lib/features/speech/data/zhipu_tts_client.dart lib/features/speech/data/speech_provider_factory.dart
+git add test/features/speech/zhipu_tts_client_test.dart test/features/speech/speech_provider_factory_test.dart test/features/downloads/audio_cache_repository_test.dart lib/features/speech/data/zhipu_tts_client.dart lib/features/speech/data/speech_provider_factory.dart
 git commit -m "feat: synthesize and cache Zhipu speech"
 ```
 
