@@ -35,12 +35,12 @@ Azure AI Speech REST API
 - Consumes: `PlatformFile.bytes` or `PlatformFile.xFile`
 - Produces: the existing `ParsedBook` model
 
-- [ ] Add failing tests for path-only picker files and normalized EPUB content
+- [x] Add failing tests for path-only picker files and normalized EPUB content
   paths/div markup.
-- [ ] Verify the new tests fail for the current implementation.
-- [ ] Read path-only files through `XFile`, normalize EPUB hrefs, and expose
+- [x] Verify the new tests fail for the current implementation.
+- [x] Read path-only files through `XFile`, normalize EPUB hrefs, and expose
   specific import errors.
-- [ ] Run the focused library tests and commit.
+- [x] Run the focused library tests and commit.
 
 ### Task 2: Reader navigation and chapter selection
 
@@ -56,12 +56,12 @@ Azure AI Speech REST API
   `ReaderPageData`
 - Consumes: chapter selection callbacks from `ReaderPage`
 
-- [ ] Add failing tests for returning to the library, opening the chapter
+- [x] Add failing tests for returning to the library, opening the chapter
   list, and invoking previous/next chapter callbacks.
-- [ ] Verify the new tests fail for the current implementation.
-- [ ] Push reader routes, provide a safe library back action, key reader data
+- [x] Verify the new tests fail for the current implementation.
+- [x] Push reader routes, provide a safe library back action, key reader data
   by selected chapter, and persist chapter changes.
-- [ ] Run focused reader/navigation tests and commit.
+- [x] Run focused reader/navigation tests and commit.
 
 ### Task 3: Azure AI Speech and cloud audio playback
 
@@ -85,12 +85,12 @@ Azure AI Speech REST API
 - `CachedAudioSpeechProvider implements SpeechProvider`
 - `VoiceProfile.azure(region, voice, speed, outputFormat)`
 
-- [ ] Add failing tests for Azure credentials, request headers/SSML, profile
+- [x] Add failing tests for Azure credentials, request headers/SSML, profile
   normalization, and cached audio speech events.
-- [ ] Verify the tests fail for the current implementation.
-- [ ] Implement Azure synthesis, secure key storage, cloud file playback,
+- [x] Verify the tests fail for the current implementation.
+- [x] Implement Azure synthesis, secure key storage, cloud file playback,
   settings, and active profile/provider selection.
-- [ ] Run focused speech/playback tests and commit.
+- [x] Run focused speech/playback tests and commit.
 
 ### Task 4: Full verification and deliverables
 
@@ -98,8 +98,7 @@ Azure AI Speech REST API
 - Verify: all changed source and test files
 - Deliver: Android debug APK and unsigned iOS IPA
 
-- [ ] Run formatting, analysis, and the complete Flutter test suite.
+- [x] Run formatting, analysis, and the complete Flutter test suite.
 - [ ] Push the branch and wait for the PR GitHub Actions run.
 - [ ] Download and inspect Android and unsigned iOS artifacts.
 - [ ] Confirm the worktree is clean and update the PR verification summary.
-
