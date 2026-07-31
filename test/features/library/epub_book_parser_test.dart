@@ -20,9 +20,26 @@ void main() {
     expect(parsed.chapters.first.paragraphs, ['第二章', '第二段。']);
     expect(parsed.chapters.last.paragraphs, ['第一章', '第一段。']);
   });
+
+  test('extracts chapters whose EPUB3 body uses div blocks', () async {
+    final parsed = await const EpubBookParser().parse(
+      _buildEpub(
+        chapterOneHtml:
+            '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+            '<div>第一章</div><div>第一段。</div></body></html>',
+      ),
+      'fixture.epub',
+    );
+
+    expect(parsed.chapters.map((chapter) => chapter.title), [
+      '第二章',
+      '第一章',
+    ]);
+    expect(parsed.chapters.last.paragraphs, ['第一章', '第一段。']);
+  });
 }
 
-Uint8List _buildEpub() {
+Uint8List _buildEpub({String? chapterOneHtml}) {
   final archive = Archive();
   _addText(archive, 'mimetype', 'application/epub+zip');
   _addText(
@@ -90,8 +107,9 @@ Uint8List _buildEpub() {
   _addText(
     archive,
     'OEBPS/chapter1.xhtml',
-    '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
-        '<h1>第一章</h1><p>第一段。</p></body></html>',
+    chapterOneHtml ??
+        '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+            '<h1>第一章</h1><p>第一段。</p></body></html>',
   );
   _addText(
     archive,

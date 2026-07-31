@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:drift/native.dart';
@@ -61,6 +62,29 @@ void main() {
       name: '测试.txt',
       size: 0,
       bytes: Uint8List(0),
+    );
+
+    final bookId = await repository.importFile(file);
+
+    expect((await database.chaptersForBook(bookId)).length, 2);
+  });
+
+  test('imports a mobile picker file when only its path is available', () async {
+    final repository = BookImportRepository(
+      database: database,
+      txtParser: const FakeBookParser(),
+      epubParser: const FakeBookParser(),
+    );
+    final directory = await Directory.systemTemp.createTemp(
+      'novel-reader-import-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final source = File('${directory.path}${Platform.pathSeparator}测试.epub');
+    await source.writeAsBytes(const [1, 2, 3]);
+    final file = PlatformFile(
+      name: '测试.epub',
+      path: source.path,
+      size: await source.length(),
     );
 
     final bookId = await repository.importFile(file);
