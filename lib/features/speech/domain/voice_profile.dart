@@ -1,8 +1,21 @@
-enum SpeechProviderType { system, cloud, azure }
+enum SpeechProviderType { system, cloud, azure, zhipu }
 
 final class VoiceProfile {
   static const defaultAzureVoice = 'zh-CN-XiaoxiaoNeural';
   static const defaultAzureOutputFormat = 'audio-24khz-48kbitrate-mono-mp3';
+  static const zhipuBaseUrl = 'https://open.bigmodel.cn/api/paas/v4';
+  static const zhipuModel = 'glm-tts';
+  static const zhipuOutputFormat = 'wav';
+  static const defaultZhipuVoice = 'tongtong';
+  static const zhipuVoices = <String>[
+    'tongtong',
+    'chuichui',
+    'xiaochen',
+    'jam',
+    'kazi',
+    'douji',
+    'luodo',
+  ];
 
   factory VoiceProfile.system({
     String? voice,
@@ -57,6 +70,25 @@ final class VoiceProfile {
       voice: normalizedVoice,
       speed: speed,
       outputFormat: outputFormat.trim(),
+    );
+  }
+
+  factory VoiceProfile.zhipu({
+    String voice = defaultZhipuVoice,
+    double speed = 1,
+  }) {
+    _validateSpeed(speed);
+    final normalizedVoice = voice.trim().toLowerCase();
+    if (!zhipuVoices.contains(normalizedVoice)) {
+      throw ArgumentError.value(voice, 'voice', 'Unsupported Zhipu voice.');
+    }
+    return VoiceProfile._(
+      providerType: SpeechProviderType.zhipu,
+      baseUrl: zhipuBaseUrl,
+      model: zhipuModel,
+      voice: normalizedVoice,
+      speed: speed,
+      outputFormat: zhipuOutputFormat,
     );
   }
 

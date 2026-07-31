@@ -30,6 +30,7 @@ final class SecureCredentials {
 
   static const _apiKeyKey = 'cloud_tts_api_key';
   static const _azureSubscriptionKeyKey = 'azure_tts_subscription_key';
+  static const _zhipuApiKeyKey = 'zhipu_tts_api_key';
 
   final SecureKeyValueStore _storage;
 
@@ -47,4 +48,11 @@ final class SecureCredentials {
 
   Future<void> deleteAzureSubscriptionKey() =>
       _storage.delete(_azureSubscriptionKeyKey);
+
+  Future<String?> readZhipuApiKey() => _storage.read(_zhipuApiKeyKey);
+
+  Future<void> writeZhipuApiKey(String value) =>
+      _storage.write(_zhipuApiKeyKey, value);
+
+  Future<void> deleteZhipuApiKey() => _storage.delete(_zhipuApiKeyKey);
 }

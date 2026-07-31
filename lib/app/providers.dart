@@ -37,6 +37,7 @@ VoiceProfile voiceProfileFromRecord(VoiceProfileRecord? record) {
         outputFormat: record.outputFormat ?? 'mp3',
       ),
     'azure' => _azureProfileFromRecord(record),
+    'zhipu' => _zhipuProfileFromRecord(record),
     _ => VoiceProfile.system(),
   };
 }
@@ -62,6 +63,17 @@ String? _azureRegion(String? baseUrl) {
   }
   final region = host.substring(0, host.length - suffix.length);
   return region.isEmpty ? null : region;
+}
+
+VoiceProfile _zhipuProfileFromRecord(VoiceProfileRecord record) {
+  try {
+    return VoiceProfile.zhipu(
+      voice: record.voice ?? VoiceProfile.defaultZhipuVoice,
+      speed: record.speed,
+    );
+  } on ArgumentError {
+    return VoiceProfile.system();
+  }
 }
 
 final libraryBooksProvider = StreamProvider<List<BookRecord>>((ref) {

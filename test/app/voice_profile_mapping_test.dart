@@ -47,4 +47,25 @@ void main() {
     expect(profile.providerType, SpeechProviderType.azure);
     expect(profile.speed, 1.1);
   });
+
+  test('maps a stored Zhipu profile for active reader playback', () {
+    const record = VoiceProfileRecord(
+      id: 5,
+      providerType: 'zhipu',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      model: 'glm-tts',
+      voice: 'luodo',
+      speed: 0.9,
+      outputFormat: 'wav',
+    );
+
+    final profile = voiceProfileFromRecord(record);
+
+    expect(profile.providerType, SpeechProviderType.zhipu);
+    expect(profile.normalizedBaseUrl, record.baseUrl);
+    expect(profile.model, 'glm-tts');
+    expect(profile.voice, 'luodo');
+    expect(profile.speed, 0.9);
+    expect(profile.outputFormat, 'wav');
+  });
 }

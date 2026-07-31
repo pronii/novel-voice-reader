@@ -41,6 +41,30 @@ void main() {
     expect(await credentials.readAzureSubscriptionKey(), isNull);
     expect(await credentials.readApiKey(), 'compatible-secret');
   });
+
+  test('Zhipu API key uses a separate secure value', () async {
+    final store = FakeSecureKeyValueStore();
+    final credentials = SecureCredentials(store);
+    await credentials.writeApiKey('compatible-secret');
+    await credentials.writeAzureSubscriptionKey('azure-secret');
+
+    await credentials.writeZhipuApiKey('zhipu-secret');
+
+    expect(await credentials.readZhipuApiKey(), 'zhipu-secret');
+    expect(await credentials.readApiKey(), 'compatible-secret');
+    expect(await credentials.readAzureSubscriptionKey(), 'azure-secret');
+    expect(store.values.keys, {
+      'cloud_tts_api_key',
+      'azure_tts_subscription_key',
+      'zhipu_tts_api_key',
+    });
+
+    await credentials.deleteZhipuApiKey();
+
+    expect(await credentials.readZhipuApiKey(), isNull);
+    expect(await credentials.readApiKey(), 'compatible-secret');
+    expect(await credentials.readAzureSubscriptionKey(), 'azure-secret');
+  });
 }
 
 final class FakeSecureKeyValueStore implements SecureKeyValueStore {

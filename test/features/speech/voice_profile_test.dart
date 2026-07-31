@@ -42,4 +42,19 @@ void main() {
     );
     expect(profile.voice, 'zh-CN-XiaoxiaoNeural');
   });
+
+  test('uses the fixed official Zhipu speech configuration', () {
+    final profile = VoiceProfile.zhipu(voice: 'xiaochen', speed: 1.2);
+
+    expect(profile.providerType, SpeechProviderType.zhipu);
+    expect(profile.normalizedBaseUrl, 'https://open.bigmodel.cn/api/paas/v4');
+    expect(profile.model, 'glm-tts');
+    expect(profile.voice, 'xiaochen');
+    expect(profile.speed, 1.2);
+    expect(profile.outputFormat, 'wav');
+  });
+
+  test('rejects an unsupported Zhipu system voice', () {
+    expect(() => VoiceProfile.zhipu(voice: 'unknown'), throwsArgumentError);
+  });
 }
