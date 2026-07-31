@@ -28,6 +28,26 @@ void main() {
         'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
       }),
     );
+    expect(
+      document
+          .findAllElements('service')
+          .map((element) => element.getAttribute('android:name'))
+          .whereType<String>(),
+      contains('com.ryanheise.audioservice.AudioService'),
+    );
+    expect(
+      document
+          .findAllElements('receiver')
+          .map((element) => element.getAttribute('android:name'))
+          .whereType<String>(),
+      contains('com.ryanheise.audioservice.MediaButtonReceiver'),
+    );
+    expect(
+      File(
+        'android/app/src/main/kotlin/com/pronii/novel_voice_reader/MainActivity.kt',
+      ).readAsStringSync(),
+      contains('AudioServiceActivity'),
+    );
   });
 
   test('iOS declares opportunistic processing and audio background modes', () {

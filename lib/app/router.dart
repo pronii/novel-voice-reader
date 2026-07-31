@@ -15,8 +15,13 @@ import 'package:novel_voice_reader/features/library/data/book_import_repository.
 import 'package:novel_voice_reader/features/library/data/epub_book_parser.dart';
 import 'package:novel_voice_reader/features/library/data/txt_book_parser.dart';
 import 'package:novel_voice_reader/features/library/presentation/library_page.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/playback/presentation/player_page.dart';
+import 'package:novel_voice_reader/features/reader/data/reading_progress_repository.dart';
+import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
+import 'package:novel_voice_reader/features/speech/data/system_tts_adapter.dart';
+import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:novel_voice_reader/features/speech/presentation/voice_settings_page.dart';
 
 GoRouter createAppRouter() {
@@ -161,15 +166,33 @@ final class _ReaderRoutePage extends ConsumerWidget {
         onOpenPlayer: () => context.push('/player/$bookId'),
         onPlayFrom: (paragraph) {
           final database = ref.read(databaseProvider);
+          final runtime = ref.read(playbackRuntimeProvider);
           final chapter = value.chapter;
           if (database == null || chapter == null) {
             return;
           }
-          unawaited(
-            database.upsertProgress(
+          final coordinator = PlaybackCoordinator(
+            provider: SystemTtsAdapter(FlutterSystemTtsEngine()),
+            progress: DriftPlaybackProgressRepository(
+              database: database,
               bookId: bookId,
-              chapterId: chapter.id,
-              paragraphIndex: paragraph.index,
+            ),
+            paragraphs: DriftPlaybackParagraphSource(database),
+            voiceProfile: VoiceProfile.system(),
+          );
+          runtime?.controller.attach(coordinator);
+          runtime?.handler.publishNowPlaying(
+            bookId: bookId,
+            bookTitle: value.book.title,
+            chapterTitle: chapter.title,
+          );
+          runtime?.handler.markPlaying();
+          unawaited(
+            coordinator.playFrom(
+              PlaybackCursor(
+                chapterId: chapter.id,
+                paragraphIndex: paragraph.index,
+              ),
             ),
           );
           unawaited(
@@ -198,6 +221,10 @@ final class _PlayerRoutePage extends ConsumerWidget {
       data: (value) => PlayerPage(
         bookTitle: value.book.title,
         chapterTitle: value.chapter?.title ?? '未命名章节',
+        onPlay: ref.read(playbackRuntimeProvider)?.handler.play,
+        onPause: ref.read(playbackRuntimeProvider)?.handler.pause,
+        onPrevious: ref.read(playbackRuntimeProvider)?.handler.skipToPrevious,
+        onNext: ref.read(playbackRuntimeProvider)?.handler.skipToNext,
       ),
     );
   }

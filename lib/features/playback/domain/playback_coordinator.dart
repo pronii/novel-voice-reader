@@ -5,6 +5,20 @@ import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
+abstract interface class PlaybackController {
+  PlaybackCursor? get cursor;
+
+  Future<void> playFrom(PlaybackCursor cursor);
+
+  Future<void> pause();
+
+  Future<void> resume();
+
+  Future<void> nextParagraph();
+
+  Future<void> previousParagraph();
+}
+
 final class PlaybackParagraph {
   const PlaybackParagraph({
     required this.id,
@@ -27,7 +41,7 @@ abstract interface class PlaybackProgressRepository {
   Future<void> confirm(PlaybackCursor cursor);
 }
 
-final class PlaybackCoordinator {
+final class PlaybackCoordinator implements PlaybackController {
   factory PlaybackCoordinator({
     required SpeechProvider provider,
     required PlaybackProgressRepository progress,
@@ -67,8 +81,10 @@ final class PlaybackCoordinator {
   List<SpeechSegment> _segments = const [];
   int _segmentIndex = 0;
 
+  @override
   PlaybackCursor? get cursor => _cursor;
 
+  @override
   Future<void> playFrom(PlaybackCursor cursor) async {
     final paragraph = await _paragraphs.at(cursor);
     if (paragraph == null) {
@@ -77,6 +93,7 @@ final class PlaybackCoordinator {
     await _startParagraph(paragraph);
   }
 
+  @override
   Future<void> pause() async {
     final cursor = _cursor;
     if (cursor != null) {
@@ -85,7 +102,39 @@ final class PlaybackCoordinator {
     await _provider.pause();
   }
 
+  @override
   Future<void> resume() => _provider.resume();
+
+  @override
+  Future<void> nextParagraph() async {
+    final current = _cursor;
+    if (current == null) {
+      return;
+    }
+    final next = await _paragraphs.nextAfter(current);
+    if (next != null) {
+      await _progress.confirm(next.cursor);
+      await _startParagraph(next);
+    }
+  }
+
+  @override
+  Future<void> previousParagraph() async {
+    final current = _cursor;
+    if (current == null || current.paragraphIndex == 0) {
+      return;
+    }
+    final previous = await _paragraphs.at(
+      PlaybackCursor(
+        chapterId: current.chapterId,
+        paragraphIndex: current.paragraphIndex - 1,
+      ),
+    );
+    if (previous != null) {
+      await _progress.confirm(previous.cursor);
+      await _startParagraph(previous);
+    }
+  }
 
   Future<void> dispose() async {
     await _subscription.cancel();

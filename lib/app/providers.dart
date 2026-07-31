@@ -1,9 +1,11 @@
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
+import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
 
 final databaseProvider = Provider<AppDatabase?>((ref) => null);
+final playbackRuntimeProvider = Provider<PlaybackRuntime?>((ref) => null);
 
 final libraryBooksProvider = StreamProvider<List<BookRecord>>((ref) {
   final database = ref.watch(databaseProvider);
