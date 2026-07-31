@@ -1,0 +1,122 @@
+import 'dart:async';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
+import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
+import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
+import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
+import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
+
+void main() {
+  test('advances and confirms progress after paragraph completion', () async {
+    final provider = FakeSpeechProvider();
+    final progress = FakeProgressRepository();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: progress,
+      paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+      voiceProfile: VoiceProfile.system(),
+    );
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    provider.completeCurrent();
+    await pumpEventQueue();
+
+    expect(provider.prepared.last.text, '第二段');
+    expect(
+      progress.confirmed,
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 1),
+    );
+    await coordinator.dispose();
+  });
+
+  test('pause persists the current cursor and delegates to provider', () async {
+    final provider = FakeSpeechProvider();
+    final progress = FakeProgressRepository();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: progress,
+      paragraphs: FakeParagraphSource(const ['第一段']),
+      voiceProfile: VoiceProfile.system(),
+    );
+    const cursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+    await coordinator.playFrom(cursor);
+
+    await coordinator.pause();
+
+    expect(provider.pauseCalls, 1);
+    expect(progress.confirmed, cursor);
+    await coordinator.dispose();
+  });
+}
+
+final class FakeParagraphSource implements PlaybackParagraphSource {
+  FakeParagraphSource(this.values);
+
+  final List<String> values;
+
+  @override
+  Future<PlaybackParagraph?> at(PlaybackCursor cursor) async {
+    if (cursor.paragraphIndex < 0 || cursor.paragraphIndex >= values.length) {
+      return null;
+    }
+    return PlaybackParagraph(
+      id: cursor.paragraphIndex + 1,
+      cursor: cursor,
+      text: values[cursor.paragraphIndex],
+    );
+  }
+
+  @override
+  Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor) {
+    return at(
+      PlaybackCursor(
+        chapterId: cursor.chapterId,
+        paragraphIndex: cursor.paragraphIndex + 1,
+      ),
+    );
+  }
+}
+
+final class FakeProgressRepository implements PlaybackProgressRepository {
+  PlaybackCursor? confirmed;
+
+  @override
+  Future<void> confirm(PlaybackCursor cursor) async {
+    confirmed = cursor;
+  }
+}
+
+final class FakeSpeechProvider implements SpeechProvider {
+  final _events = StreamController<SpeechEvent>.broadcast(sync: true);
+  final List<SpeechSegment> prepared = [];
+  int pauseCalls = 0;
+
+  @override
+  Stream<SpeechEvent> get events => _events.stream;
+
+  @override
+  Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {
+    prepared.add(segment);
+  }
+
+  @override
+  Future<void> play() async {}
+
+  @override
+  Future<void> pause() async {
+    pauseCalls++;
+  }
+
+  @override
+  Future<void> resume() async {}
+
+  @override
+  Future<void> stop() async {}
+
+  void completeCurrent() {
+    _events.add(SpeechCompleted(segmentId: prepared.last.id));
+  }
+}

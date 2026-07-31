@@ -1,6 +1,20 @@
 enum SpeechProviderType { system, cloud }
 
 final class VoiceProfile {
+  factory VoiceProfile.system({
+    String? voice,
+    double speed = 1,
+    double pitch = 1,
+  }) {
+    _validateSpeed(speed);
+    return VoiceProfile._(
+      providerType: SpeechProviderType.system,
+      voice: voice,
+      speed: speed,
+      pitch: pitch,
+    );
+  }
+
   factory VoiceProfile.cloud({
     required String baseUrl,
     required String model,
@@ -25,6 +39,7 @@ final class VoiceProfile {
     this.model,
     this.voice,
     required this.speed,
+    this.pitch,
     this.outputFormat,
   });
 
@@ -33,6 +48,7 @@ final class VoiceProfile {
   final String? model;
   final String? voice;
   final double speed;
+  final double? pitch;
   final String? outputFormat;
 
   String get normalizedBaseUrl {
