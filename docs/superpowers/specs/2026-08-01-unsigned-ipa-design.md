@@ -21,4 +21,3 @@ the user signs it with ESign.
 GitHub Actions must complete the iOS release build, package a non-empty IPA,
 and publish an unexpired `ios-unsigned-ipa` artifact. The downloaded archive
 must contain `Payload/Runner.app`.
-

@@ -95,4 +95,3 @@ tar -tf <outputs-directory>/novel-voice-reader-unsigned.ipa
 
 Expected: the downloaded file is non-empty and contains
 `Payload/Runner.app/Info.plist`.
-

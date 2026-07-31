@@ -38,4 +38,3 @@ reader back and chapter controls, Azure request headers and SSML escaping,
 secure Azure credentials, cached audio playback, and active profile mapping.
 GitHub CI must pass Flutter analysis/tests, Android APK build, iOS unsigned IPA
 build, and artifact upload.
-
