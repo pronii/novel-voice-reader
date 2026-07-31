@@ -15,6 +15,11 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   final _model = TextEditingController(text: 'gpt-4o-mini-tts');
   final _voice = TextEditingController(text: 'alloy');
   final _apiKey = TextEditingController();
+  final _azureRegion = TextEditingController(text: 'eastasia');
+  final _azureVoice = TextEditingController(
+    text: VoiceProfile.defaultAzureVoice,
+  );
+  final _azureSubscriptionKey = TextEditingController();
   SpeechProviderType _provider = SpeechProviderType.system;
   double _speed = 1;
   bool _saving = false;
@@ -25,12 +30,16 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     _model.dispose();
     _voice.dispose();
     _apiKey.dispose();
+    _azureRegion.dispose();
+    _azureVoice.dispose();
+    _azureSubscriptionKey.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final cloud = _provider == SpeechProviderType.cloud;
+    final azure = _provider == SpeechProviderType.azure;
     return Scaffold(
       appBar: AppBar(title: const Text('语音设置')),
       body: ListView(
@@ -41,12 +50,17 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
               ButtonSegment(
                 value: SpeechProviderType.system,
                 icon: Icon(Icons.phone_android),
-                label: Text('系统语音'),
+                label: Text('系统'),
               ),
               ButtonSegment(
                 value: SpeechProviderType.cloud,
                 icon: Icon(Icons.cloud_outlined),
-                label: Text('云端语音'),
+                label: Text('兼容'),
+              ),
+              ButtonSegment(
+                value: SpeechProviderType.azure,
+                icon: Icon(Icons.cloud_queue),
+                label: Text('Azure'),
               ),
             ],
             selected: {_provider},
@@ -90,6 +104,26 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
               decoration: const InputDecoration(labelText: 'API Key'),
             ),
           ],
+          if (azure) ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _azureRegion,
+              decoration: const InputDecoration(labelText: 'Azure Region'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _azureVoice,
+              decoration: const InputDecoration(labelText: '音色'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _azureSubscriptionKey,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
+              decoration: const InputDecoration(labelText: 'Subscription Key'),
+            ),
+          ],
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: _saving ? null : _save,
@@ -102,21 +136,28 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   }
 
   Future<void> _save() async {
-    final profile = _provider == SpeechProviderType.system
-        ? VoiceProfile.system(speed: _speed)
-        : VoiceProfile.cloud(
-            baseUrl: _baseUrl.text,
-            model: _model.text,
-            voice: _voice.text,
-            speed: _speed,
-            outputFormat: 'mp3',
-          );
+    final profile = switch (_provider) {
+      SpeechProviderType.system => VoiceProfile.system(speed: _speed),
+      SpeechProviderType.cloud => VoiceProfile.cloud(
+        baseUrl: _baseUrl.text,
+        model: _model.text,
+        voice: _voice.text,
+        speed: _speed,
+        outputFormat: 'mp3',
+      ),
+      SpeechProviderType.azure => VoiceProfile.azure(
+        region: _azureRegion.text,
+        voice: _azureVoice.text,
+        speed: _speed,
+      ),
+    };
     setState(() => _saving = true);
     try {
-      await widget.onSave?.call(
-        profile,
-        _provider == SpeechProviderType.cloud ? _apiKey.text : null,
-      );
+      await widget.onSave?.call(profile, switch (_provider) {
+        SpeechProviderType.system => null,
+        SpeechProviderType.cloud => _apiKey.text,
+        SpeechProviderType.azure => _azureSubscriptionKey.text,
+      });
       if (mounted) {
         ScaffoldMessenger.of(
           context,

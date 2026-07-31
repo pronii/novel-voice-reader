@@ -1,3 +1,5 @@
+import 'package:drift/drift.dart';
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/app/providers.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
@@ -20,5 +22,29 @@ void main() {
     expect(profile.normalizedBaseUrl, record.baseUrl);
     expect(profile.voice, record.voice);
     expect(profile.speed, record.speed);
+  });
+
+  test('loads the most recently saved profile for reader playback', () async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    await database
+        .into(database.voiceProfiles)
+        .insert(VoiceProfilesCompanion.insert(providerType: 'system'));
+    await database
+        .into(database.voiceProfiles)
+        .insert(
+          VoiceProfilesCompanion.insert(
+            providerType: 'azure',
+            baseUrl: const Value('https://eastasia.tts.speech.microsoft.com'),
+            voice: const Value('zh-CN-XiaoxiaoNeural'),
+            speed: const Value(1.1),
+            outputFormat: const Value('audio-24khz-48kbitrate-mono-mp3'),
+          ),
+        );
+
+    final profile = await loadActiveVoiceProfile(database);
+
+    expect(profile.providerType, SpeechProviderType.azure);
+    expect(profile.speed, 1.1);
   });
 }

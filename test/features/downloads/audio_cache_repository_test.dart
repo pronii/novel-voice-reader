@@ -78,6 +78,25 @@ void main() {
     expect(await partial.exists(), isFalse);
     expect(directory.listSync(), isEmpty);
   });
+
+  test('stores Azure MP3 output formats with an mp3 extension', () async {
+    final directory = await Directory.systemTemp.createTemp('voice-cache-test');
+    addTearDown(() async {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    });
+    final repository = AudioCacheRepository(
+      directory: directory,
+      synthesizer: FakeCloudSpeechSynthesizer(validMp3Bytes),
+    );
+    final profile = VoiceProfile.azure(region: 'eastasia');
+
+    final file = await repository.obtain(testSegment, profile);
+
+    expect(file.path, endsWith('.mp3'));
+    expect(await file.readAsBytes(), validMp3Bytes);
+  });
 }
 
 final class FakeCloudSpeechSynthesizer implements CloudSpeechSynthesizer {

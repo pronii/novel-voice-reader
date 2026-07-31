@@ -29,6 +29,7 @@ final class SecureCredentials {
   SecureCredentials(this._storage);
 
   static const _apiKeyKey = 'cloud_tts_api_key';
+  static const _azureSubscriptionKeyKey = 'azure_tts_subscription_key';
 
   final SecureKeyValueStore _storage;
 
@@ -37,4 +38,13 @@ final class SecureCredentials {
   Future<void> writeApiKey(String value) => _storage.write(_apiKeyKey, value);
 
   Future<void> deleteApiKey() => _storage.delete(_apiKeyKey);
+
+  Future<String?> readAzureSubscriptionKey() =>
+      _storage.read(_azureSubscriptionKeyKey);
+
+  Future<void> writeAzureSubscriptionKey(String value) =>
+      _storage.write(_azureSubscriptionKeyKey, value);
+
+  Future<void> deleteAzureSubscriptionKey() =>
+      _storage.delete(_azureSubscriptionKeyKey);
 }

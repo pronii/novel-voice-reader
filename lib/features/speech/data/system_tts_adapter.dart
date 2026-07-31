@@ -69,7 +69,8 @@ final class FlutterSystemTtsEngine implements SystemTtsEngine {
   }
 }
 
-final class SystemTtsAdapter implements SpeechProvider {
+final class SystemTtsAdapter
+    implements SpeechProvider, DisposableSpeechProvider {
   SystemTtsAdapter(this._engine) {
     _engine.setStartHandler(_onStarted);
     _engine.setCompletionHandler(_onCompleted);
@@ -101,6 +102,7 @@ final class SystemTtsAdapter implements SpeechProvider {
   @override
   Future<void> stop() => _engine.stop();
 
+  @override
   Future<void> dispose() async {
     await _engine.stop();
     await _events.close();

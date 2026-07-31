@@ -49,6 +49,9 @@ final class AudioCacheRepository {
 
   static String _normalizedExtension(String? outputFormat) {
     final extension = (outputFormat ?? 'mp3').trim().toLowerCase();
+    if (extension.endsWith('-mp3')) {
+      return 'mp3';
+    }
     const supported = {'mp3', 'opus', 'aac', 'flac', 'wav', 'pcm', 'ogg'};
     if (!supported.contains(extension)) {
       throw ArgumentError.value(

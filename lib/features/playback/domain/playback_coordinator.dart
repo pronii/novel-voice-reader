@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
@@ -48,6 +49,7 @@ final class PlaybackCoordinator implements PlaybackController {
     required PlaybackParagraphSource paragraphs,
     required VoiceProfile voiceProfile,
     SpeechSegmenter segmenter = const SpeechSegmenter(),
+    void Function(AppFailure failure)? onFailure,
   }) {
     return PlaybackCoordinator._(
       provider,
@@ -55,6 +57,7 @@ final class PlaybackCoordinator implements PlaybackController {
       paragraphs,
       voiceProfile,
       segmenter,
+      onFailure,
     );
   }
 
@@ -64,6 +67,7 @@ final class PlaybackCoordinator implements PlaybackController {
     this._paragraphs,
     this._voiceProfile,
     this._segmenter,
+    this._onFailure,
   ) {
     _subscription = _provider.events.listen((event) {
       unawaited(_handleSpeechEvent(event));
@@ -75,6 +79,7 @@ final class PlaybackCoordinator implements PlaybackController {
   final PlaybackParagraphSource _paragraphs;
   final VoiceProfile _voiceProfile;
   final SpeechSegmenter _segmenter;
+  final void Function(AppFailure failure)? _onFailure;
   late final StreamSubscription<SpeechEvent> _subscription;
 
   PlaybackCursor? _cursor;
@@ -138,7 +143,12 @@ final class PlaybackCoordinator implements PlaybackController {
 
   Future<void> dispose() async {
     await _subscription.cancel();
-    await _provider.stop();
+    final provider = _provider;
+    if (provider is DisposableSpeechProvider) {
+      await (provider as DisposableSpeechProvider).dispose();
+    } else {
+      await provider.stop();
+    }
   }
 
   Future<void> _startParagraph(PlaybackParagraph paragraph) async {
@@ -158,6 +168,10 @@ final class PlaybackCoordinator implements PlaybackController {
   }
 
   Future<void> _handleSpeechEvent(SpeechEvent event) async {
+    if (event is SpeechFailed) {
+      _onFailure?.call(event.failure);
+      return;
+    }
     if (event is! SpeechCompleted ||
         _segments.isEmpty ||
         event.segmentId != _segments[_segmentIndex].id) {

@@ -1,6 +1,9 @@
-enum SpeechProviderType { system, cloud }
+enum SpeechProviderType { system, cloud, azure }
 
 final class VoiceProfile {
+  static const defaultAzureVoice = 'zh-CN-XiaoxiaoNeural';
+  static const defaultAzureOutputFormat = 'audio-24khz-48kbitrate-mono-mp3';
+
   factory VoiceProfile.system({
     String? voice,
     double speed = 1,
@@ -30,6 +33,30 @@ final class VoiceProfile {
       voice: voice,
       speed: speed,
       outputFormat: outputFormat,
+    );
+  }
+
+  factory VoiceProfile.azure({
+    required String region,
+    String voice = defaultAzureVoice,
+    double speed = 1,
+    String outputFormat = defaultAzureOutputFormat,
+  }) {
+    _validateSpeed(speed);
+    final normalizedRegion = region.trim().toLowerCase();
+    if (!RegExp(r'^[a-z0-9]+$').hasMatch(normalizedRegion)) {
+      throw ArgumentError.value(region, 'region', 'Must be an Azure region.');
+    }
+    final normalizedVoice = voice.trim();
+    if (normalizedVoice.isEmpty) {
+      throw ArgumentError.value(voice, 'voice', 'Must not be empty.');
+    }
+    return VoiceProfile._(
+      providerType: SpeechProviderType.azure,
+      baseUrl: 'https://$normalizedRegion.tts.speech.microsoft.com',
+      voice: normalizedVoice,
+      speed: speed,
+      outputFormat: outputFormat.trim(),
     );
   }
 

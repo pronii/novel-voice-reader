@@ -16,6 +16,10 @@ abstract interface class SpeechProvider {
   Future<void> stop();
 }
 
+abstract interface class DisposableSpeechProvider {
+  Future<void> dispose();
+}
+
 sealed class SpeechEvent {
   const SpeechEvent();
 }

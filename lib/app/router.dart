@@ -1,12 +1,16 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:novel_voice_reader/app/providers.dart';
+import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/downloads/domain/download_policy.dart';
@@ -20,7 +24,7 @@ import 'package:novel_voice_reader/features/playback/presentation/player_page.da
 import 'package:novel_voice_reader/features/reader/data/reading_progress_repository.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
-import 'package:novel_voice_reader/features/speech/data/system_tts_adapter.dart';
+import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:novel_voice_reader/features/speech/presentation/voice_settings_page.dart';
 
@@ -161,6 +165,7 @@ final class _ReaderRoutePage extends ConsumerStatefulWidget {
 
 final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
   int? _selectedChapterId;
+  PlaybackCoordinator? _coordinator;
 
   @override
   Widget build(BuildContext context) {
@@ -197,45 +202,73 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
               )
             : null,
         onOpenPlayer: () => context.push('/player/$bookId'),
-        onPlayFrom: (paragraph) {
-          final database = ref.read(databaseProvider);
-          final runtime = ref.read(playbackRuntimeProvider);
-          final chapter = value.chapter;
-          if (database == null || chapter == null) {
-            return;
-          }
-          final coordinator = PlaybackCoordinator(
-            provider: SystemTtsAdapter(FlutterSystemTtsEngine()),
-            progress: DriftPlaybackProgressRepository(
-              database: database,
-              bookId: bookId,
-            ),
-            paragraphs: DriftPlaybackParagraphSource(database),
-            voiceProfile: VoiceProfile.system(),
-          );
-          runtime?.controller.attach(coordinator);
-          runtime?.handler.publishNowPlaying(
-            bookId: bookId,
-            bookTitle: value.book.title,
-            chapterTitle: chapter.title,
-          );
-          runtime?.handler.markPlaying();
-          unawaited(
-            coordinator.playFrom(
-              PlaybackCursor(
-                chapterId: chapter.id,
-                paragraphIndex: paragraph.index,
-              ),
-            ),
-          );
-          unawaited(
-            (database.update(database.books)
-                  ..where((book) => book.id.equals(bookId)))
-                .write(BooksCompanion(lastReadAt: Value(DateTime.now()))),
-          );
-        },
+        onPlayFrom: (paragraph) => unawaited(_playFrom(value, paragraph)),
       ),
     );
+  }
+
+  Future<void> _playFrom(ReaderPageData data, ReaderParagraph paragraph) async {
+    final database = ref.read(databaseProvider);
+    final runtime = ref.read(playbackRuntimeProvider);
+    final chapter = data.chapter;
+    if (database == null || chapter == null) {
+      return;
+    }
+    try {
+      final profile = await loadActiveVoiceProfile(database);
+      final supportDirectory = await getApplicationSupportDirectory();
+      final credentials = SecureCredentials(
+        FlutterSecureKeyValueStore(const FlutterSecureStorage()),
+      );
+      final provider = SpeechProviderFactory(
+        dio: Dio(),
+        credentials: credentials,
+        cacheDirectory: Directory(
+          '${supportDirectory.path}${Platform.pathSeparator}speech_audio',
+        ),
+      ).create(profile);
+      final coordinator = PlaybackCoordinator(
+        provider: provider,
+        progress: DriftPlaybackProgressRepository(
+          database: database,
+          bookId: widget.bookId,
+        ),
+        paragraphs: DriftPlaybackParagraphSource(database),
+        voiceProfile: profile,
+        onFailure: _showSpeechFailure,
+      );
+      final previous = _coordinator;
+      _coordinator = coordinator;
+      if (previous != null) {
+        await previous.dispose();
+      }
+      runtime?.controller.attach(coordinator);
+      runtime?.handler.publishNowPlaying(
+        bookId: widget.bookId,
+        bookTitle: data.book.title,
+        chapterTitle: chapter.title,
+      );
+      await coordinator.playFrom(
+        PlaybackCursor(chapterId: chapter.id, paragraphIndex: paragraph.index),
+      );
+      runtime?.handler.markPlaying();
+      await (database.update(database.books)
+            ..where((book) => book.id.equals(widget.bookId)))
+          .write(BooksCompanion(lastReadAt: Value(DateTime.now())));
+    } catch (error) {
+      if (error is! AppFailure) {
+        _showSpeechFailure(const AppFailure('朗读启动失败'));
+      }
+    }
+  }
+
+  void _showSpeechFailure(AppFailure failure) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(failure.message)));
   }
 
   void _backToLibrary() {
@@ -320,9 +353,14 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
               );
         }
         if (apiKey != null && apiKey.isNotEmpty) {
-          await SecureCredentials(
+          final credentials = SecureCredentials(
             FlutterSecureKeyValueStore(const FlutterSecureStorage()),
-          ).writeApiKey(apiKey);
+          );
+          if (profile.providerType == SpeechProviderType.azure) {
+            await credentials.writeAzureSubscriptionKey(apiKey);
+          } else if (profile.providerType == SpeechProviderType.cloud) {
+            await credentials.writeApiKey(apiKey);
+          }
         }
       },
     );
