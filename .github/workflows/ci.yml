@@ -35,4 +35,15 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build
-      - run: flutter build ios --debug --no-codesign
+      - run: flutter build ios --release --no-codesign
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ipa/Payload/
+          cd build/ipa
+          ditto -c -k --sequesterRsrc --keepParent Payload novel-voice-reader-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-ipa
+          path: build/ipa/novel-voice-reader-unsigned.ipa
+          if-no-files-found: error
