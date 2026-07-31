@@ -39,7 +39,7 @@ dependencies:
   drift: ^2.34.3
   drift_flutter: ^0.3.1
   dio: ^5.11.0
-  file_picker: ^3.0.4
+  file_picker: 10.3.10
   epubx: ^4.0.0
   flutter_tts: ^4.2.5
   just_audio: ^0.10.6
@@ -51,6 +51,7 @@ dependencies:
   uuid: ^4.6.0
   charset_converter: ^2.5.1
   html: ^0.15.6
+  connectivity_plus: ^7.3.1
 
 dev_dependencies:
   flutter_test:
@@ -68,6 +69,7 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   archive: ^3.6.1
+  xml: ^6.6.1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

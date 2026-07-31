@@ -2936,6 +2936,10 @@ class $DownloadJobsTable extends DownloadJobs
   @override
   Set<GeneratedColumn> get $primaryKey => {id};
   @override
+  List<Set<GeneratedColumn>> get uniqueKeys => [
+    {cacheKey},
+  ];
+  @override
   DownloadJobRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return DownloadJobRecord(

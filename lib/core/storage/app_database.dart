@@ -106,6 +106,11 @@ class DownloadJobs extends Table {
   IntColumn get retryCount => integer().withDefault(const Constant(0))();
   TextColumn get status => text()();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  List<Set<Column<Object>>> get uniqueKeys => [
+    {cacheKey},
+  ];
 }
 
 @DriftDatabase(
@@ -142,9 +147,9 @@ final class AppDatabase extends _$AppDatabase {
     required List<String> paragraphs,
   }) {
     return transaction(() async {
-      final bookId = await into(books).insert(
-        BooksCompanion.insert(title: title),
-      );
+      final bookId = await into(
+        books,
+      ).insert(BooksCompanion.insert(title: title));
       final chapterId = await into(chapters).insert(
         ChaptersCompanion.insert(
           bookId: bookId,
@@ -173,9 +178,7 @@ final class AppDatabase extends _$AppDatabase {
     final count = paragraphs.id.count();
     final query = selectOnly(paragraphs)
       ..addColumns([count])
-      ..join([
-        innerJoin(chapters, chapters.id.equalsExp(paragraphs.chapterId)),
-      ])
+      ..join([innerJoin(chapters, chapters.id.equalsExp(paragraphs.chapterId))])
       ..where(chapters.bookId.equals(bookId));
     final row = await query.getSingle();
     return row.read(count) ?? 0;
@@ -199,9 +202,7 @@ final class AppDatabase extends _$AppDatabase {
   Future<List<ParagraphRecord>> paragraphsForChapter(int chapterId) {
     final query = select(paragraphs)
       ..where((paragraph) => paragraph.chapterId.equals(chapterId))
-      ..orderBy([
-        (paragraph) => OrderingTerm.asc(paragraph.paragraphIndex),
-      ]);
+      ..orderBy([(paragraph) => OrderingTerm.asc(paragraph.paragraphIndex)]);
     return query.get();
   }
 
@@ -221,8 +222,8 @@ final class AppDatabase extends _$AppDatabase {
   }
 
   Future<ReadingProgressRecord?> progressForBook(int bookId) {
-    return (select(readingProgresses)
-          ..where((progress) => progress.bookId.equals(bookId)))
-        .getSingleOrNull();
+    return (select(
+      readingProgresses,
+    )..where((progress) => progress.bookId.equals(bookId))).getSingleOrNull();
   }
 }
