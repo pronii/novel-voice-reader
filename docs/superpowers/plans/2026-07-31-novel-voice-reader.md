@@ -313,7 +313,7 @@ The Drift schema must annotate data classes as `BookRecord`, `ChapterRecord`, `P
 Run:
 
 ```powershell
-work/tools/flutter/bin/dart.bat run build_runner build --delete-conflicting-outputs
+work/tools/flutter/bin/dart.bat run build_runner build
 work/tools/flutter/bin/flutter.bat test test/core/storage
 ```
 
@@ -863,7 +863,7 @@ testWidgets('imports TXT, generates cloud audio, and restores progress', (tester
 
 ```powershell
 work/tools/flutter/bin/flutter.bat pub get
-work/tools/flutter/bin/dart.bat run build_runner build --delete-conflicting-outputs
+work/tools/flutter/bin/dart.bat run build_runner build
 work/tools/flutter/bin/flutter.bat analyze
 work/tools/flutter/bin/flutter.bat test
 work/tools/flutter/bin/flutter.bat build apk --debug
