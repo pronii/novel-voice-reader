@@ -189,6 +189,22 @@ final class AppDatabase extends _$AppDatabase {
     return query.getSingle();
   }
 
+  Future<List<ChapterRecord>> chaptersForBook(int bookId) {
+    final query = select(chapters)
+      ..where((chapter) => chapter.bookId.equals(bookId))
+      ..orderBy([(chapter) => OrderingTerm.asc(chapter.chapterIndex)]);
+    return query.get();
+  }
+
+  Future<List<ParagraphRecord>> paragraphsForChapter(int chapterId) {
+    final query = select(paragraphs)
+      ..where((paragraph) => paragraph.chapterId.equals(chapterId))
+      ..orderBy([
+        (paragraph) => OrderingTerm.asc(paragraph.paragraphIndex),
+      ]);
+    return query.get();
+  }
+
   Future<void> upsertProgress({
     required int bookId,
     required int chapterId,

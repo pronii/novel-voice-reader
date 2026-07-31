@@ -50,6 +50,7 @@ dependencies:
   crypto: ^3.0.7
   uuid: ^4.6.0
   charset_converter: ^2.5.1
+  html: ^0.15.6
 
 dev_dependencies:
   flutter_test:
@@ -66,6 +67,7 @@ dev_dependencies:
   mocktail: ^1.0.5
   integration_test:
     sdk: flutter
+  archive: ^3.6.1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
