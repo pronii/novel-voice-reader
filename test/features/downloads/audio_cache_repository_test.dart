@@ -97,6 +97,24 @@ void main() {
     expect(file.path, endsWith('.mp3'));
     expect(await file.readAsBytes(), validMp3Bytes);
   });
+
+  test('stores Zhipu WAV output with a wav extension', () async {
+    final directory = await Directory.systemTemp.createTemp('voice-cache-test');
+    addTearDown(() async {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    });
+    final repository = AudioCacheRepository(
+      directory: directory,
+      synthesizer: FakeCloudSpeechSynthesizer(validWavBytes),
+    );
+
+    final file = await repository.obtain(testSegment, VoiceProfile.zhipu());
+
+    expect(file.path, endsWith('.wav'));
+    expect(await file.readAsBytes(), validWavBytes);
+  });
 }
 
 final class FakeCloudSpeechSynthesizer implements CloudSpeechSynthesizer {
@@ -151,4 +169,19 @@ final validMp3Bytes = Uint8List.fromList([
   0x00,
   0x00,
   0x00,
+]);
+
+final validWavBytes = Uint8List.fromList([
+  0x52,
+  0x49,
+  0x46,
+  0x46,
+  0x04,
+  0x00,
+  0x00,
+  0x00,
+  0x57,
+  0x41,
+  0x56,
+  0x45,
 ]);

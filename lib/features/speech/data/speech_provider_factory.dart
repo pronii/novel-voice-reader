@@ -7,6 +7,7 @@ import 'package:novel_voice_reader/features/speech/data/azure_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/data/cloud_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/system_tts_adapter.dart';
+import 'package:novel_voice_reader/features/speech/data/zhipu_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
@@ -34,6 +35,9 @@ final class SpeechProviderFactory {
       ),
       SpeechProviderType.azure => _cached(
         AzureTtsClient(dio: dio, credentials: credentials),
+      ),
+      SpeechProviderType.zhipu => _cached(
+        ZhipuTtsClient(dio: dio, credentials: credentials),
       ),
     };
   }
