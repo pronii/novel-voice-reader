@@ -20,9 +20,21 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     text: VoiceProfile.defaultAzureVoice,
   );
   final _azureSubscriptionKey = TextEditingController();
+  final _zhipuApiKey = TextEditingController();
   SpeechProviderType _provider = SpeechProviderType.system;
+  String _zhipuVoice = VoiceProfile.defaultZhipuVoice;
   double _speed = 1;
   bool _saving = false;
+
+  static const _zhipuVoiceLabels = <String, String>{
+    'tongtong': '彤彤 (tongtong)',
+    'chuichui': '锤锤 (chuichui)',
+    'xiaochen': '小陈 (xiaochen)',
+    'jam': 'jam',
+    'kazi': 'kazi',
+    'douji': 'douji',
+    'luodo': 'luodo',
+  };
 
   @override
   void dispose() {
@@ -33,6 +45,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     _azureRegion.dispose();
     _azureVoice.dispose();
     _azureSubscriptionKey.dispose();
+    _zhipuApiKey.dispose();
     super.dispose();
   }
 
@@ -40,33 +53,43 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   Widget build(BuildContext context) {
     final cloud = _provider == SpeechProviderType.cloud;
     final azure = _provider == SpeechProviderType.azure;
+    final zhipu = _provider == SpeechProviderType.zhipu;
     return Scaffold(
       appBar: AppBar(title: const Text('语音设置')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          SegmentedButton<SpeechProviderType>(
-            segments: const [
-              ButtonSegment(
-                value: SpeechProviderType.system,
-                icon: Icon(Icons.phone_android),
-                label: Text('系统'),
-              ),
-              ButtonSegment(
-                value: SpeechProviderType.cloud,
-                icon: Icon(Icons.cloud_outlined),
-                label: Text('兼容'),
-              ),
-              ButtonSegment(
-                value: SpeechProviderType.azure,
-                icon: Icon(Icons.cloud_queue),
-                label: Text('Azure'),
-              ),
-            ],
-            selected: {_provider},
-            onSelectionChanged: (values) {
-              setState(() => _provider = values.single);
-            },
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SegmentedButton<SpeechProviderType>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                  value: SpeechProviderType.system,
+                  icon: Icon(Icons.phone_android),
+                  label: Text('系统'),
+                ),
+                ButtonSegment(
+                  value: SpeechProviderType.cloud,
+                  icon: Icon(Icons.cloud_outlined),
+                  label: Text('兼容'),
+                ),
+                ButtonSegment(
+                  value: SpeechProviderType.azure,
+                  icon: Icon(Icons.cloud_queue),
+                  label: Text('Azure'),
+                ),
+                ButtonSegment(
+                  value: SpeechProviderType.zhipu,
+                  icon: Icon(Icons.record_voice_over_outlined),
+                  label: Text('智谱'),
+                ),
+              ],
+              selected: {_provider},
+              onSelectionChanged: (values) {
+                setState(() => _provider = values.single);
+              },
+            ),
           ),
           const SizedBox(height: 24),
           Text('语速 ${_speed.toStringAsFixed(1)}x'),
@@ -124,6 +147,33 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
               decoration: const InputDecoration(labelText: 'Subscription Key'),
             ),
           ],
+          if (zhipu) ...[
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _zhipuVoice,
+              decoration: const InputDecoration(labelText: '音色'),
+              items: [
+                for (final voice in VoiceProfile.zhipuVoices)
+                  DropdownMenuItem(
+                    value: voice,
+                    child: Text(_zhipuVoiceLabels[voice] ?? voice),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => _zhipuVoice = value);
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _zhipuApiKey,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
+              decoration: const InputDecoration(labelText: 'API Key'),
+            ),
+          ],
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: _saving ? null : _save,
@@ -153,6 +203,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
         SpeechProviderType.system => null,
         SpeechProviderType.cloud => _apiKey.text,
         SpeechProviderType.azure => _azureSubscriptionKey.text,
+        SpeechProviderType.zhipu => _zhipuApiKey.text,
       });
       _showMessage('语音设置已保存');
     } catch (_) {
@@ -177,6 +228,10 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       SpeechProviderType.azure => VoiceProfile.azure(
         region: _azureRegion.text,
         voice: _azureVoice.text,
+        speed: _speed,
+      ),
+      SpeechProviderType.zhipu => VoiceProfile.zhipu(
+        voice: _zhipuVoice,
         speed: _speed,
       ),
     };

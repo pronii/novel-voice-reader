@@ -358,6 +358,8 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
           );
           if (profile.providerType == SpeechProviderType.azure) {
             await credentials.writeAzureSubscriptionKey(apiKey);
+          } else if (profile.providerType == SpeechProviderType.zhipu) {
+            await credentials.writeZhipuApiKey(apiKey);
           } else if (profile.providerType == SpeechProviderType.cloud) {
             await credentials.writeApiKey(apiKey);
           }
