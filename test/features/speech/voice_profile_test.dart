@@ -26,4 +26,20 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test('normalizes an Azure region into the Speech endpoint', () {
+    final profile = VoiceProfile.azure(
+      region: ' EastAsia ',
+      voice: 'zh-CN-XiaoxiaoNeural',
+      speed: 1.1,
+      outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
+    );
+
+    expect(profile.providerType, SpeechProviderType.azure);
+    expect(
+      profile.normalizedBaseUrl,
+      'https://eastasia.tts.speech.microsoft.com',
+    );
+    expect(profile.voice, 'zh-CN-XiaoxiaoNeural');
+  });
 }

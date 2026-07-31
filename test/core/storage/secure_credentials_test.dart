@@ -21,6 +21,26 @@ void main() {
 
     expect(await credentials.readApiKey(), isNull);
   });
+
+  test('Azure subscription key uses a separate secure value', () async {
+    final store = FakeSecureKeyValueStore();
+    final credentials = SecureCredentials(store);
+    await credentials.writeApiKey('compatible-secret');
+
+    await credentials.writeAzureSubscriptionKey('azure-secret');
+
+    expect(await credentials.readApiKey(), 'compatible-secret');
+    expect(await credentials.readAzureSubscriptionKey(), 'azure-secret');
+    expect(store.values.keys, {
+      'cloud_tts_api_key',
+      'azure_tts_subscription_key',
+    });
+
+    await credentials.deleteAzureSubscriptionKey();
+
+    expect(await credentials.readAzureSubscriptionKey(), isNull);
+    expect(await credentials.readApiKey(), 'compatible-secret');
+  });
 }
 
 final class FakeSecureKeyValueStore implements SecureKeyValueStore {
