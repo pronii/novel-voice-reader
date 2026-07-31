@@ -26,7 +26,7 @@ void main() {
     expect(find.byTooltip('播放器'), findsOneWidget);
 
     await tester.tap(find.byTooltip('返回书架'));
-    await _pumpUntilFound(tester, find.text('我的书架'));
+    await _pumpUntilFound(tester, find.byTooltip('导入小说'));
 
     expect(find.text('测试书'), findsOneWidget);
 
