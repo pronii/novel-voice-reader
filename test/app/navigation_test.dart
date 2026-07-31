@@ -26,8 +26,10 @@ void main() {
     expect(find.byTooltip('播放器'), findsOneWidget);
 
     await tester.tap(find.byTooltip('返回书架'));
-    await _pumpUntilFound(tester, find.byTooltip('导入小说'));
+    await tester.pumpAndSettle();
 
+    expect(find.byTooltip('导入小说'), findsOneWidget);
+    expect(find.byTooltip('返回书架'), findsNothing);
     expect(find.text('测试书'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
