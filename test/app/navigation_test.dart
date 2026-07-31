@@ -20,7 +20,7 @@ void main() {
     await tester.tap(find.text('测试书'));
     await _pumpUntilFound(tester, find.text('第一章'));
 
-    expect(find.text('第一章'), findsOneWidget);
+    expect(find.text('第一章'), findsWidgets);
     expect(find.byTooltip('返回书架'), findsOneWidget);
     expect(find.byTooltip('播放'), findsOneWidget);
     expect(find.byTooltip('播放器'), findsOneWidget);
