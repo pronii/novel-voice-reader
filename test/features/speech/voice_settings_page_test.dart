@@ -37,4 +37,31 @@ void main() {
     expect(savedProfile?.voice, 'zh-CN-XiaoxiaoNeural');
     expect(savedKey, 'azure-secret');
   });
+
+  testWidgets('shows a validation message for an invalid Azure region', (
+    tester,
+  ) async {
+    var saves = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onSave: (profile, apiKey) async {
+            saves++;
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Azure'));
+    await tester.pump();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Azure Region'),
+      'invalid region',
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pump();
+
+    expect(find.text('请输入有效的 Azure Region 和音色'), findsOneWidget);
+    expect(saves, 0);
+  });
 }

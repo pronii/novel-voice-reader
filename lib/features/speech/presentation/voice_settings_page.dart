@@ -136,7 +136,36 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   }
 
   Future<void> _save() async {
-    final profile = switch (_provider) {
+    late final VoiceProfile profile;
+    try {
+      profile = _buildProfile();
+    } on ArgumentError {
+      _showMessage(
+        _provider == SpeechProviderType.azure
+            ? '请输入有效的 Azure Region 和音色'
+            : '请检查语音服务配置',
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await widget.onSave?.call(profile, switch (_provider) {
+        SpeechProviderType.system => null,
+        SpeechProviderType.cloud => _apiKey.text,
+        SpeechProviderType.azure => _azureSubscriptionKey.text,
+      });
+      _showMessage('语音设置已保存');
+    } catch (_) {
+      _showMessage('语音设置保存失败');
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  VoiceProfile _buildProfile() {
+    return switch (_provider) {
       SpeechProviderType.system => VoiceProfile.system(speed: _speed),
       SpeechProviderType.cloud => VoiceProfile.cloud(
         baseUrl: _baseUrl.text,
@@ -151,22 +180,14 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
         speed: _speed,
       ),
     };
-    setState(() => _saving = true);
-    try {
-      await widget.onSave?.call(profile, switch (_provider) {
-        SpeechProviderType.system => null,
-        SpeechProviderType.cloud => _apiKey.text,
-        SpeechProviderType.azure => _azureSubscriptionKey.text,
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('语音设置已保存')));
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _saving = false);
-      }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) {
+      return;
     }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 }
