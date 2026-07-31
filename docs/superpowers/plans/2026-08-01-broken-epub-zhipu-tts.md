@@ -85,7 +85,8 @@ Run the command from Step 2. Expected: all EPUB parser tests pass.
 
 - [ ] **Step 5: Verify the supplied file**
 
-Run the external diagnostic fixture and assert `title=完美世界 chapters=2005`:
+Run the external diagnostic fixture and assert
+`title=完美世界 chapters=2004 paragraphs=186814`:
 
 ```powershell
 & .\tool\flutter.ps1 test C:\Users\Administrator\Documents\Codex\2026-07-31\ru\work\repro_epub_test.dart --concurrency=1 -r expanded
@@ -336,7 +337,8 @@ Expected: formatter is stable, analysis reports no issues, all tests pass, and `
 
 - [ ] **Step 3: Re-run the supplied EPUB acceptance test**
 
-Run the Task 1 Step 5 command and verify `title=完美世界 chapters=2005`.
+Run the Task 1 Step 5 command and verify
+`title=完美世界 chapters=2004 paragraphs=186814`.
 
 - [ ] **Step 4: Commit documentation and push**
 

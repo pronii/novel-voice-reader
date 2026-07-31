@@ -13,10 +13,7 @@ void main() {
     );
 
     expect(parsed.title, '测试 EPUB');
-    expect(
-      parsed.chapters.map((chapter) => chapter.title),
-      ['第二章', '第一章'],
-    );
+    expect(parsed.chapters.map((chapter) => chapter.title), ['第二章', '第一章']);
     expect(parsed.chapters.first.paragraphs, ['第二章', '第二段。']);
     expect(parsed.chapters.last.paragraphs, ['第一章', '第一段。']);
   });
@@ -31,21 +28,42 @@ void main() {
       'fixture.epub',
     );
 
-    expect(parsed.chapters.map((chapter) => chapter.title), [
-      '第二章',
-      '第一章',
-    ]);
+    expect(parsed.chapters.map((chapter) => chapter.title), ['第二章', '第一章']);
     expect(parsed.chapters.last.paragraphs, ['第一章', '第一段。']);
+  });
+
+  test(
+    'ignores missing non-reading resources while parsing the spine',
+    () async {
+      final parsed = await const EpubBookParser().parse(
+        _buildEpub(includeMissingImageManifestItem: true),
+        'broken-cover.epub',
+      );
+
+      expect(parsed.title, '测试 EPUB');
+      expect(parsed.chapters.map((chapter) => chapter.title), ['第二章', '第一章']);
+    },
+  );
+
+  test('rejects a missing linear spine document', () async {
+    expect(
+      () => const EpubBookParser().parse(
+        _buildEpub(missingSpineDocument: true),
+        'missing-chapter.epub',
+      ),
+      throwsA(isA<FormatException>()),
+    );
   });
 }
 
-Uint8List _buildEpub({String? chapterOneHtml}) {
+Uint8List _buildEpub({
+  String? chapterOneHtml,
+  bool includeMissingImageManifestItem = false,
+  bool missingSpineDocument = false,
+}) {
   final archive = Archive();
   _addText(archive, 'mimetype', 'application/epub+zip');
-  _addText(
-    archive,
-    'META-INF/container.xml',
-    '''
+  _addText(archive, 'META-INF/container.xml', '''
 <?xml version="1.0"?>
 <container version="1.0"
   xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -54,12 +72,8 @@ Uint8List _buildEpub({String? chapterOneHtml}) {
       media-type="application/oebps-package+xml"/>
   </rootfiles>
 </container>
-''',
-  );
-  _addText(
-    archive,
-    'OEBPS/content.opf',
-    '''
+''');
+  _addText(archive, 'OEBPS/content.opf', '''
 <?xml version="1.0" encoding="UTF-8"?>
 <package version="2.0" unique-identifier="book-id"
   xmlns="http://www.idpf.org/2007/opf">
@@ -75,18 +89,15 @@ Uint8List _buildEpub({String? chapterOneHtml}) {
       media-type="application/xhtml+xml"/>
     <item id="two" href="chapter2.xhtml"
       media-type="application/xhtml+xml"/>
+    ${includeMissingImageManifestItem ? '<item id="missing-cover" href="images/missing-cover.jpg" media-type="image/jpeg"/>' : ''}
   </manifest>
   <spine toc="toc">
     <itemref idref="two"/>
     <itemref idref="one"/>
   </spine>
 </package>
-''',
-  );
-  _addText(
-    archive,
-    'OEBPS/toc.ncx',
-    '''
+''');
+  _addText(archive, 'OEBPS/toc.ncx', '''
 <?xml version="1.0" encoding="UTF-8"?>
 <ncx version="2005-1" xmlns="http://www.daisy.org/z3986/2005/ncx/">
   <head><meta name="dtb:uid" content="fixture"/></head>
@@ -102,8 +113,7 @@ Uint8List _buildEpub({String? chapterOneHtml}) {
     </navPoint>
   </navMap>
 </ncx>
-''',
-  );
+''');
   _addText(
     archive,
     'OEBPS/chapter1.xhtml',
@@ -111,12 +121,14 @@ Uint8List _buildEpub({String? chapterOneHtml}) {
         '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
             '<h1>第一章</h1><p>第一段。</p></body></html>',
   );
-  _addText(
-    archive,
-    'OEBPS/chapter2.xhtml',
-    '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
-        '<h1>第二章</h1><p>第二段。</p></body></html>',
-  );
+  if (!missingSpineDocument) {
+    _addText(
+      archive,
+      'OEBPS/chapter2.xhtml',
+      '<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+          '<h1>第二章</h1><p>第二段。</p></body></html>',
+    );
+  }
   return Uint8List.fromList(ZipEncoder().encode(archive)!);
 }
 

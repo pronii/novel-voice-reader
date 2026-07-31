@@ -10,7 +10,7 @@ final class EpubBookParser implements BookParser {
 
   @override
   Future<ParsedBook> parse(Uint8List bytes, String fileName) async {
-    final book = await EpubReader.readBook(bytes);
+    final book = await EpubReader.openBook(bytes);
     final package = book.Schema?.Package;
     final manifestItems = package?.Manifest?.Items ?? const [];
     final manifestById = {
@@ -34,7 +34,7 @@ final class EpubBookParser implements BookParser {
         continue;
       }
       final normalizedHref = _normalizeHref(href);
-      final contentFile =
+      final contentRef =
           normalizedHtmlFiles[normalizedHref] ??
           normalizedHtmlFiles.entries
               .where(
@@ -44,9 +44,17 @@ final class EpubBookParser implements BookParser {
               )
               .map((entry) => entry.value)
               .firstOrNull;
-      final html = contentFile?.Content;
-      if (html == null) {
-        continue;
+      if (contentRef == null) {
+        throw FormatException('EPUB spine document is missing: $href');
+      }
+      late final String html;
+      try {
+        html = await contentRef.readContentAsText();
+      } catch (error) {
+        throw FormatException(
+          'EPUB spine document cannot be read: $href',
+          error,
+        );
       }
       final document = html_parser.parse(html);
       final blocks = _extractBlocks(document);
@@ -54,10 +62,7 @@ final class EpubBookParser implements BookParser {
         continue;
       }
       chapters.add(
-        ParsedChapter(
-          title: _chapterTitle(blocks, href),
-          paragraphs: blocks,
-        ),
+        ParsedChapter(title: _chapterTitle(blocks, href), paragraphs: blocks),
       );
     }
 

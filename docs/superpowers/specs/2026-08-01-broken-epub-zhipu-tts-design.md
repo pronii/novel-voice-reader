@@ -71,5 +71,6 @@ spine ordering and text extraction, Zhipu profile defaults and persistence,
 separate secure credentials, the exact official request URL/body/headers,
 failure mapping and retries, provider factory wiring, and settings-page save
 behavior. The supplied 13 MB EPUB must parse as title `完美世界` with 2,005
-chapters. Flutter analysis and the complete test suite must pass before Android
-APK and unsigned iOS IPA artifacts are rebuilt.
+spine documents and 2,004 readable chapters; its text-free cover document is
+not a chapter. Flutter analysis and the complete test suite must pass before
+Android APK and unsigned iOS IPA artifacts are rebuilt.
