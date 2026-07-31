@@ -14,8 +14,9 @@ final class BookImportRepository {
   final BookParser txtParser;
   final BookParser epubParser;
 
-  Future<int> importFile(PlatformFile file) {
-    return importBytes(file.bytes!, fileName: file.name);
+  Future<int> importFile(PlatformFile file) async {
+    final bytes = file.bytes ?? await file.xFile.readAsBytes();
+    return importBytes(bytes, fileName: file.name);
   }
 
   Future<int> importBytes(

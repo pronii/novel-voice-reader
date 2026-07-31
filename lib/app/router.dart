@@ -123,19 +123,16 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
       if (file == null) {
         return;
       }
-      if (file.bytes == null) {
-        throw StateError('Unable to read selected file.');
-      }
       await BookImportRepository(
         database: database,
         txtParser: const TxtBookParser(),
         epubParser: const EpubBookParser(),
       ).importFile(file);
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('导入失败，请检查文件格式')));
+        ).showSnackBar(SnackBar(content: Text(_importErrorMessage(error))));
       }
     } finally {
       if (mounted) {
@@ -143,6 +140,14 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
       }
     }
   }
+}
+
+String _importErrorMessage(Object error) {
+  return switch (error) {
+    UnsupportedError() => '仅支持 TXT 和非 DRM EPUB 图书',
+    FormatException() => '图书文件损坏、加密或不包含可阅读正文',
+    _ => '导入失败，请确认文件仍可访问',
+  };
 }
 
 final class _ReaderRoutePage extends ConsumerWidget {

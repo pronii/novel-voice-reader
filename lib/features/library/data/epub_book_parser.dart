@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:epubx/epubx.dart';
+import 'package:html/dom.dart' as html_dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:novel_voice_reader/features/library/domain/book_parser.dart';
 
@@ -17,6 +18,10 @@ final class EpubBookParser implements BookParser {
         if (item.Id != null) item.Id!: item,
     };
     final htmlFiles = book.Content?.Html ?? const {};
+    final normalizedHtmlFiles = {
+      for (final entry in htmlFiles.entries)
+        _normalizeHref(entry.key): entry.value,
+    };
     final chapters = <ParsedChapter>[];
 
     for (final itemRef in package?.Spine?.Items ?? const []) {
@@ -28,10 +33,15 @@ final class EpubBookParser implements BookParser {
       if (href == null) {
         continue;
       }
+      final normalizedHref = _normalizeHref(href);
       final contentFile =
-          htmlFiles[href] ??
-          htmlFiles.entries
-              .where((entry) => entry.key.endsWith(href))
+          normalizedHtmlFiles[normalizedHref] ??
+          normalizedHtmlFiles.entries
+              .where(
+                (entry) =>
+                    entry.key == normalizedHref ||
+                    entry.key.endsWith('/$normalizedHref'),
+              )
               .map((entry) => entry.value)
               .firstOrNull;
       final html = contentFile?.Content;
@@ -39,11 +49,7 @@ final class EpubBookParser implements BookParser {
         continue;
       }
       final document = html_parser.parse(html);
-      final blocks = document
-          .querySelectorAll('h1,h2,h3,p,blockquote,li')
-          .map((element) => element.text.trim())
-          .where((text) => text.isNotEmpty)
-          .toList(growable: false);
+      final blocks = _extractBlocks(document);
       if (blocks.isEmpty) {
         continue;
       }
@@ -62,6 +68,52 @@ final class EpubBookParser implements BookParser {
       title: _bookTitle(book.Title, fileName),
       chapters: chapters,
     );
+  }
+
+  List<String> _extractBlocks(html_dom.Document document) {
+    final semanticBlocks = document
+        .querySelectorAll('h1,h2,h3,h4,h5,h6,p,blockquote,li')
+        .map((element) => _normalizeText(element.text))
+        .where((text) => text.isNotEmpty)
+        .toList(growable: false);
+    if (semanticBlocks.isNotEmpty) {
+      return semanticBlocks;
+    }
+
+    const nestedBlockTags = {'div', 'p', 'blockquote', 'li'};
+    final divBlocks = document
+        .querySelectorAll('body div')
+        .where(
+          (element) => !element.children.any(
+            (child) => nestedBlockTags.contains(child.localName),
+          ),
+        )
+        .map((element) => _normalizeText(element.text))
+        .where((text) => text.isNotEmpty)
+        .toList(growable: false);
+    if (divBlocks.isNotEmpty) {
+      return divBlocks;
+    }
+
+    final bodyText = document.body?.text;
+    if (bodyText == null) {
+      return const [];
+    }
+    return bodyText
+        .split(RegExp(r'[\r\n]+'))
+        .map(_normalizeText)
+        .where((text) => text.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  String _normalizeHref(String href) {
+    final withoutFragment = href.split('#').first.replaceAll('\\', '/');
+    final decoded = Uri.decodeComponent(withoutFragment);
+    return decoded.replaceFirst(RegExp(r'^(\./)+'), '');
+  }
+
+  String _normalizeText(String value) {
+    return value.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   String _chapterTitle(List<String> blocks, String href) {
