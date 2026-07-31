@@ -100,7 +100,7 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
         ],
         loading: _importing,
         onImport: _importBook,
-        onOpenBook: (bookId) => context.go('/reader/$bookId'),
+        onOpenBook: (bookId) => context.push('/reader/$bookId'),
         onOpenVoiceSettings: () => context.push('/settings/voice'),
         onOpenCacheSettings: () => context.push('/settings/cache'),
       ),
@@ -150,14 +150,24 @@ String _importErrorMessage(Object error) {
   };
 }
 
-final class _ReaderRoutePage extends ConsumerWidget {
+final class _ReaderRoutePage extends ConsumerStatefulWidget {
   const _ReaderRoutePage({required this.bookId});
 
   final int bookId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final data = ref.watch(readerPageDataProvider(bookId));
+  ConsumerState<_ReaderRoutePage> createState() => _ReaderRoutePageState();
+}
+
+final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
+  int? _selectedChapterId;
+
+  @override
+  Widget build(BuildContext context) {
+    final bookId = widget.bookId;
+    final data = ref.watch(
+      readerPageDataProvider(ReaderPageRequest(bookId, _selectedChapterId)),
+    );
     return data.when(
       loading: () =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
@@ -166,8 +176,26 @@ final class _ReaderRoutePage extends ConsumerWidget {
         bookId: bookId,
         bookTitle: value.book.title,
         chapterTitle: value.chapter?.title ?? '未命名章节',
+        chapters: value.chapters,
+        currentChapterId: value.chapter?.id,
         paragraphs: value.paragraphs,
         initialActiveParagraphId: value.activeParagraphId,
+        onBackToLibrary: _backToLibrary,
+        onChapterSelected: (chapterId) => _selectChapter(value, chapterId),
+        onPreviousChapter: value.currentChapterIndex > 0
+            ? () => _selectChapter(
+                value,
+                value.chapters[value.currentChapterIndex - 1].id,
+              )
+            : null,
+        onNextChapter:
+            value.currentChapterIndex >= 0 &&
+                value.currentChapterIndex < value.chapters.length - 1
+            ? () => _selectChapter(
+                value,
+                value.chapters[value.currentChapterIndex + 1].id,
+              )
+            : null,
         onOpenPlayer: () => context.push('/player/$bookId'),
         onPlayFrom: (paragraph) {
           final database = ref.read(databaseProvider);
@@ -209,6 +237,39 @@ final class _ReaderRoutePage extends ConsumerWidget {
       ),
     );
   }
+
+  void _backToLibrary() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/library');
+    }
+  }
+
+  void _selectChapter(ReaderPageData data, int chapterId) {
+    if (chapterId == data.chapter?.id) {
+      return;
+    }
+    setState(() => _selectedChapterId = chapterId);
+    final database = ref.read(databaseProvider);
+    if (database != null) {
+      unawaited(_persistSelectedChapter(database, chapterId));
+    }
+  }
+
+  Future<void> _persistSelectedChapter(
+    AppDatabase database,
+    int chapterId,
+  ) async {
+    await database.upsertProgress(
+      bookId: widget.bookId,
+      chapterId: chapterId,
+      paragraphIndex: 0,
+    );
+    await (database.update(database.books)
+          ..where((book) => book.id.equals(widget.bookId)))
+        .write(BooksCompanion(lastReadAt: Value(DateTime.now())));
+  }
 }
 
 final class _PlayerRoutePage extends ConsumerWidget {
@@ -218,7 +279,7 @@ final class _PlayerRoutePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final data = ref.watch(readerPageDataProvider(bookId));
+    final data = ref.watch(readerPageDataProvider(ReaderPageRequest(bookId)));
     return data.when(
       loading: () =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),

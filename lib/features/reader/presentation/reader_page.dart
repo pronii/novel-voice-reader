@@ -1,5 +1,17 @@
 import 'package:flutter/material.dart';
 
+final class ReaderChapter {
+  const ReaderChapter({
+    required this.id,
+    required this.index,
+    required this.title,
+  });
+
+  final int id;
+  final int index;
+  final String title;
+}
+
 final class ReaderParagraph {
   const ReaderParagraph({
     required this.id,
@@ -19,7 +31,13 @@ final class ReaderPage extends StatefulWidget {
     required this.bookTitle,
     required this.chapterTitle,
     required this.paragraphs,
+    this.chapters = const [],
+    this.currentChapterId,
     this.initialActiveParagraphId,
+    this.onBackToLibrary,
+    this.onChapterSelected,
+    this.onPreviousChapter,
+    this.onNextChapter,
     this.onPlayFrom,
     this.onOpenPlayer,
   });
@@ -27,8 +45,14 @@ final class ReaderPage extends StatefulWidget {
   final int bookId;
   final String bookTitle;
   final String chapterTitle;
+  final List<ReaderChapter> chapters;
+  final int? currentChapterId;
   final List<ReaderParagraph> paragraphs;
   final int? initialActiveParagraphId;
+  final VoidCallback? onBackToLibrary;
+  final ValueChanged<int>? onChapterSelected;
+  final VoidCallback? onPreviousChapter;
+  final VoidCallback? onNextChapter;
   final ValueChanged<ReaderParagraph>? onPlayFrom;
   final VoidCallback? onOpenPlayer;
 
@@ -48,15 +72,34 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   @override
+  void didUpdateWidget(covariant ReaderPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentChapterId != widget.currentChapterId) {
+      _activeParagraphId =
+          widget.initialActiveParagraphId ?? widget.paragraphs.firstOrNull?.id;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          tooltip: '返回书架',
+          onPressed: widget.onBackToLibrary,
+          icon: const Icon(Icons.arrow_back),
+        ),
         title: Text(
           widget.bookTitle,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          IconButton(
+            tooltip: '章节目录',
+            onPressed: widget.chapters.isEmpty ? null : _showChapterList,
+            icon: const Icon(Icons.format_list_numbered),
+          ),
           IconButton(
             tooltip: '阅读设置',
             onPressed: _showReadingSettings,
@@ -145,6 +188,40 @@ final class _ReaderPageState extends State<ReaderPage> {
           const SliverToBoxAdapter(child: SizedBox(height: 48)),
         ],
       ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          height: 56,
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: Theme.of(context).dividerColor),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              IconButton(
+                tooltip: '上一章',
+                onPressed: widget.onPreviousChapter,
+                icon: const Icon(Icons.chevron_left),
+              ),
+              Expanded(
+                child: Text(
+                  widget.chapterTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              IconButton(
+                tooltip: '下一章',
+                onPressed: widget.onNextChapter,
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -160,6 +237,54 @@ final class _ReaderPageState extends State<ReaderPage> {
   void _play(ReaderParagraph paragraph) {
     setState(() => _activeParagraphId = paragraph.id);
     widget.onPlayFrom?.call(paragraph);
+  }
+
+  Future<void> _showChapterList() async {
+    final selectedChapterId = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.7,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Text(
+                  '章节目录',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: widget.chapters.length,
+                  itemBuilder: (context, index) {
+                    final chapter = widget.chapters[index];
+                    final selected = chapter.id == widget.currentChapterId;
+                    return ListTile(
+                      title: Text(chapter.title),
+                      leading: SizedBox(
+                        width: 32,
+                        child: Text('${chapter.index + 1}'),
+                      ),
+                      trailing: selected ? const Icon(Icons.check) : null,
+                      selected: selected,
+                      onTap: () => Navigator.of(context).pop(chapter.id),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selectedChapterId != null) {
+      widget.onChapterSelected?.call(selectedChapterId);
+    }
   }
 
   Future<void> _showReadingSettings() async {
