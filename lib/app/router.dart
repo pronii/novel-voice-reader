@@ -25,6 +25,7 @@ import 'package:novel_voice_reader/features/reader/data/reading_progress_reposit
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
+import 'package:novel_voice_reader/features/speech/data/zhipu_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:novel_voice_reader/features/speech/presentation/voice_settings_page.dart';
 
@@ -335,6 +336,15 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return VoiceSettingsPage(
+      onTestConnection: (profile, apiKey) async {
+        final credentials = SecureCredentials(
+          FlutterSecureKeyValueStore(const FlutterSecureStorage()),
+        );
+        await ZhipuTtsClient(
+          dio: Dio(),
+          credentials: credentials,
+        ).testConnection(apiKey: apiKey, profile: profile);
+      },
       onSave: (profile, apiKey) async {
         final database = ref.read(databaseProvider);
         if (database != null) {

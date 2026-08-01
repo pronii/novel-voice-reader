@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 final class VoiceSettingsPage extends StatefulWidget {
-  const VoiceSettingsPage({super.key, this.onSave});
+  const VoiceSettingsPage({super.key, this.onTestConnection, this.onSave});
 
+  final Future<void> Function(VoiceProfile profile, String apiKey)?
+  onTestConnection;
   final Future<void> Function(VoiceProfile profile, String? apiKey)? onSave;
 
   @override
@@ -25,6 +28,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   String _zhipuVoice = VoiceProfile.defaultZhipuVoice;
   double _speed = 1;
   bool _saving = false;
+  bool _testingConnection = false;
 
   static const _zhipuVoiceLabels = <String, String>{
     'tongtong': '彤彤 (tongtong)',
@@ -173,10 +177,16 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
               autocorrect: false,
               decoration: const InputDecoration(labelText: 'API Key'),
             ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _saving || _testingConnection ? null : _testConnection,
+              icon: const Icon(Icons.wifi_tethering),
+              label: Text(_testingConnection ? '测试中' : '测试连接'),
+            ),
           ],
           const SizedBox(height: 24),
           FilledButton.icon(
-            onPressed: _saving ? null : _save,
+            onPressed: _saving || _testingConnection ? null : _save,
             icon: const Icon(Icons.save_outlined),
             label: Text(_saving ? '保存中' : '保存'),
           ),
@@ -186,6 +196,9 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   }
 
   Future<void> _save() async {
+    if (_saving || _testingConnection) {
+      return;
+    }
     late final VoiceProfile profile;
     try {
       profile = _buildProfile();
@@ -211,6 +224,31 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     } finally {
       if (mounted) {
         setState(() => _saving = false);
+      }
+    }
+  }
+
+  Future<void> _testConnection() async {
+    if (_saving || _testingConnection) {
+      return;
+    }
+    final apiKey = _zhipuApiKey.text.trim();
+    if (apiKey.isEmpty) {
+      _showMessage('请输入智谱 API Key');
+      return;
+    }
+    final profile = VoiceProfile.zhipu(voice: _zhipuVoice, speed: _speed);
+    setState(() => _testingConnection = true);
+    try {
+      await widget.onTestConnection?.call(profile, apiKey);
+      _showMessage('连接成功，API Key 可用');
+    } on AppFailure catch (failure) {
+      _showMessage(failure.message);
+    } catch (_) {
+      _showMessage('连接测试失败');
+    } finally {
+      if (mounted) {
+        setState(() => _testingConnection = false);
       }
     }
   }
