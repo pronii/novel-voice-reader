@@ -142,6 +142,7 @@ void main() {
   );
 
   test('failed playback startup does not block a later replacement', () async {
+    final firstProvider = RuntimeSpeechProvider();
     final failedProvider = RuntimeSpeechProvider(
       prepareError: StateError('prepare failed'),
     );
@@ -152,6 +153,14 @@ void main() {
       handler: NovelAudioHandler(controller),
     );
     const cursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+    await runtime.replaceAndPlayFrom(
+      createCoordinator(firstProvider),
+      cursor,
+      token: runtime.beginReplacement(),
+    );
+    runtime.handler.markPlaying();
+
+    expect(runtime.handler.playbackState.value.playing, isTrue);
 
     await expectLater(
       runtime.replaceAndPlayFrom(
@@ -163,8 +172,11 @@ void main() {
     );
 
     expect(failedProvider.disposeCalls, 1);
-    await runtime.handler.play();
     expect(runtime.handler.playbackState.value.playing, isFalse);
+    expect(
+      runtime.handler.playbackState.value.processingState,
+      AudioProcessingState.idle,
+    );
 
     await runtime.replaceAndPlayFrom(
       createCoordinator(nextProvider),
@@ -174,6 +186,68 @@ void main() {
 
     expect(nextProvider.prepared, hasLength(1));
     await runtime.dispose();
+  });
+
+  test('stale current replacement resets the playback state', () async {
+    final firstProvider = RuntimeSpeechProvider(
+      disposeCompleter: Completer<void>(),
+    );
+    final staleProvider = RuntimeSpeechProvider();
+    final controller = AttachablePlaybackController();
+    final runtime = PlaybackRuntime(
+      controller: controller,
+      handler: NovelAudioHandler(controller),
+    );
+    const cursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+    await runtime.replaceAndPlayFrom(
+      createCoordinator(firstProvider),
+      cursor,
+      token: runtime.beginReplacement(),
+    );
+    runtime.handler.markPlaying();
+    final staleToken = runtime.beginReplacement();
+
+    final replacement = runtime.replaceAndPlayFrom(
+      createCoordinator(staleProvider),
+      cursor,
+      token: staleToken,
+    );
+    await pumpEventQueue();
+    runtime.cancelReplacement(staleToken);
+    firstProvider.disposeCompleter!.complete();
+
+    expect(await replacement, isFalse);
+    expect(staleProvider.disposeCalls, 1);
+    expect(runtime.handler.playbackState.value.playing, isFalse);
+    expect(
+      runtime.handler.playbackState.value.processingState,
+      AudioProcessingState.idle,
+    );
+    await runtime.dispose();
+  });
+
+  test('disposing the runtime resets the playback state', () async {
+    final provider = RuntimeSpeechProvider();
+    final controller = AttachablePlaybackController();
+    final runtime = PlaybackRuntime(
+      controller: controller,
+      handler: NovelAudioHandler(controller),
+    );
+    const cursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+    await runtime.replaceAndPlayFrom(
+      createCoordinator(provider),
+      cursor,
+      token: runtime.beginReplacement(),
+    );
+    runtime.handler.markPlaying();
+
+    await runtime.dispose();
+
+    expect(runtime.handler.playbackState.value.playing, isFalse);
+    expect(
+      runtime.handler.playbackState.value.processingState,
+      AudioProcessingState.idle,
+    );
   });
 
   test('a stale startup cannot replace the latest playback request', () async {
@@ -193,6 +267,7 @@ void main() {
       cursor,
       token: latestToken,
     );
+    runtime.handler.markPlaying();
     final staleStarted = await runtime.replaceAndPlayFrom(
       createCoordinator(staleProvider),
       cursor,
@@ -205,6 +280,11 @@ void main() {
     expect(staleProvider.prepared, isEmpty);
     await controller.playFrom(cursor);
     expect(latestProvider.prepared, hasLength(2));
+    expect(runtime.handler.playbackState.value.playing, isTrue);
+    expect(
+      runtime.handler.playbackState.value.processingState,
+      AudioProcessingState.ready,
+    );
     await runtime.dispose();
   });
 }

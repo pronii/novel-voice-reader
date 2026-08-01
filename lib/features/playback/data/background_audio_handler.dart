@@ -134,6 +134,7 @@ final class PlaybackRuntime {
   Future<void> _disposeCurrent() async {
     final current = _coordinator;
     _coordinator = null;
+    handler.markIdle();
     if (current == null) {
       return;
     }
@@ -145,6 +146,7 @@ final class PlaybackRuntime {
     if (identical(_coordinator, coordinator)) {
       _coordinator = null;
       controller.detach(coordinator);
+      handler.markIdle();
     }
     await _dispose(coordinator);
   }
@@ -192,6 +194,14 @@ final class NovelAudioHandler extends BaseAudioHandler {
     playbackState.add(_state(playing: true));
   }
 
+  void markIdle() {
+    playbackState.add(
+      _state(
+        playing: false,
+      ).copyWith(processingState: AudioProcessingState.idle),
+    );
+  }
+
   @override
   Future<void> play() async {
     await _controller.resume();
@@ -216,11 +226,7 @@ final class NovelAudioHandler extends BaseAudioHandler {
   @override
   Future<void> stop() async {
     await _controller.pause();
-    playbackState.add(
-      _state(
-        playing: false,
-      ).copyWith(processingState: AudioProcessingState.idle),
-    );
+    markIdle();
     await super.stop();
   }
 
