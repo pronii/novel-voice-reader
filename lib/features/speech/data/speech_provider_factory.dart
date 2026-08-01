@@ -7,6 +7,8 @@ import 'package:novel_voice_reader/features/speech/data/azure_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/data/cloud_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/system_tts_adapter.dart';
+import 'package:novel_voice_reader/features/speech/data/tencent_tts_client.dart';
+import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
 import 'package:novel_voice_reader/features/speech/data/zhipu_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
@@ -16,6 +18,7 @@ final class SpeechProviderFactory {
     required this.dio,
     required this.credentials,
     required this.cacheDirectory,
+    required this.tencentUsageCounter,
     SystemTtsEngine Function()? systemEngineFactory,
     AudioPlaybackEngine Function()? audioEngineFactory,
   }) : systemEngineFactory = systemEngineFactory ?? FlutterSystemTtsEngine.new,
@@ -24,6 +27,7 @@ final class SpeechProviderFactory {
   final Dio dio;
   final SecureCredentials credentials;
   final Directory cacheDirectory;
+  final TencentTtsUsageCounter tencentUsageCounter;
   final SystemTtsEngine Function() systemEngineFactory;
   final AudioPlaybackEngine Function() audioEngineFactory;
 
@@ -39,8 +43,12 @@ final class SpeechProviderFactory {
       SpeechProviderType.zhipu => _cached(
         ZhipuTtsClient(dio: dio, credentials: credentials),
       ),
-      SpeechProviderType.tencent => throw UnsupportedError(
-        'Tencent TTS is not wired yet.',
+      SpeechProviderType.tencent => _cached(
+        TencentTtsClient(
+          dio: dio,
+          credentials: credentials,
+          usageCounter: tencentUsageCounter,
+        ),
       ),
     };
   }

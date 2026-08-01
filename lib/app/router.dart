@@ -26,6 +26,7 @@ import 'package:novel_voice_reader/features/reader/data/reading_progress_reposit
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
+import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
 import 'package:novel_voice_reader/features/speech/data/zhipu_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:novel_voice_reader/features/speech/presentation/voice_settings_page.dart';
@@ -241,6 +242,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         cacheDirectory: Directory(
           '${supportDirectory.path}${Platform.pathSeparator}speech_audio',
         ),
+        tencentUsageCounter: TencentTtsUsageRepository(database),
       ).create(profile);
       final coordinator = PlaybackCoordinator(
         provider: provider,

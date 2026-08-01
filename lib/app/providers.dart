@@ -38,6 +38,7 @@ VoiceProfile voiceProfileFromRecord(VoiceProfileRecord? record) {
       ),
     'azure' => _azureProfileFromRecord(record),
     'zhipu' => _zhipuProfileFromRecord(record),
+    'tencent' => _tencentProfileFromRecord(record),
     _ => VoiceProfile.system(),
   };
 }
@@ -71,6 +72,18 @@ VoiceProfile _zhipuProfileFromRecord(VoiceProfileRecord record) {
       voice: record.voice ?? VoiceProfile.defaultZhipuVoice,
       speed: record.speed,
     );
+  } on ArgumentError {
+    return VoiceProfile.system();
+  }
+}
+
+VoiceProfile _tencentProfileFromRecord(VoiceProfileRecord record) {
+  final voiceType = int.tryParse(record.voice ?? '');
+  if (voiceType == null) {
+    return VoiceProfile.system();
+  }
+  try {
+    return VoiceProfile.tencent(voiceType: voiceType, speed: record.speed);
   } on ArgumentError {
     return VoiceProfile.system();
   }

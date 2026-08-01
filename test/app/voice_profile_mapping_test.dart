@@ -68,4 +68,37 @@ void main() {
     expect(profile.speed, 0.9);
     expect(profile.outputFormat, 'wav');
   });
+
+  test('maps a stored Tencent profile for active reader playback', () {
+    const record = VoiceProfileRecord(
+      id: 6,
+      providerType: 'tencent',
+      baseUrl: 'https://tts.tencentcloudapi.com',
+      model: '1',
+      voice: '1001',
+      speed: 1.2,
+      outputFormat: 'mp3',
+    );
+
+    final profile = voiceProfileFromRecord(record);
+
+    expect(profile.providerType, SpeechProviderType.tencent);
+    expect(profile.normalizedBaseUrl, VoiceProfile.tencentBaseUrl);
+    expect(profile.voice, '1001');
+    expect(profile.speed, 1.2);
+    expect(profile.outputFormat, 'mp3');
+  });
+
+  test('falls back to system speech for a corrupt Tencent voice type', () {
+    const record = VoiceProfileRecord(
+      id: 7,
+      providerType: 'tencent',
+      voice: 'not-a-number',
+      speed: 1,
+    );
+
+    final profile = voiceProfileFromRecord(record);
+
+    expect(profile.providerType, SpeechProviderType.system);
+  });
 }
