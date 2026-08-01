@@ -120,9 +120,10 @@ final class CachedAudioSpeechProvider
   @override
   Future<void> setPlaybackSpeed(double speed) async {
     final playbackEngine = engine;
-    if (playbackEngine is AdjustableAudioPlaybackEngine) {
-      await (playbackEngine as AdjustableAudioPlaybackEngine).setSpeed(speed);
+    if (playbackEngine is! AdjustableAudioPlaybackEngine) {
+      throw StateError('Audio playback engine does not support speed changes.');
     }
+    await (playbackEngine as AdjustableAudioPlaybackEngine).setSpeed(speed);
   }
 
   @override

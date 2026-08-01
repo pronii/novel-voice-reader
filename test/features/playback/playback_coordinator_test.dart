@@ -66,6 +66,25 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('does not retain a playback speed rejected by the provider', () async {
+    final provider = FakeSpeechProvider()..speedFailure = StateError('failed');
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource(const ['第一段']),
+      voiceProfile: VoiceProfile.system(),
+    );
+
+    await expectLater(coordinator.setSpeed(1.25), throwsStateError);
+    provider.speedFailure = null;
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+
+    expect(provider.speedChanges, [1.25, 1]);
+    await coordinator.dispose();
+  });
+
   test('reapplies playback speed after every segment prepare', () async {
     final provider = FakeSpeechProvider();
     final coordinator = PlaybackCoordinator(
@@ -150,6 +169,7 @@ final class FakeSpeechProvider
   final List<SpeechSegment> prepared = [];
   int pauseCalls = 0;
   final List<double> speedChanges = [];
+  Object? speedFailure;
 
   @override
   Stream<SpeechEvent> get events => _events.stream;
@@ -176,6 +196,10 @@ final class FakeSpeechProvider
   @override
   Future<void> setPlaybackSpeed(double speed) async {
     speedChanges.add(speed);
+    final failure = speedFailure;
+    if (failure != null) {
+      throw failure;
+    }
   }
 
   void completeCurrent() {

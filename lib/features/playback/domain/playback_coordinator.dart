@@ -115,11 +115,11 @@ final class PlaybackCoordinator implements PlaybackController {
 
   @override
   Future<void> setSpeed(double speed) async {
-    _speed = speed;
     final provider = _provider;
     if (provider is AdjustableSpeechProvider) {
       await (provider as AdjustableSpeechProvider).setPlaybackSpeed(speed);
     }
+    _speed = speed;
   }
 
   @override

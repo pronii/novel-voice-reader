@@ -115,9 +115,10 @@ final class SystemTtsAdapter
   @override
   Future<void> setPlaybackSpeed(double speed) async {
     final engine = _engine;
-    if (engine is AdjustableSystemTtsEngine) {
-      await (engine as AdjustableSystemTtsEngine).setPlaybackSpeed(speed);
+    if (engine is! AdjustableSystemTtsEngine) {
+      throw StateError('System TTS engine does not support speed changes.');
     }
+    await (engine as AdjustableSystemTtsEngine).setPlaybackSpeed(speed);
   }
 
   @override

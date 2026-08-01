@@ -5,6 +5,27 @@ import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart'
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
+  test('forwards playback speed to an adjustable system engine', () async {
+    final engine = AdjustableFakeSystemTtsEngine();
+    final adapter = SystemTtsAdapter(engine);
+
+    await adapter.setPlaybackSpeed(1.5);
+
+    expect(engine.speedChanges, [1.5]);
+    await adapter.dispose();
+  });
+
+  test(
+    'rejects playback speed when the system engine is not adjustable',
+    () async {
+      final adapter = SystemTtsAdapter(FakeSystemTtsEngine());
+
+      await expectLater(adapter.setPlaybackSpeed(1.5), throwsStateError);
+
+      await adapter.dispose();
+    },
+  );
+
   test('maps engine start and completion callbacks to speech events', () async {
     final engine = FakeSystemTtsEngine();
     final adapter = SystemTtsAdapter(engine);
@@ -50,7 +71,7 @@ void main() {
   });
 }
 
-final class FakeSystemTtsEngine implements SystemTtsEngine {
+class FakeSystemTtsEngine implements SystemTtsEngine {
   final List<String> spoken = [];
   int pauseCalls = 0;
   void Function()? onStart;
@@ -91,4 +112,14 @@ final class FakeSystemTtsEngine implements SystemTtsEngine {
   void start() => onStart?.call();
 
   void complete() => onComplete?.call();
+}
+
+final class AdjustableFakeSystemTtsEngine extends FakeSystemTtsEngine
+    implements AdjustableSystemTtsEngine {
+  final List<double> speedChanges = [];
+
+  @override
+  Future<void> setPlaybackSpeed(double speed) async {
+    speedChanges.add(speed);
+  }
 }

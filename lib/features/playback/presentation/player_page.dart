@@ -20,7 +20,7 @@ final class PlayerPage extends StatefulWidget {
   final VoidCallback? onPlay;
   final VoidCallback? onPause;
   final double initialSpeed;
-  final ValueChanged<double>? onSpeedChanged;
+  final Future<void> Function(double speed)? onSpeedChanged;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
@@ -29,6 +29,7 @@ final class PlayerPage extends StatefulWidget {
 final class _PlayerPageState extends State<PlayerPage> {
   bool _playing = false;
   late double _speed;
+  Future<void> _speedChanges = Future<void>.value();
 
   @override
   void initState() {
@@ -95,9 +96,7 @@ final class _PlayerPageState extends State<PlayerPage> {
                 ],
                 selected: {_speed},
                 onSelectionChanged: (values) {
-                  final speed = values.single;
-                  setState(() => _speed = speed);
-                  widget.onSpeedChanged?.call(speed);
+                  _queueSpeedChange(values.single);
                 },
               ),
               const Spacer(),
@@ -106,6 +105,21 @@ final class _PlayerPageState extends State<PlayerPage> {
         ),
       ),
     );
+  }
+
+  void _queueSpeedChange(double speed) {
+    _speedChanges = _speedChanges.then((_) => _applySpeed(speed));
+  }
+
+  Future<void> _applySpeed(double speed) async {
+    try {
+      await widget.onSpeedChanged?.call(speed);
+    } catch (_) {
+      return;
+    }
+    if (mounted) {
+      setState(() => _speed = speed);
+    }
   }
 
   void _togglePlayback() {

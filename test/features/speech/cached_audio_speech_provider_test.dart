@@ -10,6 +10,43 @@ import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart'
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
+  test('forwards playback speed to an adjustable audio engine', () async {
+    final directory = await Directory.systemTemp.createTemp('cached-speed-');
+    final engine = AdjustableFakeAudioPlaybackEngine();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: FakeCloudSpeechSynthesizer(),
+      ),
+      engine: engine,
+    );
+
+    await provider.setPlaybackSpeed(1.25);
+
+    expect(engine.speedChanges, [1.25]);
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
+
+  test(
+    'rejects playback speed when the audio engine is not adjustable',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('cached-speed-');
+      final provider = CachedAudioSpeechProvider(
+        cache: AudioCacheRepository(
+          directory: directory,
+          synthesizer: FakeCloudSpeechSynthesizer(),
+        ),
+        engine: FakeAudioPlaybackEngine(),
+      );
+
+      await expectLater(provider.setPlaybackSpeed(1.25), throwsStateError);
+
+      await provider.dispose();
+      await directory.delete(recursive: true);
+    },
+  );
+
   test('plays cached audio and exposes speech lifecycle events', () async {
     final directory = await Directory.systemTemp.createTemp('cached-speech-');
     final engine = FakeAudioPlaybackEngine();
@@ -70,7 +107,7 @@ final class FakeCloudSpeechSynthesizer implements CloudSpeechSynthesizer {
   }
 }
 
-final class FakeAudioPlaybackEngine implements AudioPlaybackEngine {
+class FakeAudioPlaybackEngine implements AudioPlaybackEngine {
   final _completed = StreamController<void>.broadcast(sync: true);
   String? filePath;
   int playCalls = 0;
@@ -108,4 +145,12 @@ final class FakeAudioPlaybackEngine implements AudioPlaybackEngine {
   }
 
   void complete() => _completed.add(null);
+}
+
+final class AdjustableFakeAudioPlaybackEngine extends FakeAudioPlaybackEngine
+    implements AdjustableAudioPlaybackEngine {
+  final List<double> speedChanges = [];
+
+  @override
+  Future<void> setSpeed(double speed) async => speedChanges.add(speed);
 }

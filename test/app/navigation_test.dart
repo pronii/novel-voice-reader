@@ -6,10 +6,61 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/app/app.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
+import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
+import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 void main() {
+  testWidgets('wires the effective playback speed through the player route', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    await database.createBookWithChapter(
+      title: '倍速测试书',
+      chapterTitle: '第一章',
+      paragraphs: const ['第一段。'],
+    );
+    final controller = AttachablePlaybackController();
+    final delegate = _SpeedPlaybackController();
+    controller.attach(delegate);
+    final handler = NovelAudioHandler(controller);
+    await handler.setSpeed(1.25);
+    delegate.speedChanges.clear();
+    final runtime = PlaybackRuntime(controller: controller, handler: handler);
+
+    await tester.pumpWidget(
+      NovelVoiceReaderApp(database: database, playbackRuntime: runtime),
+    );
+    await _pumpUntilFound(tester, find.text('倍速测试书'));
+    await tester.tap(find.text('倍速测试书'));
+    await _pumpUntilFound(tester, find.byTooltip('播放器'));
+    tester
+        .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.graphic_eq))
+        .onPressed!
+        .call();
+    await _pumpUntilFound(tester, find.text('1.5x'));
+
+    expect(
+      tester
+          .widget<SegmentedButton<double>>(find.byType(SegmentedButton<double>))
+          .selected,
+      {1.25},
+    );
+    await tester.tap(find.text('1.5x'));
+    await tester.pump();
+
+    expect(delegate.speedChanges, [1.5]);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
   testWidgets('opens a book and exposes reader playback controls', (
     tester,
   ) async {
@@ -240,6 +291,31 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
   });
+}
+
+final class _SpeedPlaybackController implements PlaybackController {
+  final List<double> speedChanges = [];
+
+  @override
+  PlaybackCursor? get cursor => null;
+
+  @override
+  Future<void> nextParagraph() async {}
+
+  @override
+  Future<void> pause() async {}
+
+  @override
+  Future<void> playFrom(PlaybackCursor cursor) async {}
+
+  @override
+  Future<void> previousParagraph() async {}
+
+  @override
+  Future<void> resume() async {}
+
+  @override
+  Future<void> setSpeed(double speed) async => speedChanges.add(speed);
 }
 
 Future<void> _openTencentSettings(WidgetTester tester) async {
