@@ -3233,6 +3233,344 @@ class DownloadJobsCompanion extends UpdateCompanion<DownloadJobRecord> {
   }
 }
 
+class $TencentTtsMonthlyUsagesTable extends TencentTtsMonthlyUsages
+    with
+        TableInfo<$TencentTtsMonthlyUsagesTable, TencentTtsMonthlyUsageRecord> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $TencentTtsMonthlyUsagesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _periodMeta = const VerificationMeta('period');
+  @override
+  late final GeneratedColumn<String> period = GeneratedColumn<String>(
+    'period',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _usedCharactersMeta = const VerificationMeta(
+    'usedCharacters',
+  );
+  @override
+  late final GeneratedColumn<int> usedCharacters = GeneratedColumn<int>(
+    'used_characters',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _quotaCharactersMeta = const VerificationMeta(
+    'quotaCharacters',
+  );
+  @override
+  late final GeneratedColumn<int> quotaCharacters = GeneratedColumn<int>(
+    'quota_characters',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    period,
+    usedCharacters,
+    quotaCharacters,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'tencent_tts_monthly_usages';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<TencentTtsMonthlyUsageRecord> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('period')) {
+      context.handle(
+        _periodMeta,
+        period.isAcceptableOrUnknown(data['period']!, _periodMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_periodMeta);
+    }
+    if (data.containsKey('used_characters')) {
+      context.handle(
+        _usedCharactersMeta,
+        usedCharacters.isAcceptableOrUnknown(
+          data['used_characters']!,
+          _usedCharactersMeta,
+        ),
+      );
+    }
+    if (data.containsKey('quota_characters')) {
+      context.handle(
+        _quotaCharactersMeta,
+        quotaCharacters.isAcceptableOrUnknown(
+          data['quota_characters']!,
+          _quotaCharactersMeta,
+        ),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {period};
+  @override
+  TencentTtsMonthlyUsageRecord map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return TencentTtsMonthlyUsageRecord(
+      period: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}period'],
+      )!,
+      usedCharacters: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}used_characters'],
+      )!,
+      quotaCharacters: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}quota_characters'],
+      ),
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $TencentTtsMonthlyUsagesTable createAlias(String alias) {
+    return $TencentTtsMonthlyUsagesTable(attachedDatabase, alias);
+  }
+}
+
+class TencentTtsMonthlyUsageRecord extends DataClass
+    implements Insertable<TencentTtsMonthlyUsageRecord> {
+  final String period;
+  final int usedCharacters;
+  final int? quotaCharacters;
+  final DateTime updatedAt;
+  const TencentTtsMonthlyUsageRecord({
+    required this.period,
+    required this.usedCharacters,
+    this.quotaCharacters,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['period'] = Variable<String>(period);
+    map['used_characters'] = Variable<int>(usedCharacters);
+    if (!nullToAbsent || quotaCharacters != null) {
+      map['quota_characters'] = Variable<int>(quotaCharacters);
+    }
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  TencentTtsMonthlyUsagesCompanion toCompanion(bool nullToAbsent) {
+    return TencentTtsMonthlyUsagesCompanion(
+      period: Value(period),
+      usedCharacters: Value(usedCharacters),
+      quotaCharacters: quotaCharacters == null && nullToAbsent
+          ? const Value.absent()
+          : Value(quotaCharacters),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory TencentTtsMonthlyUsageRecord.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return TencentTtsMonthlyUsageRecord(
+      period: serializer.fromJson<String>(json['period']),
+      usedCharacters: serializer.fromJson<int>(json['usedCharacters']),
+      quotaCharacters: serializer.fromJson<int?>(json['quotaCharacters']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'period': serializer.toJson<String>(period),
+      'usedCharacters': serializer.toJson<int>(usedCharacters),
+      'quotaCharacters': serializer.toJson<int?>(quotaCharacters),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  TencentTtsMonthlyUsageRecord copyWith({
+    String? period,
+    int? usedCharacters,
+    Value<int?> quotaCharacters = const Value.absent(),
+    DateTime? updatedAt,
+  }) => TencentTtsMonthlyUsageRecord(
+    period: period ?? this.period,
+    usedCharacters: usedCharacters ?? this.usedCharacters,
+    quotaCharacters: quotaCharacters.present
+        ? quotaCharacters.value
+        : this.quotaCharacters,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  TencentTtsMonthlyUsageRecord copyWithCompanion(
+    TencentTtsMonthlyUsagesCompanion data,
+  ) {
+    return TencentTtsMonthlyUsageRecord(
+      period: data.period.present ? data.period.value : this.period,
+      usedCharacters: data.usedCharacters.present
+          ? data.usedCharacters.value
+          : this.usedCharacters,
+      quotaCharacters: data.quotaCharacters.present
+          ? data.quotaCharacters.value
+          : this.quotaCharacters,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TencentTtsMonthlyUsageRecord(')
+          ..write('period: $period, ')
+          ..write('usedCharacters: $usedCharacters, ')
+          ..write('quotaCharacters: $quotaCharacters, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(period, usedCharacters, quotaCharacters, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is TencentTtsMonthlyUsageRecord &&
+          other.period == this.period &&
+          other.usedCharacters == this.usedCharacters &&
+          other.quotaCharacters == this.quotaCharacters &&
+          other.updatedAt == this.updatedAt);
+}
+
+class TencentTtsMonthlyUsagesCompanion
+    extends UpdateCompanion<TencentTtsMonthlyUsageRecord> {
+  final Value<String> period;
+  final Value<int> usedCharacters;
+  final Value<int?> quotaCharacters;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const TencentTtsMonthlyUsagesCompanion({
+    this.period = const Value.absent(),
+    this.usedCharacters = const Value.absent(),
+    this.quotaCharacters = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  TencentTtsMonthlyUsagesCompanion.insert({
+    required String period,
+    this.usedCharacters = const Value.absent(),
+    this.quotaCharacters = const Value.absent(),
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : period = Value(period),
+       updatedAt = Value(updatedAt);
+  static Insertable<TencentTtsMonthlyUsageRecord> custom({
+    Expression<String>? period,
+    Expression<int>? usedCharacters,
+    Expression<int>? quotaCharacters,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (period != null) 'period': period,
+      if (usedCharacters != null) 'used_characters': usedCharacters,
+      if (quotaCharacters != null) 'quota_characters': quotaCharacters,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  TencentTtsMonthlyUsagesCompanion copyWith({
+    Value<String>? period,
+    Value<int>? usedCharacters,
+    Value<int?>? quotaCharacters,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return TencentTtsMonthlyUsagesCompanion(
+      period: period ?? this.period,
+      usedCharacters: usedCharacters ?? this.usedCharacters,
+      quotaCharacters: quotaCharacters ?? this.quotaCharacters,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (period.present) {
+      map['period'] = Variable<String>(period.value);
+    }
+    if (usedCharacters.present) {
+      map['used_characters'] = Variable<int>(usedCharacters.value);
+    }
+    if (quotaCharacters.present) {
+      map['quota_characters'] = Variable<int>(quotaCharacters.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TencentTtsMonthlyUsagesCompanion(')
+          ..write('period: $period, ')
+          ..write('usedCharacters: $usedCharacters, ')
+          ..write('quotaCharacters: $quotaCharacters, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3248,6 +3586,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $AudioCacheEntriesTable audioCacheEntries =
       $AudioCacheEntriesTable(this);
   late final $DownloadJobsTable downloadJobs = $DownloadJobsTable(this);
+  late final $TencentTtsMonthlyUsagesTable tencentTtsMonthlyUsages =
+      $TencentTtsMonthlyUsagesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3261,6 +3601,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     downloadPolicies,
     audioCacheEntries,
     downloadJobs,
+    tencentTtsMonthlyUsages,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -6949,6 +7290,210 @@ typedef $$DownloadJobsTableProcessedTableManager =
       DownloadJobRecord,
       PrefetchHooks Function({bool paragraphId})
     >;
+typedef $$TencentTtsMonthlyUsagesTableCreateCompanionBuilder =
+    TencentTtsMonthlyUsagesCompanion Function({
+      required String period,
+      Value<int> usedCharacters,
+      Value<int?> quotaCharacters,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$TencentTtsMonthlyUsagesTableUpdateCompanionBuilder =
+    TencentTtsMonthlyUsagesCompanion Function({
+      Value<String> period,
+      Value<int> usedCharacters,
+      Value<int?> quotaCharacters,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$TencentTtsMonthlyUsagesTableFilterComposer
+    extends Composer<_$AppDatabase, $TencentTtsMonthlyUsagesTable> {
+  $$TencentTtsMonthlyUsagesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get period => $composableBuilder(
+    column: $table.period,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get usedCharacters => $composableBuilder(
+    column: $table.usedCharacters,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get quotaCharacters => $composableBuilder(
+    column: $table.quotaCharacters,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$TencentTtsMonthlyUsagesTableOrderingComposer
+    extends Composer<_$AppDatabase, $TencentTtsMonthlyUsagesTable> {
+  $$TencentTtsMonthlyUsagesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get period => $composableBuilder(
+    column: $table.period,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get usedCharacters => $composableBuilder(
+    column: $table.usedCharacters,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get quotaCharacters => $composableBuilder(
+    column: $table.quotaCharacters,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$TencentTtsMonthlyUsagesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $TencentTtsMonthlyUsagesTable> {
+  $$TencentTtsMonthlyUsagesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get period =>
+      $composableBuilder(column: $table.period, builder: (column) => column);
+
+  GeneratedColumn<int> get usedCharacters => $composableBuilder(
+    column: $table.usedCharacters,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get quotaCharacters => $composableBuilder(
+    column: $table.quotaCharacters,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$TencentTtsMonthlyUsagesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $TencentTtsMonthlyUsagesTable,
+          TencentTtsMonthlyUsageRecord,
+          $$TencentTtsMonthlyUsagesTableFilterComposer,
+          $$TencentTtsMonthlyUsagesTableOrderingComposer,
+          $$TencentTtsMonthlyUsagesTableAnnotationComposer,
+          $$TencentTtsMonthlyUsagesTableCreateCompanionBuilder,
+          $$TencentTtsMonthlyUsagesTableUpdateCompanionBuilder,
+          (
+            TencentTtsMonthlyUsageRecord,
+            BaseReferences<
+              _$AppDatabase,
+              $TencentTtsMonthlyUsagesTable,
+              TencentTtsMonthlyUsageRecord
+            >,
+          ),
+          TencentTtsMonthlyUsageRecord,
+          PrefetchHooks Function()
+        > {
+  $$TencentTtsMonthlyUsagesTableTableManager(
+    _$AppDatabase db,
+    $TencentTtsMonthlyUsagesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$TencentTtsMonthlyUsagesTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$TencentTtsMonthlyUsagesTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$TencentTtsMonthlyUsagesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> period = const Value.absent(),
+                Value<int> usedCharacters = const Value.absent(),
+                Value<int?> quotaCharacters = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => TencentTtsMonthlyUsagesCompanion(
+                period: period,
+                usedCharacters: usedCharacters,
+                quotaCharacters: quotaCharacters,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String period,
+                Value<int> usedCharacters = const Value.absent(),
+                Value<int?> quotaCharacters = const Value.absent(),
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => TencentTtsMonthlyUsagesCompanion.insert(
+                period: period,
+                usedCharacters: usedCharacters,
+                quotaCharacters: quotaCharacters,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$TencentTtsMonthlyUsagesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $TencentTtsMonthlyUsagesTable,
+      TencentTtsMonthlyUsageRecord,
+      $$TencentTtsMonthlyUsagesTableFilterComposer,
+      $$TencentTtsMonthlyUsagesTableOrderingComposer,
+      $$TencentTtsMonthlyUsagesTableAnnotationComposer,
+      $$TencentTtsMonthlyUsagesTableCreateCompanionBuilder,
+      $$TencentTtsMonthlyUsagesTableUpdateCompanionBuilder,
+      (
+        TencentTtsMonthlyUsageRecord,
+        BaseReferences<
+          _$AppDatabase,
+          $TencentTtsMonthlyUsagesTable,
+          TencentTtsMonthlyUsageRecord
+        >,
+      ),
+      TencentTtsMonthlyUsageRecord,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -6969,4 +7514,9 @@ class $AppDatabaseManager {
       $$AudioCacheEntriesTableTableManager(_db, _db.audioCacheEntries);
   $$DownloadJobsTableTableManager get downloadJobs =>
       $$DownloadJobsTableTableManager(_db, _db.downloadJobs);
+  $$TencentTtsMonthlyUsagesTableTableManager get tencentTtsMonthlyUsages =>
+      $$TencentTtsMonthlyUsagesTableTableManager(
+        _db,
+        _db.tencentTtsMonthlyUsages,
+      );
 }

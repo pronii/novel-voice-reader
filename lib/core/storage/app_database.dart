@@ -113,6 +113,17 @@ class DownloadJobs extends Table {
   ];
 }
 
+@DataClassName('TencentTtsMonthlyUsageRecord')
+class TencentTtsMonthlyUsages extends Table {
+  TextColumn get period => text()();
+  IntColumn get usedCharacters => integer().withDefault(const Constant(0))();
+  IntColumn get quotaCharacters => integer().nullable()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {period};
+}
+
 @DriftDatabase(
   tables: [
     Books,
@@ -123,6 +134,7 @@ class DownloadJobs extends Table {
     DownloadPolicies,
     AudioCacheEntries,
     DownloadJobs,
+    TencentTtsMonthlyUsages,
   ],
 )
 final class AppDatabase extends _$AppDatabase {
@@ -132,10 +144,15 @@ final class AppDatabase extends _$AppDatabase {
       AppDatabase(executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
+    onUpgrade: (migrator, from, to) async {
+      if (from < 2) {
+        await migrator.createTable(tencentTtsMonthlyUsages);
+      }
+    },
     beforeOpen: (_) async {
       await customStatement('PRAGMA foreign_keys = ON');
     },
