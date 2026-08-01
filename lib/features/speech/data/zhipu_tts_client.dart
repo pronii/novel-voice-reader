@@ -135,11 +135,12 @@ final class ZhipuTtsClient implements CloudSpeechSynthesizer {
         try {
           final date = HttpDate.parse(header);
           final duration = date.difference(_now().toUtc());
-          if (!duration.isNegative) {
-            return duration > const Duration(seconds: 60)
-                ? const Duration(seconds: 60)
-                : duration;
+          if (duration.isNegative) {
+            return Duration.zero;
           }
+          return duration > const Duration(seconds: 60)
+              ? const Duration(seconds: 60)
+              : duration;
         } on FormatException {
           // Fall back to exponential backoff for an invalid HTTP date.
         } on HttpException {

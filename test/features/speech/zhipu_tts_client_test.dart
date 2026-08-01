@@ -193,6 +193,31 @@ void main() {
     expect(delays, const [Duration(seconds: 30)]);
   });
 
+  test('clamps a past Retry-After HTTP-date to zero', () async {
+    final delays = <Duration>[];
+    final adapter = RecordingHttpClientAdapter(
+      outcomes: const [
+        HttpOutcome.status(
+          429,
+          headers: {
+            'retry-after': ['Fri, 31 Jul 2026 23:59:30 GMT'],
+          },
+        ),
+        HttpOutcome.success([4, 5, 6]),
+      ],
+    );
+    final client = ZhipuTtsClient(
+      dio: Dio()..httpClientAdapter = adapter,
+      credentials: SecureCredentials(FakeSecureStore('zhipu-secret')),
+      delay: (duration) async => delays.add(duration),
+      now: () => DateTime.utc(2026, 8, 1),
+    );
+
+    await client.synthesize(testSegment, testProfile);
+
+    expect(delays, const [Duration.zero]);
+  });
+
   test('tests an entered key with a short real synthesis request', () async {
     final adapter = RecordingHttpClientAdapter(
       outcomes: [const HttpOutcome.success(validWavBytes)],
