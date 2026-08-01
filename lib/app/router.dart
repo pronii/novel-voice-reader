@@ -410,26 +410,40 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
       },
       onSave: (submission) async {
         final profile = submission.profile;
-        if (database != null) {
-          await database
-              .into(database.voiceProfiles)
-              .insert(
-                VoiceProfilesCompanion.insert(
-                  providerType: profile.providerType.name,
-                  baseUrl: Value(profile.baseUrl),
-                  model: Value(profile.model),
-                  voice: Value(profile.voice),
-                  speed: Value(profile.speed),
-                  pitch: Value(profile.pitch),
-                  outputFormat: Value(profile.outputFormat),
-                ),
-              );
-          if (profile.providerType == SpeechProviderType.tencent) {
-            await TencentTtsUsageRepository(
-              database,
-            ).setMonthlyQuota(submission.monthlyQuotaCharacters);
-          }
+        Future<void> persistProfile() async {
+          if (database == null) return;
+          await database.transaction(() async {
+            await database
+                .into(database.voiceProfiles)
+                .insert(
+                  VoiceProfilesCompanion.insert(
+                    providerType: profile.providerType.name,
+                    baseUrl: Value(profile.baseUrl),
+                    model: Value(profile.model),
+                    voice: Value(profile.voice),
+                    speed: Value(profile.speed),
+                    pitch: Value(profile.pitch),
+                    outputFormat: Value(profile.outputFormat),
+                  ),
+                );
+            if (profile.providerType == SpeechProviderType.tencent) {
+              await TencentTtsUsageRepository(
+                database,
+              ).setMonthlyQuota(submission.monthlyQuotaCharacters);
+            }
+          });
         }
+
+        if (profile.providerType == SpeechProviderType.tencent) {
+          await credentials.runWithTencentCredentialUpdate(
+            secretId: submission.credentials.normalizedSecretId,
+            secretKey: submission.credentials.normalizedSecretKey,
+            commit: persistProfile,
+          );
+          return;
+        }
+
+        await persistProfile();
         final apiKey = submission.credentials.normalizedApiKey;
         if (apiKey != null) {
           switch (profile.providerType) {
@@ -441,16 +455,6 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
               await credentials.writeApiKey(apiKey);
             case SpeechProviderType.system || SpeechProviderType.tencent:
               break;
-          }
-        }
-        if (profile.providerType == SpeechProviderType.tencent) {
-          final secretId = submission.credentials.normalizedSecretId;
-          final secretKey = submission.credentials.normalizedSecretKey;
-          if (secretId != null) {
-            await credentials.writeTencentSecretId(secretId);
-          }
-          if (secretKey != null) {
-            await credentials.writeTencentSecretKey(secretKey);
           }
         }
       },

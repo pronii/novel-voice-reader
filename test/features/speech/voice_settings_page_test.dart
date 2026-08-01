@@ -470,6 +470,61 @@ void main() {
     expect(find.text('估算剩余：70 字符'), findsOneWidget);
   });
 
+  testWidgets('refreshes the Tencent quota estimate after saving', (
+    tester,
+  ) async {
+    var savedQuota = 100;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onSave: (submission) async {
+            savedQuota = submission.monthlyQuotaCharacters!;
+          },
+          onLoadTencentUsage: () async => TencentTtsUsageSnapshot(
+            period: '2026-08',
+            usedCharacters: 25,
+            quotaCharacters: savedQuota,
+            updatedAt: DateTime(2026, 8, 2, 12, 30),
+          ),
+        ),
+      ),
+    );
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('腾讯云'));
+    await tester.pumpAndSettle();
+    expect(find.text('月度额度：100 字符'), findsOneWidget);
+
+    await tester.enterText(find.widgetWithText(TextField, '每月免费额度（字符）'), '200');
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('月度额度：200 字符'), findsOneWidget);
+  });
+
+  testWidgets('warns Tencent users to use least-privilege credentials', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: VoiceSettingsPage()));
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('腾讯云'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('专用腾讯云子账号'), findsOneWidget);
+    expect(find.textContaining('最小 TTS 权限'), findsOneWidget);
+  });
+
   testWidgets('clears Tencent credentials independently', (tester) async {
     final cleared = <TencentCredentialField>[];
     await tester.pumpWidget(

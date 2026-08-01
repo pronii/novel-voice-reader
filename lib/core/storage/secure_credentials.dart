@@ -73,4 +73,75 @@ final class SecureCredentials {
 
   Future<void> deleteTencentSecretKey() =>
       _storage.delete(_tencentSecretKeyKey);
+
+  Future<T> runWithTencentCredentialUpdate<T>({
+    required String? secretId,
+    required String? secretKey,
+    required Future<T> Function() commit,
+  }) async {
+    if (secretId == null && secretKey == null) {
+      return commit();
+    }
+
+    final previousSecretId = await readTencentSecretId();
+    final previousSecretKey = await readTencentSecretKey();
+    var wroteSecretId = false;
+    var wroteSecretKey = false;
+    try {
+      if (secretId != null) {
+        await writeTencentSecretId(secretId);
+        wroteSecretId = true;
+      }
+      if (secretKey != null) {
+        await writeTencentSecretKey(secretKey);
+        wroteSecretKey = true;
+      }
+      return await commit();
+    } catch (error, stackTrace) {
+      await _restoreTencentCredentials(
+        secretId: previousSecretId,
+        secretKey: previousSecretKey,
+        restoreSecretId: wroteSecretId,
+        restoreSecretKey: wroteSecretKey,
+      );
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  Future<void> _restoreTencentCredentials({
+    required String? secretId,
+    required String? secretKey,
+    required bool restoreSecretId,
+    required bool restoreSecretKey,
+  }) async {
+    Object? rollbackError;
+    StackTrace? rollbackStackTrace;
+
+    Future<void> restore(Future<void> Function() action) async {
+      try {
+        await action();
+      } catch (error, stackTrace) {
+        rollbackError ??= error;
+        rollbackStackTrace ??= stackTrace;
+      }
+    }
+
+    if (restoreSecretKey) {
+      await restore(
+        () => secretKey == null
+            ? deleteTencentSecretKey()
+            : writeTencentSecretKey(secretKey),
+      );
+    }
+    if (restoreSecretId) {
+      await restore(
+        () => secretId == null
+            ? deleteTencentSecretId()
+            : writeTencentSecretId(secretId),
+      );
+    }
+    if (rollbackError != null) {
+      Error.throwWithStackTrace(rollbackError!, rollbackStackTrace!);
+    }
+  }
 }

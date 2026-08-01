@@ -309,6 +309,11 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
           ),
         ),
       ),
+      const SizedBox(height: 8),
+      Text(
+        '请使用专用腾讯云子账号，并仅授予最小 TTS 权限。',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
       const SizedBox(height: 12),
       TextField(
         controller: _tencentQuota,
@@ -393,6 +398,9 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     setState(() => _saving = true);
     try {
       await widget.onSave?.call(submission);
+      if (_provider == SpeechProviderType.tencent) {
+        await _refreshTencentUsage();
+      }
       _showMessage('语音设置已保存');
     } catch (_) {
       _showMessage('语音设置保存失败');
