@@ -52,6 +52,7 @@ dependencies:
   charset_converter: ^2.5.1
   html: ^0.15.6
   connectivity_plus: ^7.3.1
+  scrollable_positioned_list: ^0.3.8
 
 dev_dependencies:
   flutter_test:

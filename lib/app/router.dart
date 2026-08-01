@@ -188,20 +188,13 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         initialActiveParagraphId: value.activeParagraphId,
         onBackToLibrary: _backToLibrary,
         onChapterSelected: (chapterId) => _selectChapter(value, chapterId),
-        onPreviousChapter: value.currentChapterIndex > 0
-            ? () => _selectChapter(
-                value,
-                value.chapters[value.currentChapterIndex - 1].id,
-              )
-            : null,
-        onNextChapter:
-            value.currentChapterIndex >= 0 &&
-                value.currentChapterIndex < value.chapters.length - 1
-            ? () => _selectChapter(
-                value,
-                value.chapters[value.currentChapterIndex + 1].id,
-              )
-            : null,
+        onReadingPositionChanged: (paragraph) {
+          final database = ref.read(databaseProvider);
+          final chapter = value.chapter;
+          if (database != null && chapter != null) {
+            unawaited(_persistReadingPosition(database, chapter.id, paragraph));
+          }
+        },
         onOpenPlayer: () => context.push('/player/$bookId'),
         onPlayFrom: (paragraph) => unawaited(_playFrom(value, paragraph)),
       ),
@@ -299,6 +292,21 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
       bookId: widget.bookId,
       chapterId: chapterId,
       paragraphIndex: 0,
+    );
+    await (database.update(database.books)
+          ..where((book) => book.id.equals(widget.bookId)))
+        .write(BooksCompanion(lastReadAt: Value(DateTime.now())));
+  }
+
+  Future<void> _persistReadingPosition(
+    AppDatabase database,
+    int chapterId,
+    ReaderParagraph paragraph,
+  ) async {
+    await database.upsertProgress(
+      bookId: widget.bookId,
+      chapterId: chapterId,
+      paragraphIndex: paragraph.index,
     );
     await (database.update(database.books)
           ..where((book) => book.id.equals(widget.bookId)))
