@@ -49,7 +49,7 @@ final class DriftDownloadPlanStore
         final segments = _segmenter.split(
           paragraphId: paragraph.id,
           text: paragraph.content,
-          maxCharacters: 1000,
+          maxCharacters: profile.maxSegmentCharacters,
         );
         for (final segment in segments) {
           final cacheKey = CacheKey.forSegment(segment, profile);

@@ -57,4 +57,25 @@ void main() {
   test('rejects an unsupported Zhipu system voice', () {
     expect(() => VoiceProfile.zhipu(voice: 'unknown'), throwsArgumentError);
   });
+
+  test('uses the fixed Tencent speech configuration and segment limit', () {
+    final profile = VoiceProfile.tencent(voiceType: 1001, speed: 1.2);
+
+    expect(profile.providerType, SpeechProviderType.tencent);
+    expect(profile.normalizedBaseUrl, 'https://tts.tencentcloudapi.com');
+    expect(profile.model, '1');
+    expect(profile.voice, '1001');
+    expect(profile.speed, 1.2);
+    expect(profile.outputFormat, 'mp3');
+    expect(profile.maxSegmentCharacters, 150);
+  });
+
+  test('rejects a non-positive Tencent voice type', () {
+    expect(() => VoiceProfile.tencent(voiceType: 0), throwsArgumentError);
+  });
+
+  test('keeps the existing segment limit for non-Tencent providers', () {
+    expect(VoiceProfile.system().maxSegmentCharacters, 1000);
+    expect(VoiceProfile.zhipu().maxSegmentCharacters, 1000);
+  });
 }

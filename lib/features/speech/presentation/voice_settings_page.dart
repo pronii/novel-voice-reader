@@ -222,6 +222,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
         SpeechProviderType.cloud => _apiKey.text.trim(),
         SpeechProviderType.azure => _azureSubscriptionKey.text.trim(),
         SpeechProviderType.zhipu => _zhipuApiKey.text.trim(),
+        SpeechProviderType.tencent => null,
       });
       _showMessage('语音设置已保存');
     } catch (_) {
@@ -277,6 +278,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
         voice: _zhipuVoice,
         speed: _speed,
       ),
+      SpeechProviderType.tencent => VoiceProfile.tencent(speed: _speed),
     };
   }
 

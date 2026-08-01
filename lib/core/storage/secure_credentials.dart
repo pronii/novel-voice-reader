@@ -31,6 +31,8 @@ final class SecureCredentials {
   static const _apiKeyKey = 'cloud_tts_api_key';
   static const _azureSubscriptionKeyKey = 'azure_tts_subscription_key';
   static const _zhipuApiKeyKey = 'zhipu_tts_api_key';
+  static const _tencentSecretIdKey = 'tencent_tts_secret_id';
+  static const _tencentSecretKeyKey = 'tencent_tts_secret_key';
 
   final SecureKeyValueStore _storage;
 
@@ -56,4 +58,19 @@ final class SecureCredentials {
       _storage.write(_zhipuApiKeyKey, value.trim());
 
   Future<void> deleteZhipuApiKey() => _storage.delete(_zhipuApiKeyKey);
+
+  Future<String?> readTencentSecretId() => _storage.read(_tencentSecretIdKey);
+
+  Future<void> writeTencentSecretId(String value) =>
+      _storage.write(_tencentSecretIdKey, value.trim());
+
+  Future<void> deleteTencentSecretId() => _storage.delete(_tencentSecretIdKey);
+
+  Future<String?> readTencentSecretKey() => _storage.read(_tencentSecretKeyKey);
+
+  Future<void> writeTencentSecretKey(String value) =>
+      _storage.write(_tencentSecretKeyKey, value.trim());
+
+  Future<void> deleteTencentSecretKey() =>
+      _storage.delete(_tencentSecretKeyKey);
 }

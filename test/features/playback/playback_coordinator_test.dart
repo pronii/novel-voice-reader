@@ -50,6 +50,26 @@ void main() {
     expect(progress.confirmed, cursor);
     await coordinator.dispose();
   });
+
+  test('splits Tencent playback into at most 150 characters', () async {
+    final provider = FakeSpeechProvider();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource([List.filled(151, '文').join()]),
+      voiceProfile: VoiceProfile.tencent(),
+    );
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    expect(provider.prepared.single.text.runes.length, 150);
+
+    provider.completeCurrent();
+    await pumpEventQueue();
+    expect(provider.prepared.last.text.runes.length, 1);
+    await coordinator.dispose();
+  });
 }
 
 final class FakeParagraphSource implements PlaybackParagraphSource {

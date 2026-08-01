@@ -1,4 +1,4 @@
-enum SpeechProviderType { system, cloud, azure, zhipu }
+enum SpeechProviderType { system, cloud, azure, zhipu, tencent }
 
 final class VoiceProfile {
   static const defaultAzureVoice = 'zh-CN-XiaoxiaoNeural';
@@ -6,6 +6,8 @@ final class VoiceProfile {
   static const zhipuBaseUrl = 'https://open.bigmodel.cn/api/paas/v4';
   static const zhipuModel = 'glm-tts';
   static const zhipuOutputFormat = 'wav';
+  static const tencentBaseUrl = 'https://tts.tencentcloudapi.com';
+  static const defaultTencentVoiceType = 1001;
   static const defaultZhipuVoice = 'tongtong';
   static const zhipuVoices = <String>[
     'tongtong',
@@ -92,6 +94,24 @@ final class VoiceProfile {
     );
   }
 
+  factory VoiceProfile.tencent({
+    int voiceType = defaultTencentVoiceType,
+    double speed = 1,
+  }) {
+    _validateSpeed(speed);
+    if (voiceType <= 0) {
+      throw ArgumentError.value(voiceType, 'voiceType', 'Must be positive.');
+    }
+    return VoiceProfile._(
+      providerType: SpeechProviderType.tencent,
+      baseUrl: tencentBaseUrl,
+      model: '1',
+      voice: voiceType.toString(),
+      speed: speed,
+      outputFormat: 'mp3',
+    );
+  }
+
   const VoiceProfile._({
     required this.providerType,
     this.baseUrl,
@@ -117,6 +137,9 @@ final class VoiceProfile {
     }
     return value.replaceFirst(RegExp(r'/+$'), '');
   }
+
+  int get maxSegmentCharacters =>
+      providerType == SpeechProviderType.tencent ? 150 : 1000;
 
   static void _validateSpeed(double speed) {
     if (speed <= 0) {

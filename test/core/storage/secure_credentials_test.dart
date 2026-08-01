@@ -78,6 +78,29 @@ void main() {
     expect(await credentials.readAzureSubscriptionKey(), 'azure-secret');
     expect(await credentials.readZhipuApiKey(), 'zhipu-secret');
   });
+
+  test('Tencent credentials use separate secure values', () async {
+    final store = FakeSecureKeyValueStore();
+    final credentials = SecureCredentials(store);
+
+    await credentials.writeTencentSecretId('  tencent-id  ');
+    await credentials.writeTencentSecretKey('  tencent-key  ');
+
+    expect(await credentials.readTencentSecretId(), 'tencent-id');
+    expect(await credentials.readTencentSecretKey(), 'tencent-key');
+    expect(store.values.keys, {
+      'tencent_tts_secret_id',
+      'tencent_tts_secret_key',
+    });
+
+    await credentials.deleteTencentSecretId();
+
+    expect(await credentials.readTencentSecretId(), isNull);
+    expect(await credentials.readTencentSecretKey(), 'tencent-key');
+
+    await credentials.deleteTencentSecretKey();
+    expect(await credentials.readTencentSecretKey(), isNull);
+  });
 }
 
 final class FakeSecureKeyValueStore implements SecureKeyValueStore {

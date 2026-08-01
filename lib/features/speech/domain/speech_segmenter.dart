@@ -53,13 +53,15 @@ final class SpeechSegmenter {
     }
 
     for (final sentence in _sentences(text)) {
-      if (sentence.length > maxCharacters) {
+      final sentenceLength = sentence.runes.length;
+      if (sentenceLength > maxCharacters) {
         flushBuffer();
-        for (var start = 0; start < sentence.length; start += maxCharacters) {
-          final end = (start + maxCharacters).clamp(0, sentence.length);
-          chunks.add(sentence.substring(start, end));
+        final codePoints = sentence.runes.toList(growable: false);
+        for (var start = 0; start < codePoints.length; start += maxCharacters) {
+          final end = (start + maxCharacters).clamp(0, codePoints.length);
+          chunks.add(String.fromCharCodes(codePoints.sublist(start, end)));
         }
-      } else if (buffer.length + sentence.length <= maxCharacters) {
+      } else if (buffer.runes.length + sentenceLength <= maxCharacters) {
         buffer += sentence;
       } else {
         flushBuffer();

@@ -39,6 +39,9 @@ final class SpeechProviderFactory {
       SpeechProviderType.zhipu => _cached(
         ZhipuTtsClient(dio: dio, credentials: credentials),
       ),
+      SpeechProviderType.tencent => throw UnsupportedError(
+        'Tencent TTS is not wired yet.',
+      ),
     };
   }
 

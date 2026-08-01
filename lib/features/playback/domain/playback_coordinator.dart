@@ -156,7 +156,7 @@ final class PlaybackCoordinator implements PlaybackController {
     _segments = _segmenter.split(
       paragraphId: paragraph.id,
       text: paragraph.text,
-      maxCharacters: 1000,
+      maxCharacters: _voiceProfile.maxSegmentCharacters,
     );
     _segmentIndex = 0;
     await _prepareAndPlayCurrentSegment();

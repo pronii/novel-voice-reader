@@ -29,6 +29,19 @@ void main() {
     expect(parts.map((part) => part.text).join(), text);
   });
 
+  test('counts Unicode code points without splitting surrogate pairs', () {
+    final text = List.filled(151, '𠮷').join();
+
+    final parts = const SpeechSegmenter().split(
+      paragraphId: 10,
+      text: text,
+      maxCharacters: 150,
+    );
+
+    expect(parts.map((part) => part.text.runes.length), [150, 1]);
+    expect(parts.map((part) => part.text).join(), text);
+  });
+
   test('rejects a non-positive service limit', () {
     expect(
       () => const SpeechSegmenter().split(
