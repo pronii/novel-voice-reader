@@ -153,6 +153,72 @@ void main() {
     expect(selectedChapterIds, [2]);
   });
 
+  testWidgets('locks at 48 pixels and unlocks after the chapter changes', (
+    tester,
+  ) async {
+    final selectedChapterIds = <int>[];
+    var currentChapterId = 1;
+    late StateSetter setReaderState;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            setReaderState = setState;
+            return ReaderPage(
+              bookId: 1,
+              bookTitle: '测试书',
+              chapterTitle: '第$currentChapterId章',
+              chapters: const [
+                ReaderChapter(id: 1, index: 0, title: '第一章'),
+                ReaderChapter(id: 2, index: 1, title: '第二章'),
+                ReaderChapter(id: 3, index: 2, title: '第三章'),
+              ],
+              currentChapterId: currentChapterId,
+              paragraphs: longParagraphs,
+              onChapterSelected: selectedChapterIds.add,
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    void dispatchBottomOverscroll(double amount) {
+      final listContext = tester.element(find.byType(ScrollablePositionedList));
+      OverscrollNotification(
+        metrics: FixedScrollMetrics(
+          minScrollExtent: 0,
+          maxScrollExtent: 100,
+          pixels: 100,
+          viewportDimension: 100,
+          axisDirection: AxisDirection.down,
+          devicePixelRatio: 1,
+        ),
+        context: listContext,
+        overscroll: amount,
+      ).dispatch(listContext);
+    }
+
+    dispatchBottomOverscroll(47);
+    expect(selectedChapterIds, isEmpty);
+
+    dispatchBottomOverscroll(1);
+    expect(selectedChapterIds, [2]);
+
+    dispatchBottomOverscroll(48);
+    expect(selectedChapterIds, [2]);
+
+    setReaderState(() => currentChapterId = 2);
+    await tester.pump();
+
+    dispatchBottomOverscroll(47);
+    expect(selectedChapterIds, [2]);
+
+    dispatchBottomOverscroll(1);
+    expect(selectedChapterIds, [2, 3]);
+  });
+
   testWidgets('does not continue past the last chapter', (tester) async {
     final selectedChapterIds = <int>[];
 
