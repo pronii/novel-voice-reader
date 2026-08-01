@@ -205,6 +205,42 @@ void main() {
     expect(reported, isEmpty);
   });
 
+  testWidgets('does not replace a tap after an unmoved boundary overscroll', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final reported = <int>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderPage(
+          bookId: 1,
+          bookTitle: '测试书',
+          chapterTitle: '第一章',
+          currentChapterId: 10,
+          paragraphs: longParagraphs,
+          onReadingPositionChanged: (paragraph) => reported.add(paragraph.id),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey<String>('paragraph-11')));
+    expect(reported, [11]);
+
+    await tester.drag(
+      find.byType(ScrollablePositionedList),
+      const Offset(0, 200),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(reported, [11]);
+  });
+
   testWidgets('reports a tapped paragraph immediately', (tester) async {
     tester.view.physicalSize = const Size(320, 480);
     tester.view.devicePixelRatio = 1;

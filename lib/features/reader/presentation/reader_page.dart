@@ -66,7 +66,7 @@ final class _ReaderPageState extends State<ReaderPage> {
   Timer? _progressDebounce;
   int? _activeParagraphId;
   int? _lastReportedParagraphId;
-  bool _scrollInProgress = false;
+  bool _scrollMoved = false;
   int _scrollGeneration = 0;
   double _fontSize = 19;
 
@@ -83,7 +83,7 @@ final class _ReaderPageState extends State<ReaderPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentChapterId != widget.currentChapterId) {
       _invalidatePendingProgressReport();
-      _scrollInProgress = false;
+      _scrollMoved = false;
       _activeParagraphId =
           widget.initialActiveParagraphId ?? widget.paragraphs.firstOrNull?.id;
       _lastReportedParagraphId = _activeParagraphId;
@@ -224,22 +224,25 @@ final class _ReaderPageState extends State<ReaderPage> {
 
   bool _onScrollNotification(ScrollNotification notification) {
     if (notification is ScrollStartNotification) {
-      _scrollInProgress = true;
+      _scrollMoved = false;
       _invalidatePendingProgressReport();
     } else if (notification is ScrollUpdateNotification) {
       final scrollDelta = notification.scrollDelta;
       if (scrollDelta != null && scrollDelta != 0) {
-        _scrollInProgress = true;
+        _scrollMoved = true;
         _invalidatePendingProgressReport();
       }
-    } else if (notification is ScrollEndNotification && _scrollInProgress) {
-      _scrollInProgress = false;
-      final generation = ++_scrollGeneration;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && generation == _scrollGeneration) {
-          _scheduleVisiblePositionReport();
-        }
-      });
+    } else if (notification is ScrollEndNotification) {
+      final scrollMoved = _scrollMoved;
+      _scrollMoved = false;
+      if (scrollMoved) {
+        final generation = ++_scrollGeneration;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && generation == _scrollGeneration) {
+            _scheduleVisiblePositionReport();
+          }
+        });
+      }
     }
     return false;
   }
