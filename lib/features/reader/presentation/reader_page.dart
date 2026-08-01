@@ -37,6 +37,7 @@ final class ReaderPage extends StatefulWidget {
     this.chapters = const [],
     this.currentChapterId,
     this.initialActiveParagraphId,
+    this.playbackStarting = false,
     this.onBackToLibrary,
     this.onChapterSelected,
     this.onReadingPositionChanged,
@@ -51,6 +52,7 @@ final class ReaderPage extends StatefulWidget {
   final int? currentChapterId;
   final List<ReaderParagraph> paragraphs;
   final int? initialActiveParagraphId;
+  final bool playbackStarting;
   final VoidCallback? onBackToLibrary;
   final ValueChanged<int>? onChapterSelected;
   final ValueChanged<ReaderParagraph>? onReadingPositionChanged;
@@ -128,7 +130,7 @@ final class _ReaderPageState extends State<ReaderPage> {
           ),
           IconButton(
             tooltip: '播放',
-            onPressed: _playActive,
+            onPressed: widget.playbackStarting ? null : _playActive,
             icon: const Icon(Icons.play_arrow),
           ),
         ],
@@ -199,7 +201,9 @@ final class _ReaderPageState extends State<ReaderPage> {
                         Align(
                           alignment: Alignment.centerRight,
                           child: TextButton.icon(
-                            onPressed: () => _play(paragraph),
+                            onPressed: widget.playbackStarting
+                                ? null
+                                : () => _play(paragraph),
                             icon: const Icon(Icons.play_arrow),
                             label: const Text('从这里朗读'),
                           ),

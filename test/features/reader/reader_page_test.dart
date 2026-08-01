@@ -37,6 +37,33 @@ const longParagraphs = [
 ];
 
 void main() {
+  testWidgets('disables playback commands while playback is starting', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: ReaderPage(
+          bookId: 1,
+          bookTitle: '测试书',
+          chapterTitle: '第一章',
+          playbackStarting: true,
+          paragraphs: [ReaderParagraph(id: 10, index: 0, text: '第一段。')],
+        ),
+      ),
+    );
+
+    final playButton = find.byWidgetPredicate(
+      (widget) => widget is IconButton && widget.tooltip == '播放',
+    );
+    expect(tester.widget<IconButton>(playButton).onPressed, isNull);
+    expect(
+      tester
+          .widget<TextButton>(find.widgetWithText(TextButton, '从这里朗读'))
+          .onPressed,
+      isNull,
+    );
+  });
+
   testWidgets('selects one paragraph and exposes read-from-here', (
     tester,
   ) async {

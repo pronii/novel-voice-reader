@@ -167,6 +167,7 @@ final class _ReaderRoutePage extends ConsumerStatefulWidget {
 final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
   int? _selectedChapterId;
   PlaybackCoordinator? _coordinator;
+  bool _playbackStarting = false;
 
   @override
   Widget build(BuildContext context) {
@@ -186,6 +187,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         currentChapterId: value.chapter?.id,
         paragraphs: value.paragraphs,
         initialActiveParagraphId: value.activeParagraphId,
+        playbackStarting: _playbackStarting,
         onBackToLibrary: _backToLibrary,
         onChapterSelected: (chapterId) => _selectChapter(value, chapterId),
         onReadingPositionChanged: (paragraph) {
@@ -202,13 +204,17 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
   }
 
   Future<void> _playFrom(ReaderPageData data, ReaderParagraph paragraph) async {
-    final database = ref.read(databaseProvider);
-    final runtime = ref.read(playbackRuntimeProvider);
-    final chapter = data.chapter;
-    if (database == null || chapter == null) {
+    if (_playbackStarting) {
       return;
     }
+    setState(() => _playbackStarting = true);
     try {
+      final database = ref.read(databaseProvider);
+      final runtime = ref.read(playbackRuntimeProvider);
+      final chapter = data.chapter;
+      if (database == null || chapter == null) {
+        return;
+      }
       final profile = await loadActiveVoiceProfile(database);
       final supportDirectory = await getApplicationSupportDirectory();
       final credentials = SecureCredentials(
@@ -252,6 +258,10 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     } catch (error) {
       if (error is! AppFailure) {
         _showSpeechFailure(const AppFailure('朗读启动失败'));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _playbackStarting = false);
       }
     }
   }
