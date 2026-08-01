@@ -18,7 +18,7 @@ void main() {
     final dio = Dio()..httpClientAdapter = adapter;
     final client = ZhipuTtsClient(
       dio: dio,
-      credentials: SecureCredentials(FakeSecureStore('zhipu-secret')),
+      credentials: SecureCredentials(FakeSecureStore('  zhipu-secret  ')),
     );
 
     final bytes = await client.synthesize(testSegment, testProfile);

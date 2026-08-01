@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/app/app.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 void main() {
   testWidgets('opens a book and exposes reader playback controls', (
@@ -36,14 +37,86 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
   });
+
+  testWidgets('reopens the newly selected chapter after a pending scroll', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    final bookId = await database.createBookWithChapter(
+      title: '切章测试书',
+      chapterTitle: '第一章',
+      paragraphs: List<String>.generate(
+        10,
+        (index) => '第一章第${index + 1}段。这是一段足够长的正文，用于产生可保存的滚动位置。',
+      ),
+    );
+    final secondChapterId = await database
+        .into(database.chapters)
+        .insert(
+          ChaptersCompanion.insert(
+            bookId: bookId,
+            chapterIndex: 1,
+            title: '第二章',
+          ),
+        );
+    final secondParagraphId = await database
+        .into(database.paragraphs)
+        .insert(
+          ParagraphsCompanion.insert(
+            chapterId: secondChapterId,
+            paragraphIndex: 0,
+            content: '第二章第一段。',
+          ),
+        );
+
+    await tester.pumpWidget(NovelVoiceReaderApp(database: database));
+    await _pumpUntilFound(tester, find.text('切章测试书'));
+    await tester.tap(find.text('切章测试书'));
+    await _pumpUntilFound(tester, find.byTooltip('章节目录'));
+
+    await tester.drag(
+      find.byType(ScrollablePositionedList),
+      const Offset(0, -300),
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('章节目录'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('第二章'));
+    await _pumpUntilFound(
+      tester,
+      find.byKey(ValueKey<String>('active-paragraph-$secondParagraphId')),
+    );
+
+    await tester.tap(find.byTooltip('返回书架'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('切章测试书'));
+    await _pumpUntilFound(
+      tester,
+      find.byKey(ValueKey<String>('active-paragraph-$secondParagraphId')),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+  });
 }
 
 Future<void> _pumpUntilFound(WidgetTester tester, Finder finder) async {
-  for (var attempt = 0; attempt < 20; attempt++) {
+  for (var attempt = 0; attempt < 60; attempt++) {
     await tester.pump(const Duration(milliseconds: 50));
     if (finder.evaluate().isNotEmpty) {
       return;
     }
   }
-  fail('Timed out waiting for the expected widget.');
+  final visibleText = tester
+      .widgetList<Text>(find.byType(Text))
+      .map((widget) => widget.data)
+      .whereType<String>()
+      .toList();
+  fail('Timed out waiting for the expected widget. Visible text: $visibleText');
 }

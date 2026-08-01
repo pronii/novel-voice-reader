@@ -65,6 +65,19 @@ void main() {
     expect(await credentials.readApiKey(), 'compatible-secret');
     expect(await credentials.readAzureSubscriptionKey(), 'azure-secret');
   });
+
+  test('normalizes cloud credentials at the secure storage boundary', () async {
+    final store = FakeSecureKeyValueStore();
+    final credentials = SecureCredentials(store);
+
+    await credentials.writeApiKey('  compatible-secret  ');
+    await credentials.writeAzureSubscriptionKey('  azure-secret  ');
+    await credentials.writeZhipuApiKey('  zhipu-secret  ');
+
+    expect(await credentials.readApiKey(), 'compatible-secret');
+    expect(await credentials.readAzureSubscriptionKey(), 'azure-secret');
+    expect(await credentials.readZhipuApiKey(), 'zhipu-secret');
+  });
 }
 
 final class FakeSecureKeyValueStore implements SecureKeyValueStore {

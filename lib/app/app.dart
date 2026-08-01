@@ -31,6 +31,10 @@ final class _NovelVoiceReaderAppState extends State<NovelVoiceReaderApp> {
   @override
   void dispose() {
     _router.dispose();
+    final playbackRuntime = widget.playbackRuntime;
+    if (playbackRuntime != null) {
+      unawaited(playbackRuntime.dispose());
+    }
     final database = widget.database;
     if (database != null) {
       unawaited(database.close());

@@ -37,8 +37,8 @@ final class ZhipuTtsClient implements CloudSpeechSynthesizer {
     if (profile.providerType != SpeechProviderType.zhipu) {
       throw ArgumentError.value(profile.providerType, 'profile');
     }
-    final apiKey = await credentials.readZhipuApiKey();
-    if (apiKey == null || apiKey.trim().isEmpty) {
+    final apiKey = (await credentials.readZhipuApiKey())?.trim();
+    if (apiKey == null || apiKey.isEmpty) {
       throw const AppFailure('尚未配置智谱 API Key');
     }
 

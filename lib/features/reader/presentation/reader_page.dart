@@ -66,6 +66,7 @@ final class ReaderPage extends StatefulWidget {
 final class _ReaderPageState extends State<ReaderPage> {
   final ItemPositionsListener _itemPositions = ItemPositionsListener.create();
   Timer? _progressDebounce;
+  ReaderParagraph? _pendingProgressParagraph;
   int? _activeParagraphId;
   int? _lastReportedParagraphId;
   bool _scrollMoved = false;
@@ -94,7 +95,15 @@ final class _ReaderPageState extends State<ReaderPage> {
 
   @override
   void dispose() {
+    final pendingParagraph = _pendingProgressParagraph;
     _progressDebounce?.cancel();
+    _progressDebounce = null;
+    _pendingProgressParagraph = null;
+    if (pendingParagraph != null &&
+        pendingParagraph.id != _lastReportedParagraphId) {
+      _lastReportedParagraphId = pendingParagraph.id;
+      widget.onReadingPositionChanged?.call(pendingParagraph);
+    }
     super.dispose();
   }
 
@@ -271,8 +280,12 @@ final class _ReaderPageState extends State<ReaderPage> {
     if (paragraph.id == _lastReportedParagraphId) {
       return;
     }
-    _progressDebounce?.cancel();
+    _pendingProgressParagraph = paragraph;
     _progressDebounce = Timer(const Duration(milliseconds: 500), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _activeParagraphId = paragraph.id);
       _reportReadingPosition(paragraph);
     });
   }
@@ -292,6 +305,7 @@ final class _ReaderPageState extends State<ReaderPage> {
     _scrollGeneration += 1;
     _progressDebounce?.cancel();
     _progressDebounce = null;
+    _pendingProgressParagraph = null;
   }
 
   void _playActive() {
@@ -342,7 +356,12 @@ final class _ReaderPageState extends State<ReaderPage> {
                       ),
                       trailing: selected ? const Icon(Icons.check) : null,
                       selected: selected,
-                      onTap: () => Navigator.of(context).pop(chapter.id),
+                      onTap: () {
+                        if (!selected) {
+                          _invalidatePendingProgressReport();
+                        }
+                        Navigator.of(context).pop(chapter.id);
+                      },
                     );
                   },
                 ),

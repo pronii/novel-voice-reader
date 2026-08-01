@@ -93,11 +93,8 @@ final libraryBooksProvider = StreamProvider<List<BookRecord>>((ref) {
   return query.watch();
 });
 
-final readerPageDataProvider =
-    FutureProvider.family<ReaderPageData, ReaderPageRequest>((
-      ref,
-      request,
-    ) async {
+final readerPageDataProvider = FutureProvider.autoDispose
+    .family<ReaderPageData, ReaderPageRequest>((ref, request) async {
       final bookId = request.bookId;
       final database = ref.watch(databaseProvider);
       if (database == null) {

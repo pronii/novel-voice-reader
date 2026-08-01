@@ -36,7 +36,8 @@ final class SecureCredentials {
 
   Future<String?> readApiKey() => _storage.read(_apiKeyKey);
 
-  Future<void> writeApiKey(String value) => _storage.write(_apiKeyKey, value);
+  Future<void> writeApiKey(String value) =>
+      _storage.write(_apiKeyKey, value.trim());
 
   Future<void> deleteApiKey() => _storage.delete(_apiKeyKey);
 
@@ -44,7 +45,7 @@ final class SecureCredentials {
       _storage.read(_azureSubscriptionKeyKey);
 
   Future<void> writeAzureSubscriptionKey(String value) =>
-      _storage.write(_azureSubscriptionKeyKey, value);
+      _storage.write(_azureSubscriptionKeyKey, value.trim());
 
   Future<void> deleteAzureSubscriptionKey() =>
       _storage.delete(_azureSubscriptionKeyKey);
@@ -52,7 +53,7 @@ final class SecureCredentials {
   Future<String?> readZhipuApiKey() => _storage.read(_zhipuApiKeyKey);
 
   Future<void> writeZhipuApiKey(String value) =>
-      _storage.write(_zhipuApiKeyKey, value);
+      _storage.write(_zhipuApiKeyKey, value.trim());
 
   Future<void> deleteZhipuApiKey() => _storage.delete(_zhipuApiKeyKey);
 }

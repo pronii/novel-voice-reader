@@ -114,6 +114,44 @@ void main() {
     expect(savedKey, 'zhipu-secret');
   });
 
+  testWidgets('trims a Zhipu API key before saving', (tester) async {
+    String? savedKey;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onSave: (profile, apiKey) async => savedKey = apiKey,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('智谱'));
+    await tester.pump();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'API Key'),
+      '  zhipu-secret  ',
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pump();
+
+    expect(savedKey, 'zhipu-secret');
+  });
+
+  testWidgets('disables connection testing when no callback is available', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: VoiceSettingsPage()));
+
+    await tester.tap(find.text('智谱'));
+    await tester.pump();
+
+    expect(
+      tester
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '测试连接'))
+          .onPressed,
+      isNull,
+    );
+  });
+
   testWidgets('tests the entered Zhipu key without saving it', (tester) async {
     var tests = 0;
     var saves = 0;
@@ -235,6 +273,44 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('智谱语音服务认证失败'), findsOneWidget);
+  });
+
+  testWidgets('recovers the connection button after a sanitized timeout', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onTestConnection: (profile, apiKey) async {
+            throw const AppFailure('智谱语音服务连接超时');
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('智谱'));
+    await tester.pump();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'API Key'),
+      'timeout-secret',
+    );
+    await tester.tap(find.text('测试连接'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('智谱语音服务连接超时'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(SnackBar),
+        matching: find.textContaining('timeout-secret'),
+      ),
+      findsNothing,
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '测试连接'))
+          .onPressed,
+      isNotNull,
+    );
   });
 
   testWidgets('hides unexpected Zhipu connection failure details', (

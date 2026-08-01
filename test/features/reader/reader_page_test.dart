@@ -165,6 +165,139 @@ void main() {
     },
   );
 
+  testWidgets('top play follows the first visible paragraph after scrolling', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    ReaderParagraph? reported;
+    ReaderParagraph? played;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderPage(
+          bookId: 1,
+          bookTitle: '测试书',
+          chapterTitle: '第一章',
+          currentChapterId: 10,
+          initialActiveParagraphId: 15,
+          paragraphs: longParagraphs,
+          onReadingPositionChanged: (paragraph) => reported = paragraph,
+          onPlayFrom: (paragraph) => played = paragraph,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byType(ScrollablePositionedList),
+      const Offset(0, -300),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(reported?.id, isNot(15));
+    final scrolledParagraphId = reported?.id;
+
+    await tester.tap(find.byTooltip('播放'));
+
+    expect(played?.id, scrolledParagraphId);
+  });
+
+  testWidgets(
+    'flushes a settled visible paragraph when disposed during debounce',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 480);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final reported = <int>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderPage(
+            bookId: 1,
+            bookTitle: '测试书',
+            chapterTitle: '第一章',
+            currentChapterId: 10,
+            initialActiveParagraphId: 15,
+            paragraphs: longParagraphs,
+            onReadingPositionChanged: (paragraph) => reported.add(paragraph.id),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.drag(
+        find.byType(ScrollablePositionedList),
+        const Offset(0, -300),
+      );
+      await tester.pump();
+      expect(reported, isEmpty);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      expect(reported, isNotEmpty);
+      expect(reported.last, isNot(15));
+    },
+  );
+
+  testWidgets('does not flush an old paragraph when switching chapters', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final reported = <int>[];
+    int? selectedChapterId;
+    var showReader = true;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) => showReader
+              ? ReaderPage(
+                  bookId: 1,
+                  bookTitle: '测试书',
+                  chapterTitle: '第一章',
+                  chapters: const [
+                    ReaderChapter(id: 10, index: 0, title: '第一章'),
+                    ReaderChapter(id: 20, index: 1, title: '第二章'),
+                  ],
+                  currentChapterId: 10,
+                  initialActiveParagraphId: 15,
+                  paragraphs: longParagraphs,
+                  onReadingPositionChanged: (paragraph) =>
+                      reported.add(paragraph.id),
+                  onChapterSelected: (chapterId) {
+                    selectedChapterId = chapterId;
+                    setState(() => showReader = false);
+                  },
+                )
+              : const SizedBox.shrink(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byType(ScrollablePositionedList),
+      const Offset(0, -300),
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('章节目录'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('第二章'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(selectedChapterId, 20);
+    expect(reported, isEmpty);
+  });
+
   testWidgets('does not report a stale paragraph after scrolling back', (
     tester,
   ) async {

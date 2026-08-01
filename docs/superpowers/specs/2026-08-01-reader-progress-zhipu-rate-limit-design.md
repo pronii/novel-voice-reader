@@ -4,21 +4,21 @@
 
 Fix three reader regressions: Zhipu GLM-TTS playback can fail with HTTP 429,
 reopening a book does not visibly return to the last reading position, and the
-fixed chapter bar consumes space below the正文. The change keeps the existing
+fixed chapter bar consumes space below the 正文. The change keeps the existing
 book, chapter, paragraph, and playback-progress schema.
 
 ## Reader Layout
 
-The fixed bottom navigation bar will be removed completely. The正文 list uses
+The fixed bottom navigation bar will be removed completely. The 正文 list uses
 all space below the app bar, including the area previously occupied by the
 chapter title and previous/next buttons. Chapter switching remains available
 through the chapter-directory action in the app bar. The chapter heading at
-the start of the scrollable正文 remains because it is part of the reading
+the start of the scrollable 正文 remains because it is part of the reading
 content rather than a fixed footer.
 
 ## Reading Progress
 
-Progress remains paragraph based. The first visible正文 paragraph is considered
+Progress remains paragraph based. The first visible 正文 paragraph is considered
 the current reading position. A position change is persisted only after
 scrolling settles and only when the paragraph differs from the last persisted
 value, preventing database writes on every scroll frame.
@@ -81,7 +81,7 @@ lifecycle before touching UI state.
 ## Verification
 
 Widget tests will verify that the fixed bottom chapter title and navigation
-buttons are absent, the正文 occupies the available body, a saved paragraph is
+buttons are absent, the 正文 occupies the available body, a saved paragraph is
 used as the initial scroll position, and scrolling/tapping reports the expected
 paragraph. Router or repository tests will verify that reported positions are
 persisted and restored.

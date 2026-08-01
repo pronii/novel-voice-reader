@@ -1,4 +1,5 @@
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 
@@ -7,6 +8,12 @@ final class AttachablePlaybackController implements PlaybackController {
 
   void attach(PlaybackController controller) {
     _delegate = controller;
+  }
+
+  void detach(PlaybackController controller) {
+    if (identical(_delegate, controller)) {
+      _delegate = null;
+    }
   }
 
   @override
@@ -29,11 +36,139 @@ final class AttachablePlaybackController implements PlaybackController {
   Future<void> resume() async => _delegate?.resume();
 }
 
+final class PlaybackReplacementToken {
+  const PlaybackReplacementToken._(this.generation);
+
+  final int generation;
+}
+
 final class PlaybackRuntime {
-  const PlaybackRuntime({required this.controller, required this.handler});
+  PlaybackRuntime({
+    required this.controller,
+    required this.handler,
+    void Function(Object error, StackTrace stackTrace)?
+    onCoordinatorDisposeError,
+  }) : _onCoordinatorDisposeError =
+           onCoordinatorDisposeError ?? _reportCoordinatorDisposeError;
 
   final AttachablePlaybackController controller;
   final NovelAudioHandler handler;
+  final void Function(Object error, StackTrace stackTrace)
+  _onCoordinatorDisposeError;
+  PlaybackCoordinator? _coordinator;
+  Future<void> _replacement = Future<void>.value();
+  int _replacementGeneration = 0;
+
+  PlaybackReplacementToken beginReplacement() {
+    return PlaybackReplacementToken._(++_replacementGeneration);
+  }
+
+  void cancelReplacement(PlaybackReplacementToken token) {
+    if (_isCurrent(token)) {
+      _replacementGeneration++;
+    }
+  }
+
+  Future<void> replace(PlaybackCoordinator next) {
+    return _enqueue(() => _replaceNow(next));
+  }
+
+  Future<bool> replaceAndPlayFrom(
+    PlaybackCoordinator next,
+    PlaybackCursor cursor, {
+    required PlaybackReplacementToken token,
+  }) {
+    return _enqueue(() async {
+      if (!_isCurrent(token)) {
+        await _dispose(next);
+        return false;
+      }
+      await _replaceNow(next);
+      if (!_isCurrent(token)) {
+        await _removeCurrent(next);
+        return false;
+      }
+      try {
+        await next.playFrom(cursor);
+      } catch (_) {
+        await _removeCurrent(next);
+        rethrow;
+      }
+      if (!_isCurrent(token)) {
+        await _removeCurrent(next);
+        return false;
+      }
+      return true;
+    });
+  }
+
+  Future<void> dispose() {
+    return _enqueue(_disposeCurrent);
+  }
+
+  Future<T> _enqueue<T>(Future<T> Function() action) {
+    final operation = _replacement.then((_) => action());
+    _replacement = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
+  }
+
+  bool _isCurrent(PlaybackReplacementToken token) {
+    return token.generation == _replacementGeneration;
+  }
+
+  Future<void> _replaceNow(PlaybackCoordinator next) async {
+    final previous = _coordinator;
+    if (identical(previous, next)) {
+      return;
+    }
+    _coordinator = next;
+    controller.attach(next);
+    if (previous != null) {
+      await _dispose(previous);
+    }
+  }
+
+  Future<void> _disposeCurrent() async {
+    final current = _coordinator;
+    _coordinator = null;
+    if (current == null) {
+      return;
+    }
+    controller.detach(current);
+    await _dispose(current);
+  }
+
+  Future<void> _removeCurrent(PlaybackCoordinator coordinator) async {
+    if (identical(_coordinator, coordinator)) {
+      _coordinator = null;
+      controller.detach(coordinator);
+    }
+    await _dispose(coordinator);
+  }
+
+  Future<void> _dispose(PlaybackCoordinator coordinator) async {
+    try {
+      await coordinator.dispose();
+    } catch (error, stackTrace) {
+      _onCoordinatorDisposeError(error, stackTrace);
+    }
+  }
+
+  static void _reportCoordinatorDisposeError(
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        context: ErrorDescription('while disposing a playback coordinator'),
+      ),
+    );
+  }
 }
 
 final class NovelAudioHandler extends BaseAudioHandler {
@@ -60,6 +195,9 @@ final class NovelAudioHandler extends BaseAudioHandler {
   @override
   Future<void> play() async {
     await _controller.resume();
+    if (_controller.cursor == null) {
+      return;
+    }
     playbackState.add(_state(playing: true));
   }
 

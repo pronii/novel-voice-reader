@@ -179,7 +179,12 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
-              onPressed: _saving || _testingConnection ? null : _testConnection,
+              onPressed:
+                  widget.onTestConnection == null ||
+                      _saving ||
+                      _testingConnection
+                  ? null
+                  : _testConnection,
               icon: const Icon(Icons.wifi_tethering),
               label: Text(_testingConnection ? '测试中' : '测试连接'),
             ),
@@ -214,9 +219,9 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     try {
       await widget.onSave?.call(profile, switch (_provider) {
         SpeechProviderType.system => null,
-        SpeechProviderType.cloud => _apiKey.text,
-        SpeechProviderType.azure => _azureSubscriptionKey.text,
-        SpeechProviderType.zhipu => _zhipuApiKey.text,
+        SpeechProviderType.cloud => _apiKey.text.trim(),
+        SpeechProviderType.azure => _azureSubscriptionKey.text.trim(),
+        SpeechProviderType.zhipu => _zhipuApiKey.text.trim(),
       });
       _showMessage('语音设置已保存');
     } catch (_) {

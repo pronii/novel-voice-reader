@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
+import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
+import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
+import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -38,6 +43,179 @@ void main() {
       containsAll([MediaControl.skipToPrevious, MediaControl.skipToNext]),
     );
   });
+
+  test('runtime serializes global coordinator replacement', () async {
+    final firstProvider = RuntimeSpeechProvider(
+      disposeCompleter: Completer<void>(),
+    );
+    final secondProvider = RuntimeSpeechProvider();
+    final thirdProvider = RuntimeSpeechProvider();
+    final controller = AttachablePlaybackController();
+    final runtime = PlaybackRuntime(
+      controller: controller,
+      handler: NovelAudioHandler(controller),
+    );
+    final first = createCoordinator(firstProvider);
+    final second = createCoordinator(secondProvider);
+    final third = createCoordinator(thirdProvider);
+    await runtime.replace(first);
+
+    final replaceSecond = runtime.replace(second);
+    await pumpEventQueue();
+    expect(firstProvider.disposeCalls, 1);
+
+    final replaceThird = runtime.replace(third);
+    await pumpEventQueue();
+    expect(secondProvider.disposeCalls, 0);
+
+    firstProvider.disposeCompleter!.complete();
+    await replaceSecond;
+    await replaceThird;
+    await controller.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+
+    expect(secondProvider.disposeCalls, 1);
+    expect(thirdProvider.prepared, hasLength(1));
+    await runtime.dispose();
+  });
+
+  test('runtime keeps the new delegate when previous disposal fails', () async {
+    final errors = <Object>[];
+    final firstProvider = RuntimeSpeechProvider(
+      disposeError: StateError('dispose failed'),
+    );
+    final secondProvider = RuntimeSpeechProvider();
+    final controller = AttachablePlaybackController();
+    final runtime = PlaybackRuntime(
+      controller: controller,
+      handler: NovelAudioHandler(controller),
+      onCoordinatorDisposeError: (error, _) => errors.add(error),
+    );
+    await runtime.replace(createCoordinator(firstProvider));
+
+    await runtime.replace(createCoordinator(secondProvider));
+    await controller.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+
+    expect(errors, hasLength(1));
+    expect(secondProvider.prepared, hasLength(1));
+    await runtime.dispose();
+  });
+
+  test(
+    'runtime disposes previous playback before starting its replacement',
+    () async {
+      final firstProvider = RuntimeSpeechProvider(
+        disposeCompleter: Completer<void>(),
+      );
+      final secondProvider = RuntimeSpeechProvider();
+      final controller = AttachablePlaybackController();
+      final runtime = PlaybackRuntime(
+        controller: controller,
+        handler: NovelAudioHandler(controller),
+      );
+      const cursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+      await runtime.replaceAndPlayFrom(
+        createCoordinator(firstProvider),
+        cursor,
+        token: runtime.beginReplacement(),
+      );
+
+      final replacement = runtime.replaceAndPlayFrom(
+        createCoordinator(secondProvider),
+        cursor,
+        token: runtime.beginReplacement(),
+      );
+      await pumpEventQueue();
+
+      expect(firstProvider.disposeCalls, 1);
+      expect(secondProvider.prepared, isEmpty);
+
+      firstProvider.disposeCompleter!.complete();
+      await replacement;
+
+      expect(secondProvider.prepared, hasLength(1));
+      await runtime.dispose();
+    },
+  );
+
+  test('failed playback startup does not block a later replacement', () async {
+    final failedProvider = RuntimeSpeechProvider(
+      prepareError: StateError('prepare failed'),
+    );
+    final nextProvider = RuntimeSpeechProvider();
+    final controller = AttachablePlaybackController();
+    final runtime = PlaybackRuntime(
+      controller: controller,
+      handler: NovelAudioHandler(controller),
+    );
+    const cursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+
+    await expectLater(
+      runtime.replaceAndPlayFrom(
+        createCoordinator(failedProvider),
+        cursor,
+        token: runtime.beginReplacement(),
+      ),
+      throwsStateError,
+    );
+
+    expect(failedProvider.disposeCalls, 1);
+    await runtime.handler.play();
+    expect(runtime.handler.playbackState.value.playing, isFalse);
+
+    await runtime.replaceAndPlayFrom(
+      createCoordinator(nextProvider),
+      cursor,
+      token: runtime.beginReplacement(),
+    );
+
+    expect(nextProvider.prepared, hasLength(1));
+    await runtime.dispose();
+  });
+
+  test('a stale startup cannot replace the latest playback request', () async {
+    final staleProvider = RuntimeSpeechProvider();
+    final latestProvider = RuntimeSpeechProvider();
+    final controller = AttachablePlaybackController();
+    final runtime = PlaybackRuntime(
+      controller: controller,
+      handler: NovelAudioHandler(controller),
+    );
+    const cursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+    final staleToken = runtime.beginReplacement();
+    final latestToken = runtime.beginReplacement();
+
+    final latestStarted = await runtime.replaceAndPlayFrom(
+      createCoordinator(latestProvider),
+      cursor,
+      token: latestToken,
+    );
+    final staleStarted = await runtime.replaceAndPlayFrom(
+      createCoordinator(staleProvider),
+      cursor,
+      token: staleToken,
+    );
+
+    expect(latestStarted, isTrue);
+    expect(staleStarted, isFalse);
+    expect(staleProvider.disposeCalls, 1);
+    expect(staleProvider.prepared, isEmpty);
+    await controller.playFrom(cursor);
+    expect(latestProvider.prepared, hasLength(2));
+    await runtime.dispose();
+  });
+}
+
+PlaybackCoordinator createCoordinator(RuntimeSpeechProvider provider) {
+  return PlaybackCoordinator(
+    provider: provider,
+    progress: RuntimeProgressRepository(),
+    paragraphs: RuntimeParagraphSource(),
+    voiceProfile: VoiceProfile.system(),
+  );
 }
 
 final class FakePlaybackController implements PlaybackController {
@@ -84,4 +262,71 @@ final class FakePlaybackController implements PlaybackController {
 
   @override
   Future<void> resume() async => resumeCalls++;
+}
+
+final class RuntimeParagraphSource implements PlaybackParagraphSource {
+  @override
+  Future<PlaybackParagraph?> at(PlaybackCursor cursor) async {
+    return PlaybackParagraph(id: 1, cursor: cursor, text: '第一段');
+  }
+
+  @override
+  Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor) async => null;
+}
+
+final class RuntimeProgressRepository implements PlaybackProgressRepository {
+  @override
+  Future<void> confirm(PlaybackCursor cursor) async {}
+}
+
+final class RuntimeSpeechProvider
+    implements SpeechProvider, DisposableSpeechProvider {
+  RuntimeSpeechProvider({
+    this.disposeCompleter,
+    this.disposeError,
+    this.prepareError,
+  });
+
+  final StreamController<SpeechEvent> _events =
+      StreamController<SpeechEvent>.broadcast();
+  final Completer<void>? disposeCompleter;
+  final Object? disposeError;
+  final Object? prepareError;
+  final List<SpeechSegment> prepared = [];
+  int disposeCalls = 0;
+
+  @override
+  Stream<SpeechEvent> get events => _events.stream;
+
+  @override
+  Future<void> dispose() async {
+    disposeCalls++;
+    await disposeCompleter?.future;
+    final error = disposeError;
+    if (error != null) {
+      throw error;
+    }
+    await _events.close();
+  }
+
+  @override
+  Future<void> pause() async {}
+
+  @override
+  Future<void> play() async {}
+
+  @override
+  Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {
+    final error = prepareError;
+    if (error != null) {
+      throw error;
+    }
+    prepared.add(segment);
+  }
+
+  @override
+  Future<void> resume() async {}
+
+  @override
+  Future<void> stop() async {}
 }

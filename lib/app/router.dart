@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +10,7 @@ import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:novel_voice_reader/app/providers.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
+import 'package:novel_voice_reader/core/network/speech_http_client.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/downloads/domain/download_policy.dart';
@@ -19,6 +19,7 @@ import 'package:novel_voice_reader/features/library/data/book_import_repository.
 import 'package:novel_voice_reader/features/library/data/epub_book_parser.dart';
 import 'package:novel_voice_reader/features/library/data/txt_book_parser.dart';
 import 'package:novel_voice_reader/features/library/presentation/library_page.dart';
+import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/playback/presentation/player_page.dart';
 import 'package:novel_voice_reader/features/reader/data/reading_progress_repository.dart';
@@ -166,8 +167,19 @@ final class _ReaderRoutePage extends ConsumerStatefulWidget {
 
 final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
   int? _selectedChapterId;
-  PlaybackCoordinator? _coordinator;
+  PlaybackRuntime? _pendingPlaybackRuntime;
+  PlaybackReplacementToken? _pendingPlaybackReplacement;
   bool _playbackStarting = false;
+
+  @override
+  void dispose() {
+    final pendingReplacement = _pendingPlaybackReplacement;
+    final runtime = _pendingPlaybackRuntime;
+    if (pendingReplacement != null && runtime != null) {
+      runtime.cancelReplacement(pendingReplacement);
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -212,16 +224,19 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
       final database = ref.read(databaseProvider);
       final runtime = ref.read(playbackRuntimeProvider);
       final chapter = data.chapter;
-      if (database == null || chapter == null) {
+      if (database == null || runtime == null || chapter == null) {
         return;
       }
+      final replacementToken = runtime.beginReplacement();
+      _pendingPlaybackRuntime = runtime;
+      _pendingPlaybackReplacement = replacementToken;
       final profile = await loadActiveVoiceProfile(database);
       final supportDirectory = await getApplicationSupportDirectory();
       final credentials = SecureCredentials(
         FlutterSecureKeyValueStore(const FlutterSecureStorage()),
       );
       final provider = SpeechProviderFactory(
-        dio: Dio(),
+        dio: createSpeechDio(),
         credentials: credentials,
         cacheDirectory: Directory(
           '${supportDirectory.path}${Platform.pathSeparator}speech_audio',
@@ -237,21 +252,22 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         voiceProfile: profile,
         onFailure: _showSpeechFailure,
       );
-      final previous = _coordinator;
-      _coordinator = coordinator;
-      if (previous != null) {
-        await previous.dispose();
+      final started = await runtime.replaceAndPlayFrom(
+        coordinator,
+        PlaybackCursor(chapterId: chapter.id, paragraphIndex: paragraph.index),
+        token: replacementToken,
+      );
+      if (!started) {
+        return;
       }
-      runtime?.controller.attach(coordinator);
-      runtime?.handler.publishNowPlaying(
+      _pendingPlaybackRuntime = null;
+      _pendingPlaybackReplacement = null;
+      runtime.handler.publishNowPlaying(
         bookId: widget.bookId,
         bookTitle: data.book.title,
         chapterTitle: chapter.title,
       );
-      await coordinator.playFrom(
-        PlaybackCursor(chapterId: chapter.id, paragraphIndex: paragraph.index),
-      );
-      runtime?.handler.markPlaying();
+      runtime.handler.markPlaying();
       await (database.update(database.books)
             ..where((book) => book.id.equals(widget.bookId)))
           .write(BooksCompanion(lastReadAt: Value(DateTime.now())));
@@ -260,6 +276,8 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         _showSpeechFailure(const AppFailure('朗读启动失败'));
       }
     } finally {
+      _pendingPlaybackRuntime = null;
+      _pendingPlaybackReplacement = null;
       if (mounted) {
         setState(() => _playbackStarting = false);
       }
@@ -359,7 +377,7 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
           FlutterSecureKeyValueStore(const FlutterSecureStorage()),
         );
         await ZhipuTtsClient(
-          dio: Dio(),
+          dio: createSpeechDio(),
           credentials: credentials,
         ).testConnection(apiKey: apiKey, profile: profile);
       },
