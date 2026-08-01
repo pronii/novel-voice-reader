@@ -40,6 +40,18 @@ void main() {
     expect(handler.playbackState.value.speed, 1.5);
   });
 
+  test(
+    'does not publish playback speed without an attached delegate',
+    () async {
+      final controller = AttachablePlaybackController();
+      final handler = NovelAudioHandler(controller);
+
+      await expectLater(handler.setSpeed(1.5), throwsStateError);
+
+      expect(handler.playbackState.value.speed, 1);
+    },
+  );
+
   test('publishes book and chapter metadata for the lock screen', () async {
     final handler = NovelAudioHandler(FakePlaybackController(null));
 
@@ -87,6 +99,22 @@ void main() {
 
     expect(secondProvider.disposeCalls, 1);
     expect(thirdProvider.prepared, hasLength(1));
+    await runtime.dispose();
+  });
+
+  test('runtime reapplies the effective speed to a replacement', () async {
+    final firstProvider = RuntimeSpeechProvider();
+    final replacementProvider = RuntimeSpeechProvider();
+    final controller = AttachablePlaybackController();
+    final handler = NovelAudioHandler(controller);
+    final runtime = PlaybackRuntime(controller: controller, handler: handler);
+    await runtime.replace(createCoordinator(firstProvider));
+    await handler.setSpeed(1.5);
+
+    await runtime.replace(createCoordinator(replacementProvider));
+
+    expect(replacementProvider.speedChanges, [1.5]);
+    expect(handler.playbackState.value.speed, 1.5);
     await runtime.dispose();
   });
 
@@ -374,7 +402,10 @@ final class RuntimeProgressRepository implements PlaybackProgressRepository {
 }
 
 final class RuntimeSpeechProvider
-    implements SpeechProvider, DisposableSpeechProvider {
+    implements
+        SpeechProvider,
+        DisposableSpeechProvider,
+        AdjustableSpeechProvider {
   RuntimeSpeechProvider({
     this.disposeCompleter,
     this.disposeError,
@@ -387,6 +418,7 @@ final class RuntimeSpeechProvider
   final Object? disposeError;
   final Object? prepareError;
   final List<SpeechSegment> prepared = [];
+  final List<double> speedChanges = [];
   int disposeCalls = 0;
 
   @override
@@ -420,6 +452,11 @@ final class RuntimeSpeechProvider
 
   @override
   Future<void> resume() async {}
+
+  @override
+  Future<void> setPlaybackSpeed(double speed) async {
+    speedChanges.add(speed);
+  }
 
   @override
   Future<void> stop() async {}

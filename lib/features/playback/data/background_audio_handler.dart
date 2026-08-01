@@ -36,7 +36,13 @@ final class AttachablePlaybackController implements PlaybackController {
   Future<void> resume() async => _delegate?.resume();
 
   @override
-  Future<void> setSpeed(double speed) async => _delegate?.setSpeed(speed);
+  Future<void> setSpeed(double speed) async {
+    final delegate = _delegate;
+    if (delegate == null) {
+      throw StateError('No playback controller is attached.');
+    }
+    await delegate.setSpeed(speed);
+  }
 }
 
 final class PlaybackReplacementToken {
@@ -127,6 +133,7 @@ final class PlaybackRuntime {
     if (identical(previous, next)) {
       return;
     }
+    await next.setSpeed(handler.playbackState.value.speed);
     _coordinator = next;
     controller.attach(next);
     if (previous != null) {
