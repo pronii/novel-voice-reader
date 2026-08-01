@@ -9,6 +9,8 @@ final class PlayerPage extends StatefulWidget {
     this.onNext,
     this.onPlay,
     this.onPause,
+    this.initialSpeed = 1,
+    this.onSpeedChanged,
   });
 
   final String bookTitle;
@@ -17,6 +19,8 @@ final class PlayerPage extends StatefulWidget {
   final VoidCallback? onNext;
   final VoidCallback? onPlay;
   final VoidCallback? onPause;
+  final double initialSpeed;
+  final ValueChanged<double>? onSpeedChanged;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
@@ -24,7 +28,13 @@ final class PlayerPage extends StatefulWidget {
 
 final class _PlayerPageState extends State<PlayerPage> {
   bool _playing = false;
-  double _speed = 1;
+  late double _speed;
+
+  @override
+  void initState() {
+    super.initState();
+    _speed = widget.initialSpeed;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +95,9 @@ final class _PlayerPageState extends State<PlayerPage> {
                 ],
                 selected: {_speed},
                 onSelectionChanged: (values) {
-                  setState(() => _speed = values.single);
+                  final speed = values.single;
+                  setState(() => _speed = speed);
+                  widget.onSpeedChanged?.call(speed);
                 },
               ),
               const Spacer(),

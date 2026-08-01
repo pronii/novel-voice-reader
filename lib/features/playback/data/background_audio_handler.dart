@@ -34,6 +34,9 @@ final class AttachablePlaybackController implements PlaybackController {
 
   @override
   Future<void> resume() async => _delegate?.resume();
+
+  @override
+  Future<void> setSpeed(double speed) async => _delegate?.setSpeed(speed);
 }
 
 final class PlaybackReplacementToken {
@@ -179,6 +182,7 @@ final class NovelAudioHandler extends BaseAudioHandler {
   }
 
   final PlaybackController _controller;
+  double _speed = 1;
 
   void publishNowPlaying({
     required int bookId,
@@ -224,6 +228,13 @@ final class NovelAudioHandler extends BaseAudioHandler {
   Future<void> skipToPrevious() => _controller.previousParagraph();
 
   @override
+  Future<void> setSpeed(double speed) async {
+    await _controller.setSpeed(speed);
+    _speed = speed;
+    playbackState.add(_state(playing: playbackState.value.playing));
+  }
+
+  @override
   Future<void> stop() async {
     await _controller.pause();
     markIdle();
@@ -243,6 +254,7 @@ final class NovelAudioHandler extends BaseAudioHandler {
       androidCompactActionIndices: const [0, 1, 2],
       processingState: AudioProcessingState.ready,
       playing: playing,
+      speed: _speed,
     );
   }
 }

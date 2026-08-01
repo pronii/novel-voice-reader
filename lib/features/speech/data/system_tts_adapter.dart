@@ -22,7 +22,12 @@ abstract interface class SystemTtsEngine {
   Future<void> stop();
 }
 
-final class FlutterSystemTtsEngine implements SystemTtsEngine {
+abstract interface class AdjustableSystemTtsEngine {
+  Future<void> setPlaybackSpeed(double speed);
+}
+
+final class FlutterSystemTtsEngine
+    implements SystemTtsEngine, AdjustableSystemTtsEngine {
   FlutterSystemTtsEngine([FlutterTts? flutterTts])
     : _flutterTts = flutterTts ?? FlutterTts();
 
@@ -54,6 +59,11 @@ final class FlutterSystemTtsEngine implements SystemTtsEngine {
   }
 
   @override
+  Future<void> setPlaybackSpeed(double speed) async {
+    await _flutterTts.setSpeechRate(speed);
+  }
+
+  @override
   Future<void> speak(String text) async {
     await _flutterTts.speak(text);
   }
@@ -70,7 +80,10 @@ final class FlutterSystemTtsEngine implements SystemTtsEngine {
 }
 
 final class SystemTtsAdapter
-    implements SpeechProvider, DisposableSpeechProvider {
+    implements
+        SpeechProvider,
+        DisposableSpeechProvider,
+        AdjustableSpeechProvider {
   SystemTtsAdapter(this._engine) {
     _engine.setStartHandler(_onStarted);
     _engine.setCompletionHandler(_onCompleted);
@@ -98,6 +111,14 @@ final class SystemTtsAdapter
 
   @override
   Future<void> resume() => _speakCurrent();
+
+  @override
+  Future<void> setPlaybackSpeed(double speed) async {
+    final engine = _engine;
+    if (engine is AdjustableSystemTtsEngine) {
+      await (engine as AdjustableSystemTtsEngine).setPlaybackSpeed(speed);
+    }
+  }
 
   @override
   Future<void> stop() => _engine.stop();

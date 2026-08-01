@@ -15,6 +15,8 @@ abstract interface class PlaybackController {
 
   Future<void> resume();
 
+  Future<void> setSpeed(double speed);
+
   Future<void> nextParagraph();
 
   Future<void> previousParagraph();
@@ -85,6 +87,7 @@ final class PlaybackCoordinator implements PlaybackController {
   PlaybackCursor? _cursor;
   List<SpeechSegment> _segments = const [];
   int _segmentIndex = 0;
+  double _speed = 1;
 
   @override
   PlaybackCursor? get cursor => _cursor;
@@ -109,6 +112,15 @@ final class PlaybackCoordinator implements PlaybackController {
 
   @override
   Future<void> resume() => _provider.resume();
+
+  @override
+  Future<void> setSpeed(double speed) async {
+    _speed = speed;
+    final provider = _provider;
+    if (provider is AdjustableSpeechProvider) {
+      await (provider as AdjustableSpeechProvider).setPlaybackSpeed(speed);
+    }
+  }
 
   @override
   Future<void> nextParagraph() async {
@@ -164,6 +176,10 @@ final class PlaybackCoordinator implements PlaybackController {
 
   Future<void> _prepareAndPlayCurrentSegment() async {
     await _provider.prepare(_segments[_segmentIndex], _voiceProfile);
+    final provider = _provider;
+    if (provider is AdjustableSpeechProvider) {
+      await (provider as AdjustableSpeechProvider).setPlaybackSpeed(_speed);
+    }
     await _provider.play();
   }
 

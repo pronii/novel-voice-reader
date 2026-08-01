@@ -21,7 +21,12 @@ abstract interface class AudioPlaybackEngine {
   Future<void> dispose();
 }
 
-final class JustAudioPlaybackEngine implements AudioPlaybackEngine {
+abstract interface class AdjustableAudioPlaybackEngine {
+  Future<void> setSpeed(double speed);
+}
+
+final class JustAudioPlaybackEngine
+    implements AudioPlaybackEngine, AdjustableAudioPlaybackEngine {
   JustAudioPlaybackEngine([AudioPlayer? player])
     : _player = player ?? AudioPlayer();
 
@@ -38,6 +43,9 @@ final class JustAudioPlaybackEngine implements AudioPlaybackEngine {
   }
 
   @override
+  Future<void> setSpeed(double speed) => _player.setSpeed(speed);
+
+  @override
   Future<void> play() => _player.play();
 
   @override
@@ -51,7 +59,10 @@ final class JustAudioPlaybackEngine implements AudioPlaybackEngine {
 }
 
 final class CachedAudioSpeechProvider
-    implements SpeechProvider, DisposableSpeechProvider {
+    implements
+        SpeechProvider,
+        DisposableSpeechProvider,
+        AdjustableSpeechProvider {
   CachedAudioSpeechProvider({required this.cache, required this.engine}) {
     _completionSubscription = engine.completed.listen((_) => _onCompleted());
   }
@@ -104,6 +115,14 @@ final class CachedAudioSpeechProvider
       throw StateError('No speech segment has been prepared.');
     }
     unawaited(_playEngine());
+  }
+
+  @override
+  Future<void> setPlaybackSpeed(double speed) async {
+    final playbackEngine = engine;
+    if (playbackEngine is AdjustableAudioPlaybackEngine) {
+      await (playbackEngine as AdjustableAudioPlaybackEngine).setSpeed(speed);
+    }
   }
 
   @override

@@ -20,6 +20,10 @@ abstract interface class DisposableSpeechProvider {
   Future<void> dispose();
 }
 
+abstract interface class AdjustableSpeechProvider {
+  Future<void> setPlaybackSpeed(double speed);
+}
+
 sealed class SpeechEvent {
   const SpeechEvent();
 }

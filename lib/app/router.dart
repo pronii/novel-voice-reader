@@ -353,6 +353,7 @@ final class _PlayerRoutePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final data = ref.watch(readerPageDataProvider(ReaderPageRequest(bookId)));
+    final handler = ref.watch(playbackRuntimeProvider)?.handler;
     return data.when(
       loading: () =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
@@ -360,10 +361,12 @@ final class _PlayerRoutePage extends ConsumerWidget {
       data: (value) => PlayerPage(
         bookTitle: value.book.title,
         chapterTitle: value.chapter?.title ?? '未命名章节',
-        onPlay: ref.read(playbackRuntimeProvider)?.handler.play,
-        onPause: ref.read(playbackRuntimeProvider)?.handler.pause,
-        onPrevious: ref.read(playbackRuntimeProvider)?.handler.skipToPrevious,
-        onNext: ref.read(playbackRuntimeProvider)?.handler.skipToNext,
+        initialSpeed: handler?.playbackState.value.speed ?? 1,
+        onSpeedChanged: handler?.setSpeed,
+        onPlay: handler?.play,
+        onPause: handler?.pause,
+        onPrevious: handler?.skipToPrevious,
+        onNext: handler?.skipToNext,
       ),
     );
   }

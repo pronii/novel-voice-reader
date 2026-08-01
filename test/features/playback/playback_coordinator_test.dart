@@ -51,6 +51,41 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('forwards playback speed to an adjustable provider', () async {
+    final provider = FakeSpeechProvider();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource(const ['第一段']),
+      voiceProfile: VoiceProfile.system(),
+    );
+
+    await coordinator.setSpeed(1.25);
+
+    expect(provider.speedChanges, [1.25]);
+    await coordinator.dispose();
+  });
+
+  test('reapplies playback speed after every segment prepare', () async {
+    final provider = FakeSpeechProvider();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource([List.filled(151, '文').join()]),
+      voiceProfile: VoiceProfile.tencent(),
+    );
+    await coordinator.setSpeed(1.25);
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    provider.completeCurrent();
+    await pumpEventQueue();
+
+    expect(provider.speedChanges, [1.25, 1.25, 1.25]);
+    await coordinator.dispose();
+  });
+
   test('splits Tencent playback into at most 150 characters', () async {
     final provider = FakeSpeechProvider();
     final coordinator = PlaybackCoordinator(
@@ -109,10 +144,12 @@ final class FakeProgressRepository implements PlaybackProgressRepository {
   }
 }
 
-final class FakeSpeechProvider implements SpeechProvider {
+final class FakeSpeechProvider
+    implements SpeechProvider, AdjustableSpeechProvider {
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
   final List<SpeechSegment> prepared = [];
   int pauseCalls = 0;
+  final List<double> speedChanges = [];
 
   @override
   Stream<SpeechEvent> get events => _events.stream;
@@ -135,6 +172,11 @@ final class FakeSpeechProvider implements SpeechProvider {
 
   @override
   Future<void> stop() async {}
+
+  @override
+  Future<void> setPlaybackSpeed(double speed) async {
+    speedChanges.add(speed);
+  }
 
   void completeCurrent() {
     _events.add(SpeechCompleted(segmentId: prepared.last.id));

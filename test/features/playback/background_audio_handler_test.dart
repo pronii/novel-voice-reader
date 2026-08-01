@@ -30,6 +30,16 @@ void main() {
     expect(controller.cursor?.paragraphIndex, 3);
   });
 
+  test('playback speed is forwarded and published in playback state', () async {
+    final controller = FakePlaybackController(null);
+    final handler = NovelAudioHandler(controller);
+
+    await handler.setSpeed(1.5);
+
+    expect(controller.speedChanges, [1.5]);
+    expect(handler.playbackState.value.speed, 1.5);
+  });
+
   test('publishes book and chapter metadata for the lock screen', () async {
     final handler = NovelAudioHandler(FakePlaybackController(null));
 
@@ -306,6 +316,7 @@ final class FakePlaybackController implements PlaybackController {
   int pauseCalls = 0;
   int nextCalls = 0;
   int previousCalls = 0;
+  final List<double> speedChanges = [];
 
   @override
   PlaybackCursor? get cursor => _cursor;
@@ -342,6 +353,9 @@ final class FakePlaybackController implements PlaybackController {
 
   @override
   Future<void> resume() async => resumeCalls++;
+
+  @override
+  Future<void> setSpeed(double speed) async => speedChanges.add(speed);
 }
 
 final class RuntimeParagraphSource implements PlaybackParagraphSource {
