@@ -66,7 +66,8 @@ final class _ReaderPageState extends State<ReaderPage> {
   Timer? _progressDebounce;
   int? _activeParagraphId;
   int? _lastReportedParagraphId;
-  bool _ignorePositionUpdatesUntilScroll = false;
+  bool _scrollInProgress = false;
+  int _scrollGeneration = 0;
   double _fontSize = 19;
 
   @override
@@ -75,25 +76,23 @@ final class _ReaderPageState extends State<ReaderPage> {
     _activeParagraphId =
         widget.initialActiveParagraphId ?? widget.paragraphs.firstOrNull?.id;
     _lastReportedParagraphId = _activeParagraphId;
-    _itemPositions.itemPositions.addListener(_onItemPositionsChanged);
   }
 
   @override
   void didUpdateWidget(covariant ReaderPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentChapterId != widget.currentChapterId) {
-      _progressDebounce?.cancel();
+      _invalidatePendingProgressReport();
+      _scrollInProgress = false;
       _activeParagraphId =
           widget.initialActiveParagraphId ?? widget.paragraphs.firstOrNull?.id;
       _lastReportedParagraphId = _activeParagraphId;
-      _ignorePositionUpdatesUntilScroll = false;
     }
   }
 
   @override
   void dispose() {
     _progressDebounce?.cancel();
-    _itemPositions.itemPositions.removeListener(_onItemPositionsChanged);
     super.dispose();
   }
 
@@ -134,14 +133,8 @@ final class _ReaderPageState extends State<ReaderPage> {
           ),
         ],
       ),
-      body: NotificationListener<ScrollUpdateNotification>(
-        onNotification: (notification) {
-          final scrollDelta = notification.scrollDelta;
-          if (scrollDelta != null && scrollDelta != 0) {
-            _ignorePositionUpdatesUntilScroll = false;
-          }
-          return false;
-        },
+      body: NotificationListener<ScrollNotification>(
+        onNotification: _onScrollNotification,
         child: ScrollablePositionedList.builder(
           key: ValueKey<int?>(widget.currentChapterId),
           initialScrollIndex: _initialScrollIndex,
@@ -229,10 +222,31 @@ final class _ReaderPageState extends State<ReaderPage> {
     return activeIndex < 0 ? 0 : activeIndex + 1;
   }
 
-  void _onItemPositionsChanged() {
-    if (_ignorePositionUpdatesUntilScroll) {
-      return;
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification is ScrollStartNotification) {
+      _scrollInProgress = true;
+      _invalidatePendingProgressReport();
+    } else if (notification is ScrollUpdateNotification) {
+      final scrollDelta = notification.scrollDelta;
+      if (scrollDelta != null && scrollDelta != 0) {
+        _scrollInProgress = true;
+        _invalidatePendingProgressReport();
+      }
+    } else if (notification is ScrollEndNotification && _scrollInProgress) {
+      _scrollInProgress = false;
+      final generation = ++_scrollGeneration;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && generation == _scrollGeneration) {
+          _scheduleVisiblePositionReport();
+        }
+      });
     }
+    return false;
+  }
+
+  void _scheduleVisiblePositionReport() {
+    _progressDebounce?.cancel();
+    _progressDebounce = null;
     final visible =
         _itemPositions.itemPositions.value
             .where(
@@ -258,19 +272,19 @@ final class _ReaderPageState extends State<ReaderPage> {
 
   void _selectParagraph(ReaderParagraph paragraph) {
     setState(() => _activeParagraphId = paragraph.id);
-    _reportExplicitReadingPosition(paragraph);
-  }
-
-  void _reportExplicitReadingPosition(ReaderParagraph paragraph) {
-    _ignorePositionUpdatesUntilScroll = true;
     _reportReadingPosition(paragraph);
   }
 
   void _reportReadingPosition(ReaderParagraph paragraph) {
-    _progressDebounce?.cancel();
-    _progressDebounce = null;
+    _invalidatePendingProgressReport();
     _lastReportedParagraphId = paragraph.id;
     widget.onReadingPositionChanged?.call(paragraph);
+  }
+
+  void _invalidatePendingProgressReport() {
+    _scrollGeneration += 1;
+    _progressDebounce?.cancel();
+    _progressDebounce = null;
   }
 
   void _playActive() {
@@ -284,7 +298,7 @@ final class _ReaderPageState extends State<ReaderPage> {
 
   void _play(ReaderParagraph paragraph) {
     setState(() => _activeParagraphId = paragraph.id);
-    _reportExplicitReadingPosition(paragraph);
+    _reportReadingPosition(paragraph);
     widget.onPlayFrom?.call(paragraph);
   }
 

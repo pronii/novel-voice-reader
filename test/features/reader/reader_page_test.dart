@@ -138,6 +138,73 @@ void main() {
     },
   );
 
+  testWidgets('does not report a stale paragraph after scrolling back', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final reported = <int>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderPage(
+          bookId: 1,
+          bookTitle: '测试书',
+          chapterTitle: '第一章',
+          currentChapterId: 10,
+          initialActiveParagraphId: 15,
+          paragraphs: longParagraphs,
+          onReadingPositionChanged: (paragraph) => reported.add(paragraph.id),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final list = find.byType(ScrollablePositionedList);
+    await tester.drag(list, const Offset(0, -300));
+    await tester.pump();
+    await tester.drag(list, const Offset(0, 300));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(reported, isEmpty);
+  });
+
+  testWidgets('does not report progress after changing only the font size', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final reported = <int>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderPage(
+          bookId: 1,
+          bookTitle: '测试书',
+          chapterTitle: '第一章',
+          currentChapterId: 10,
+          initialActiveParagraphId: 15,
+          paragraphs: longParagraphs,
+          onReadingPositionChanged: (paragraph) => reported.add(paragraph.id),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('阅读设置'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(Slider), const Offset(200, 0));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    expect(reported, isEmpty);
+  });
+
   testWidgets('reports a tapped paragraph immediately', (tester) async {
     tester.view.physicalSize = const Size(320, 480);
     tester.view.devicePixelRatio = 1;
