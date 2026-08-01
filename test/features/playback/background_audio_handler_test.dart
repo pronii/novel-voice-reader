@@ -118,6 +118,63 @@ void main() {
     await runtime.dispose();
   });
 
+  test('serializes a speed change with coordinator attachment', () async {
+    final firstProvider = RuntimeSpeechProvider();
+    final restoreCompleter = Completer<void>();
+    final replacementProvider = RuntimeSpeechProvider(
+      speedCompleter: restoreCompleter,
+    );
+    final controller = AttachablePlaybackController();
+    final handler = NovelAudioHandler(controller);
+    final runtime = PlaybackRuntime(controller: controller, handler: handler);
+    await runtime.replace(createCoordinator(firstProvider));
+    await handler.setSpeed(1.5);
+
+    final replacement = runtime.replace(createCoordinator(replacementProvider));
+    await pumpEventQueue();
+    expect(replacementProvider.speedChanges, [1.5]);
+
+    var speedChangeCompleted = false;
+    final speedChange = handler.setSpeed(1.25).then((_) {
+      speedChangeCompleted = true;
+    });
+    await pumpEventQueue();
+
+    expect(speedChangeCompleted, isFalse);
+    restoreCompleter.complete();
+    await replacement;
+    await speedChange;
+
+    expect(replacementProvider.speedChanges, [1.5, 1.25]);
+    expect(handler.playbackState.value.speed, 1.25);
+    await runtime.dispose();
+  });
+
+  test(
+    'disposes a replacement when speed restoration fails and keeps the old delegate',
+    () async {
+      final firstProvider = RuntimeSpeechProvider();
+      final failedProvider = RuntimeSpeechProvider(
+        speedError: StateError('restore failed'),
+      );
+      final controller = AttachablePlaybackController();
+      final handler = NovelAudioHandler(controller);
+      final runtime = PlaybackRuntime(controller: controller, handler: handler);
+      await runtime.replace(createCoordinator(firstProvider));
+
+      await expectLater(
+        runtime.replace(createCoordinator(failedProvider)),
+        throwsStateError,
+      );
+
+      expect(failedProvider.disposeCalls, 1);
+      await handler.setSpeed(1.25);
+      expect(firstProvider.speedChanges.last, 1.25);
+      expect(handler.playbackState.value.speed, 1.25);
+      await runtime.dispose();
+    },
+  );
+
   test('runtime keeps the new delegate when previous disposal fails', () async {
     final errors = <Object>[];
     final firstProvider = RuntimeSpeechProvider(
@@ -410,6 +467,8 @@ final class RuntimeSpeechProvider
     this.disposeCompleter,
     this.disposeError,
     this.prepareError,
+    this.speedCompleter,
+    this.speedError,
   });
 
   final StreamController<SpeechEvent> _events =
@@ -417,6 +476,8 @@ final class RuntimeSpeechProvider
   final Completer<void>? disposeCompleter;
   final Object? disposeError;
   final Object? prepareError;
+  final Completer<void>? speedCompleter;
+  final Object? speedError;
   final List<SpeechSegment> prepared = [];
   final List<double> speedChanges = [];
   int disposeCalls = 0;
@@ -456,6 +517,11 @@ final class RuntimeSpeechProvider
   @override
   Future<void> setPlaybackSpeed(double speed) async {
     speedChanges.add(speed);
+    await speedCompleter?.future;
+    final error = speedError;
+    if (error != null) {
+      throw error;
+    }
   }
 
   @override

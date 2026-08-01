@@ -28,7 +28,7 @@ void main() {
     );
     final controller = AttachablePlaybackController();
     final delegate = _SpeedPlaybackController();
-    controller.attach(delegate);
+    await controller.attach(delegate);
     final handler = NovelAudioHandler(controller);
     await handler.setSpeed(1.25);
     delegate.speedChanges.clear();

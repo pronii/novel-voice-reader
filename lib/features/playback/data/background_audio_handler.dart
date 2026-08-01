@@ -5,9 +5,14 @@ import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 
 final class AttachablePlaybackController implements PlaybackController {
   PlaybackController? _delegate;
+  Future<void> _updates = Future<void>.value();
+  double _speed = 1;
 
-  void attach(PlaybackController controller) {
-    _delegate = controller;
+  Future<void> attach(PlaybackController controller) {
+    return _enqueueUpdate(() async {
+      await controller.setSpeed(_speed);
+      _delegate = controller;
+    });
   }
 
   void detach(PlaybackController controller) {
@@ -36,12 +41,24 @@ final class AttachablePlaybackController implements PlaybackController {
   Future<void> resume() async => _delegate?.resume();
 
   @override
-  Future<void> setSpeed(double speed) async {
-    final delegate = _delegate;
-    if (delegate == null) {
-      throw StateError('No playback controller is attached.');
-    }
-    await delegate.setSpeed(speed);
+  Future<void> setSpeed(double speed) {
+    return _enqueueUpdate(() async {
+      final delegate = _delegate;
+      if (delegate == null) {
+        throw StateError('No playback controller is attached.');
+      }
+      await delegate.setSpeed(speed);
+      _speed = speed;
+    });
+  }
+
+  Future<T> _enqueueUpdate<T>(Future<T> Function() action) {
+    final operation = _updates.then((_) => action());
+    _updates = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
   }
 }
 
@@ -133,9 +150,13 @@ final class PlaybackRuntime {
     if (identical(previous, next)) {
       return;
     }
-    await next.setSpeed(handler.playbackState.value.speed);
+    try {
+      await controller.attach(next);
+    } catch (_) {
+      await _dispose(next);
+      rethrow;
+    }
     _coordinator = next;
-    controller.attach(next);
     if (previous != null) {
       await _dispose(previous);
     }
