@@ -64,6 +64,8 @@ final class ReaderPage extends StatefulWidget {
 }
 
 final class _ReaderPageState extends State<ReaderPage> {
+  static const double _nextChapterOverscrollThreshold = 48;
+
   final ItemPositionsListener _itemPositions = ItemPositionsListener.create();
   Timer? _progressDebounce;
   ReaderParagraph? _pendingProgressParagraph;
@@ -72,6 +74,8 @@ final class _ReaderPageState extends State<ReaderPage> {
   bool _scrollMoved = false;
   int _scrollGeneration = 0;
   double _fontSize = 19;
+  double _bottomOverscroll = 0;
+  bool _nextChapterTransitionLocked = false;
 
   @override
   void initState() {
@@ -85,6 +89,8 @@ final class _ReaderPageState extends State<ReaderPage> {
   void didUpdateWidget(covariant ReaderPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentChapterId != widget.currentChapterId) {
+      _bottomOverscroll = 0;
+      _nextChapterTransitionLocked = false;
       _invalidatePendingProgressReport();
       _scrollMoved = false;
       _activeParagraphId =
@@ -236,6 +242,18 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   bool _onScrollNotification(ScrollNotification notification) {
+    if (notification is OverscrollNotification &&
+        notification.overscroll > 0 &&
+        notification.metrics.extentAfter == 0) {
+      _bottomOverscroll += notification.overscroll;
+      if (!_nextChapterTransitionLocked &&
+          _bottomOverscroll >= _nextChapterOverscrollThreshold) {
+        _continueToNextChapter();
+      }
+    } else if (notification.metrics.extentAfter > 0) {
+      _bottomOverscroll = 0;
+    }
+
     if (notification is ScrollStartNotification) {
       _scrollMoved = false;
       _invalidatePendingProgressReport();
@@ -258,6 +276,24 @@ final class _ReaderPageState extends State<ReaderPage> {
       }
     }
     return false;
+  }
+
+  void _continueToNextChapter() {
+    final currentChapterIndex = widget.chapters.indexWhere(
+      (chapter) => chapter.id == widget.currentChapterId,
+    );
+    if (currentChapterIndex < 0 ||
+        currentChapterIndex + 1 >= widget.chapters.length) {
+      return;
+    }
+    final onChapterSelected = widget.onChapterSelected;
+    if (onChapterSelected == null) {
+      return;
+    }
+    _bottomOverscroll = 0;
+    _nextChapterTransitionLocked = true;
+    _invalidatePendingProgressReport();
+    onChapterSelected(widget.chapters[currentChapterIndex + 1].id);
   }
 
   void _scheduleVisiblePositionReport() {

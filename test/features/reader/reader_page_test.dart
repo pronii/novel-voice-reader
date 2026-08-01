@@ -123,6 +123,64 @@ void main() {
     expect(selectedChapterId, 20);
   });
 
+  testWidgets('continues to the next chapter after bottom overscroll', (
+    tester,
+  ) async {
+    final selectedChapterIds = <int>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderPage(
+          bookId: 1,
+          bookTitle: '测试书',
+          chapterTitle: '第一章',
+          chapters: const [
+            ReaderChapter(id: 1, index: 0, title: '第一章'),
+            ReaderChapter(id: 2, index: 1, title: '第二章'),
+          ],
+          currentChapterId: 1,
+          paragraphs: longParagraphs,
+          onChapterSelected: selectedChapterIds.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final list = find.byType(ScrollablePositionedList);
+    await tester.drag(list, const Offset(0, -600));
+    await tester.drag(list, const Offset(0, -120));
+
+    expect(selectedChapterIds, [2]);
+  });
+
+  testWidgets('does not continue past the last chapter', (tester) async {
+    final selectedChapterIds = <int>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderPage(
+          bookId: 1,
+          bookTitle: '测试书',
+          chapterTitle: '第二章',
+          chapters: const [
+            ReaderChapter(id: 1, index: 0, title: '第一章'),
+            ReaderChapter(id: 2, index: 1, title: '第二章'),
+          ],
+          currentChapterId: 2,
+          paragraphs: longParagraphs,
+          onChapterSelected: selectedChapterIds.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final list = find.byType(ScrollablePositionedList);
+    await tester.drag(list, const Offset(0, -600));
+    await tester.drag(list, const Offset(0, -120));
+
+    expect(selectedChapterIds, isEmpty);
+  });
+
   testWidgets(
     'starts at the saved paragraph and reports a new visible paragraph',
     (tester) async {
