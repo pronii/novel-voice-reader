@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
+import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:novel_voice_reader/features/speech/presentation/voice_settings_page.dart';
 
@@ -15,9 +16,9 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VoiceSettingsPage(
-          onSave: (profile, apiKey) async {
-            savedProfile = profile;
-            savedKey = apiKey;
+          onSave: (submission) async {
+            savedProfile = submission.profile;
+            savedKey = submission.credentials.normalizedApiKey;
           },
         ),
       ),
@@ -48,7 +49,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VoiceSettingsPage(
-          onSave: (profile, apiKey) async {
+          onSave: (submission) async {
             saves++;
           },
         ),
@@ -80,9 +81,9 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VoiceSettingsPage(
-          onSave: (profile, apiKey) async {
-            savedProfile = profile;
-            savedKey = apiKey;
+          onSave: (submission) async {
+            savedProfile = submission.profile;
+            savedKey = submission.credentials.normalizedApiKey;
           },
         ),
       ),
@@ -119,7 +120,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VoiceSettingsPage(
-          onSave: (profile, apiKey) async => savedKey = apiKey,
+          onSave: (submission) async =>
+              savedKey = submission.credentials.normalizedApiKey,
         ),
       ),
     );
@@ -158,12 +160,12 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VoiceSettingsPage(
-          onTestConnection: (profile, apiKey) async {
+          onTestConnection: (submission) async {
             tests++;
-            expect(profile.providerType, SpeechProviderType.zhipu);
-            expect(apiKey, 'entered-key');
+            expect(submission.profile.providerType, SpeechProviderType.zhipu);
+            expect(submission.credentials.normalizedApiKey, 'entered-key');
           },
-          onSave: (profile, apiKey) async => saves++,
+          onSave: (submission) async => saves++,
         ),
       ),
     );
@@ -187,7 +189,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VoiceSettingsPage(
-          onTestConnection: (profile, apiKey) async => tests++,
+          onTestConnection: (submission) async => tests++,
         ),
       ),
     );
@@ -211,11 +213,11 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VoiceSettingsPage(
-          onTestConnection: (profile, apiKey) {
+          onTestConnection: (submission) {
             tests++;
             return connectionTest.future;
           },
-          onSave: (profile, apiKey) async => saves++,
+          onSave: (submission) async => saves++,
         ),
       ),
     );
@@ -256,7 +258,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VoiceSettingsPage(
-          onTestConnection: (profile, apiKey) async {
+          onTestConnection: (submission) async {
             throw const AppFailure('智谱语音服务认证失败');
           },
         ),
@@ -281,7 +283,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VoiceSettingsPage(
-          onTestConnection: (profile, apiKey) async {
+          onTestConnection: (submission) async {
             throw const AppFailure('智谱语音服务连接超时');
           },
         ),
@@ -319,7 +321,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VoiceSettingsPage(
-          onTestConnection: (profile, apiKey) async {
+          onTestConnection: (submission) async {
             throw StateError('sensitive details');
           },
         ),
@@ -337,5 +339,208 @@ void main() {
 
     expect(find.text('连接测试失败'), findsOneWidget);
     expect(find.textContaining('sensitive details'), findsNothing);
+  });
+
+  testWidgets('saves Tencent credentials, voice, and monthly quota', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    VoiceSettingsSubmission? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onSave: (submission) async => saved = submission,
+        ),
+      ),
+    );
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('腾讯云'));
+    await tester.pump();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'SecretId'),
+      '  entered-id  ',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'SecretKey'),
+      '  entered-key  ',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, '每月免费额度（字符）'),
+      '1000000',
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(saved?.profile.providerType, SpeechProviderType.tencent);
+    expect(saved?.profile.voice, '1001');
+    expect(saved?.credentials.normalizedSecretId, 'entered-id');
+    expect(saved?.credentials.normalizedSecretKey, 'entered-key');
+    expect(saved?.monthlyQuotaCharacters, 1000000);
+  });
+
+  testWidgets('tests entered Tencent credentials without saving', (
+    tester,
+  ) async {
+    VoiceSettingsSubmission? tested;
+    var saves = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onTestConnection: (submission) async => tested = submission,
+          onSave: (submission) async => saves++,
+        ),
+      ),
+    );
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('腾讯云'));
+    await tester.pump();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'SecretId'),
+      'entered-id',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'SecretKey'),
+      'entered-key',
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pumpAndSettle();
+    final testButton = find.widgetWithText(OutlinedButton, '测试连接').last;
+    await tester.tap(testButton);
+    await tester.pumpAndSettle();
+
+    expect(tested?.profile.providerType, SpeechProviderType.tencent);
+    expect(tested?.credentials.normalizedSecretId, 'entered-id');
+    expect(tested?.credentials.normalizedSecretKey, 'entered-key');
+    expect(saves, 0);
+    expect(find.text('连接成功，腾讯云凭据可用'), findsOneWidget);
+  });
+
+  testWidgets('shows and refreshes the Tencent local quota estimate', (
+    tester,
+  ) async {
+    var loads = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onLoadTencentUsage: () async {
+            loads++;
+            return TencentTtsUsageSnapshot(
+              period: '2026-08',
+              usedCharacters: loads == 1 ? 25 : 30,
+              quotaCharacters: 100,
+              updatedAt: DateTime(2026, 8, 2, 12, 30),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('腾讯云'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('本机估算'), findsOneWidget);
+    expect(find.text('本月已用：25 字符'), findsOneWidget);
+    expect(find.text('估算剩余：75 字符'), findsOneWidget);
+    expect(find.text('月度额度：100 字符'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('刷新本机估算'));
+    await tester.pumpAndSettle();
+
+    expect(loads, 2);
+    expect(find.text('本月已用：30 字符'), findsOneWidget);
+    expect(find.text('估算剩余：70 字符'), findsOneWidget);
+  });
+
+  testWidgets('clears Tencent credentials independently', (tester) async {
+    final cleared = <TencentCredentialField>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onClearTencentCredential: (field) async => cleared.add(field),
+        ),
+      ),
+    );
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('腾讯云'));
+    await tester.pump();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'SecretId'),
+      'entered-id',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'SecretKey'),
+      'entered-key',
+    );
+
+    await tester.tap(find.byTooltip('清除 SecretId'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('清除 SecretKey'));
+    await tester.pumpAndSettle();
+
+    expect(cleared, [
+      TencentCredentialField.secretId,
+      TencentCredentialField.secretKey,
+    ]);
+  });
+
+  testWidgets('rejects a non-numeric custom Tencent VoiceType', (tester) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var saves = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(onSave: (submission) async => saves++),
+      ),
+    );
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('腾讯云'));
+    await tester.pump();
+    await tester.tap(find.text('1001（推荐）'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('自定义 VoiceType').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, '自定义 VoiceType'),
+      'abc',
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('请输入有效的数字 VoiceType'), findsOneWidget);
+    expect(saves, 0);
   });
 }

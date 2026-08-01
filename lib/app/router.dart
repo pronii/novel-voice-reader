@@ -26,6 +26,7 @@ import 'package:novel_voice_reader/features/reader/data/reading_progress_reposit
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
+import 'package:novel_voice_reader/features/speech/data/tencent_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
 import 'package:novel_voice_reader/features/speech/data/zhipu_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
@@ -373,18 +374,42 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final database = ref.watch(databaseProvider);
+    final credentials = SecureCredentials(
+      FlutterSecureKeyValueStore(const FlutterSecureStorage()),
+    );
     return VoiceSettingsPage(
-      onTestConnection: (profile, apiKey) async {
-        final credentials = SecureCredentials(
-          FlutterSecureKeyValueStore(const FlutterSecureStorage()),
-        );
-        await ZhipuTtsClient(
-          dio: createSpeechDio(),
-          credentials: credentials,
-        ).testConnection(apiKey: apiKey, profile: profile);
+      onTestConnection: (submission) async {
+        final profile = submission.profile;
+        switch (profile.providerType) {
+          case SpeechProviderType.zhipu:
+            await ZhipuTtsClient(
+              dio: createSpeechDio(),
+              credentials: credentials,
+            ).testConnection(
+              apiKey: submission.credentials.normalizedApiKey ?? '',
+              profile: profile,
+            );
+          case SpeechProviderType.tencent:
+            if (database == null) {
+              throw const AppFailure('本机额度记录不可用');
+            }
+            await TencentTtsClient(
+              dio: createSpeechDio(),
+              credentials: credentials,
+              usageCounter: TencentTtsUsageRepository(database),
+            ).testConnection(
+              credentials: submission.credentials,
+              profile: profile,
+            );
+          case SpeechProviderType.system ||
+              SpeechProviderType.cloud ||
+              SpeechProviderType.azure:
+            throw const AppFailure('当前语音服务不支持连接测试');
+        }
       },
-      onSave: (profile, apiKey) async {
-        final database = ref.read(databaseProvider);
+      onSave: (submission) async {
+        final profile = submission.profile;
         if (database != null) {
           await database
               .into(database.voiceProfiles)
@@ -399,18 +424,45 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
                   outputFormat: Value(profile.outputFormat),
                 ),
               );
-        }
-        if (apiKey != null && apiKey.isNotEmpty) {
-          final credentials = SecureCredentials(
-            FlutterSecureKeyValueStore(const FlutterSecureStorage()),
-          );
-          if (profile.providerType == SpeechProviderType.azure) {
-            await credentials.writeAzureSubscriptionKey(apiKey);
-          } else if (profile.providerType == SpeechProviderType.zhipu) {
-            await credentials.writeZhipuApiKey(apiKey);
-          } else if (profile.providerType == SpeechProviderType.cloud) {
-            await credentials.writeApiKey(apiKey);
+          if (profile.providerType == SpeechProviderType.tencent) {
+            await TencentTtsUsageRepository(
+              database,
+            ).setMonthlyQuota(submission.monthlyQuotaCharacters);
           }
+        }
+        final apiKey = submission.credentials.normalizedApiKey;
+        if (apiKey != null) {
+          switch (profile.providerType) {
+            case SpeechProviderType.azure:
+              await credentials.writeAzureSubscriptionKey(apiKey);
+            case SpeechProviderType.zhipu:
+              await credentials.writeZhipuApiKey(apiKey);
+            case SpeechProviderType.cloud:
+              await credentials.writeApiKey(apiKey);
+            case SpeechProviderType.system || SpeechProviderType.tencent:
+              break;
+          }
+        }
+        if (profile.providerType == SpeechProviderType.tencent) {
+          final secretId = submission.credentials.normalizedSecretId;
+          final secretKey = submission.credentials.normalizedSecretKey;
+          if (secretId != null) {
+            await credentials.writeTencentSecretId(secretId);
+          }
+          if (secretKey != null) {
+            await credentials.writeTencentSecretKey(secretKey);
+          }
+        }
+      },
+      onLoadTencentUsage: database == null
+          ? null
+          : () => TencentTtsUsageRepository(database).current(),
+      onClearTencentCredential: (field) async {
+        switch (field) {
+          case TencentCredentialField.secretId:
+            await credentials.deleteTencentSecretId();
+          case TencentCredentialField.secretKey:
+            await credentials.deleteTencentSecretKey();
         }
       },
     );

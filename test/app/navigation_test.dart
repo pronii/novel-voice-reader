@@ -1,8 +1,9 @@
 import 'package:drift/native.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/app/app.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
+import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 void main() {
@@ -99,6 +100,48 @@ void main() {
       tester,
       find.byKey(ValueKey<String>('active-paragraph-$secondParagraphId')),
     );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
+  testWidgets('persists Tencent voice and local monthly quota from settings', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+
+    await tester.pumpWidget(NovelVoiceReaderApp(database: database));
+    await _pumpUntilFound(tester, find.byTooltip('语音设置'));
+    await tester.tap(find.byTooltip('语音设置'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-500, 0),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('腾讯云'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(
+      find.widgetWithText(TextField, '每月免费额度（字符）'),
+      '1000000',
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await _pumpUntilFound(tester, find.text('语音设置已保存'));
+
+    final profiles = await database.select(database.voiceProfiles).get();
+    final usage = await TencentTtsUsageRepository(database).current();
+    expect(profiles.single.providerType, 'tencent');
+    expect(profiles.single.voice, '1001');
+    expect(usage.quotaCharacters, 1000000);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
