@@ -123,6 +123,125 @@ void main() {
     expect(selectedChapterId, 20);
   });
 
+  testWidgets('opens the chapter directory at the current chapter', (
+    tester,
+  ) async {
+    final chapters = List.generate(
+      100,
+      (index) => ReaderChapter(
+        id: 1000 + index * 7,
+        index: index,
+        title: '第${index + 1}章',
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderPage(
+          bookId: 1,
+          bookTitle: '测试书',
+          chapterTitle: '当前正文',
+          chapters: chapters,
+          currentChapterId: chapters[80].id,
+          paragraphs: const [ReaderParagraph(id: 100, index: 0, text: '第一段。')],
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('章节目录'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('第81章'), findsOneWidget);
+    expect(
+      tester.widget<ListTile>(find.widgetWithText(ListTile, '第81章')).selected,
+      isTrue,
+    );
+  });
+
+  testWidgets('filters chapters by title and number', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: ReaderPage(
+          bookId: 1,
+          bookTitle: '测试书',
+          chapterTitle: '当前正文',
+          chapters: [
+            ReaderChapter(id: 101, index: 0, title: '普通章节'),
+            ReaderChapter(id: 700, index: 1, title: '目标章节'),
+            ReaderChapter(id: 42, index: 2, title: '尾声'),
+          ],
+          currentChapterId: 101,
+          paragraphs: [ReaderParagraph(id: 100, index: 0, text: '第一段。')],
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('章节目录'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '目标');
+    await tester.pump();
+    expect(find.text('目标章节'), findsOneWidget);
+    expect(find.text('普通章节'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), '2');
+    await tester.pump();
+    expect(find.text('目标章节'), findsOneWidget);
+    expect(find.text('普通章节'), findsNothing);
+    expect(find.text('尾声'), findsNothing);
+  });
+
+  testWidgets(
+    'clearing chapter search restores and repositions the current chapter',
+    (tester) async {
+      final chapters = List.generate(
+        100,
+        (index) => ReaderChapter(
+          id: 2000 + index * 11,
+          index: index,
+          title: index == 4 ? '目标章节' : '第${index + 1}章',
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderPage(
+            bookId: 1,
+            bookTitle: '测试书',
+            chapterTitle: '当前正文',
+            chapters: chapters,
+            currentChapterId: chapters[80].id,
+            paragraphs: const [
+              ReaderParagraph(id: 100, index: 0, text: '第一段。'),
+            ],
+          ),
+        ),
+      );
+
+      await tester.tap(find.byTooltip('章节目录'));
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.byType(ScrollablePositionedList).last,
+        const Offset(0, 600),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('第81章'), findsNothing);
+      await tester.enterText(find.byType(TextField), '目标');
+      await tester.pumpAndSettle();
+      expect(find.text('目标章节'), findsOneWidget);
+      expect(find.text('第81章'), findsNothing);
+
+      await tester.enterText(find.byType(TextField), '');
+      await tester.pumpAndSettle();
+
+      expect(find.text('第81章'), findsOneWidget);
+      expect(
+        tester.widget<ListTile>(find.widgetWithText(ListTile, '第81章')).selected,
+        isTrue,
+      );
+    },
+  );
+
   testWidgets('continues to the next chapter after bottom overscroll', (
     tester,
   ) async {

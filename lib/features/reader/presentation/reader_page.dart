@@ -360,51 +360,85 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   Future<void> _showChapterList() async {
+    var query = '';
     final selectedChapterId = await showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * 0.7,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Text(
-                  '章节目录',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: widget.chapters.length,
-                  itemBuilder: (context, index) {
-                    final chapter = widget.chapters[index];
-                    final selected = chapter.id == widget.currentChapterId;
-                    return ListTile(
-                      title: Text(chapter.title),
-                      leading: SizedBox(
-                        width: 32,
-                        child: Text('${chapter.index + 1}'),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final normalizedQuery = query.trim().toLowerCase();
+          final filteredChapters = widget.chapters.where((chapter) {
+            return chapter.title.toLowerCase().contains(normalizedQuery) ||
+                '${chapter.index + 1}'.contains(normalizedQuery);
+          }).toList();
+          final currentChapterIndex = filteredChapters.indexWhere(
+            (chapter) => chapter.id == widget.currentChapterId,
+          );
+
+          return SafeArea(
+            child: SizedBox(
+              height: MediaQuery.sizeOf(context).height * 0.7,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                    child: Text(
+                      '章节目录',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: '搜索章节',
                       ),
-                      trailing: selected ? const Icon(Icons.check) : null,
-                      selected: selected,
-                      onTap: () {
-                        if (!selected) {
-                          _invalidatePendingProgressReport();
-                        }
-                        Navigator.of(context).pop(chapter.id);
+                      onChanged: (value) {
+                        setSheetState(() => query = value);
                       },
-                    );
-                  },
-                ),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: PageStorage(
+                      bucket: PageStorageBucket(),
+                      child: ScrollablePositionedList.builder(
+                        key: PageStorageKey<String>('chapter-directory-$query'),
+                        initialScrollIndex: currentChapterIndex < 0
+                            ? 0
+                            : currentChapterIndex,
+                        itemCount: filteredChapters.length,
+                        itemBuilder: (context, index) {
+                          final chapter = filteredChapters[index];
+                          final selected =
+                              chapter.id == widget.currentChapterId;
+                          return ListTile(
+                            title: Text(chapter.title),
+                            leading: SizedBox(
+                              width: 32,
+                              child: Text('${chapter.index + 1}'),
+                            ),
+                            trailing: selected ? const Icon(Icons.check) : null,
+                            selected: selected,
+                            onTap: () {
+                              if (!selected) {
+                                _invalidatePendingProgressReport();
+                              }
+                              Navigator.of(context).pop(chapter.id);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
     if (selectedChapterId != null) {
