@@ -50,7 +50,7 @@ final class FlutterSystemTtsEngine
 
   @override
   Future<void> configure(VoiceProfile profile) async {
-    await _flutterTts.setSpeechRate(profile.speed);
+    await _flutterTts.setSpeechRate(_systemSpeechRate(profile.speed));
     await _flutterTts.setPitch(profile.pitch ?? 1);
     final voice = profile.voice;
     if (voice != null) {
@@ -60,7 +60,7 @@ final class FlutterSystemTtsEngine
 
   @override
   Future<void> setPlaybackSpeed(double speed) async {
-    await _flutterTts.setSpeechRate(speed);
+    await _flutterTts.setSpeechRate(_systemSpeechRate(speed));
   }
 
   @override
@@ -77,6 +77,11 @@ final class FlutterSystemTtsEngine
   Future<void> stop() async {
     await _flutterTts.stop();
   }
+}
+
+double _systemSpeechRate(double multiplier) {
+  // flutter_tts uses 0.5 as the cross-platform normal system speech rate.
+  return (multiplier / 2).clamp(0.0, 1.0).toDouble();
 }
 
 final class SystemTtsAdapter

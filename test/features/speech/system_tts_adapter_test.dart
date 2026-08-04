@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/features/speech/data/system_tts_adapter.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
@@ -5,6 +6,48 @@ import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart'
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const channel = MethodChannel('flutter_tts');
+
+  tearDown(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
+  });
+
+  test('maps the normal speed multiplier to the system TTS rate', () async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          return 1;
+        });
+    final engine = FlutterSystemTtsEngine();
+
+    await engine.configure(VoiceProfile.system());
+
+    expect(
+      calls.where((call) => call.method == 'setSpeechRate').single.arguments,
+      0.5,
+    );
+  });
+
+  test('maps a playback multiplier to the system TTS rate', () async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          return 1;
+        });
+    final engine = FlutterSystemTtsEngine();
+
+    await engine.setPlaybackSpeed(1.5);
+
+    expect(
+      calls.where((call) => call.method == 'setSpeechRate').single.arguments,
+      0.75,
+    );
+  });
+
   test('forwards playback speed to an adjustable system engine', () async {
     final engine = AdjustableFakeSystemTtsEngine();
     final adapter = SystemTtsAdapter(engine);
