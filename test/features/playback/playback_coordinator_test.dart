@@ -57,6 +57,25 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('prefetches the next paragraph while the current one plays', () async {
+    final provider = FakeSpeechProvider();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+      voiceProfile: VoiceProfile.system(),
+    );
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    await pumpEventQueue();
+
+    expect(provider.prefetched.map((segment) => segment.text), ['第二段']);
+    expect(provider.prepared.map((segment) => segment.text), ['第一段']);
+    await coordinator.dispose();
+  });
+
   test('pause persists the current cursor and delegates to provider', () async {
     final provider = FakeSpeechProvider();
     final progress = FakeProgressRepository();
@@ -189,9 +208,13 @@ final class FakeProgressRepository implements PlaybackProgressRepository {
 }
 
 final class FakeSpeechProvider
-    implements SpeechProvider, AdjustableSpeechProvider {
+    implements
+        SpeechProvider,
+        AdjustableSpeechProvider,
+        PrefetchingSpeechProvider {
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
   final List<SpeechSegment> prepared = [];
+  final List<SpeechSegment> prefetched = [];
   int pauseCalls = 0;
   final List<double> speedChanges = [];
   Object? speedFailure;
@@ -202,6 +225,11 @@ final class FakeSpeechProvider
   @override
   Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {
     prepared.add(segment);
+  }
+
+  @override
+  Future<void> prefetch(SpeechSegment segment, VoiceProfile profile) async {
+    prefetched.add(segment);
   }
 
   @override

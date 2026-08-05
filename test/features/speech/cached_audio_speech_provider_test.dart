@@ -95,14 +95,55 @@ void main() {
     await provider.dispose();
     await directory.delete(recursive: true);
   });
+
+  test('prefetch warms the cache without replacing active audio', () async {
+    final directory = await Directory.systemTemp.createTemp('cached-prefetch-');
+    final engine = FakeAudioPlaybackEngine();
+    final synthesizer = FakeCloudSpeechSynthesizer();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: synthesizer,
+      ),
+      engine: engine,
+    );
+    const segment = SpeechSegment(
+      id: '10:0',
+      paragraphId: 10,
+      text: '下一段正文',
+      partIndex: 0,
+    );
+    final profile = VoiceProfile.cloud(
+      baseUrl: 'https://example.com',
+      model: 'tts-model',
+      voice: 'voice-a',
+      speed: 1,
+      outputFormat: 'mp3',
+    );
+
+    final prefetching = provider as PrefetchingSpeechProvider;
+    await prefetching.prefetch(segment, profile);
+
+    expect(engine.filePath, isNull);
+    expect(synthesizer.calls, 1);
+    await provider.prepare(segment, profile);
+    expect(engine.filePath, isNotNull);
+    expect(synthesizer.calls, 1);
+
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
 }
 
 final class FakeCloudSpeechSynthesizer implements CloudSpeechSynthesizer {
+  int calls = 0;
+
   @override
   Future<Uint8List> synthesize(
     SpeechSegment segment,
     VoiceProfile profile,
   ) async {
+    calls++;
     return Uint8List.fromList(const [0x49, 0x44, 0x33, 0x04]);
   }
 }

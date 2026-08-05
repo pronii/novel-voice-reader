@@ -90,6 +90,7 @@ final class PlaybackCoordinator implements PlaybackController {
   List<SpeechSegment> _segments = const [];
   int _segmentIndex = 0;
   double _speed = 1;
+  int _playbackGeneration = 0;
 
   @override
   PlaybackCursor? get cursor => _cursor;
@@ -158,6 +159,7 @@ final class PlaybackCoordinator implements PlaybackController {
   }
 
   Future<void> dispose() async {
+    _playbackGeneration++;
     try {
       await _subscription.cancel();
       final provider = _provider;
@@ -172,6 +174,7 @@ final class PlaybackCoordinator implements PlaybackController {
   }
 
   Future<void> _startParagraph(PlaybackParagraph paragraph) async {
+    final generation = ++_playbackGeneration;
     _segments = _segmenter.split(
       paragraphId: paragraph.id,
       text: paragraph.text,
@@ -183,6 +186,7 @@ final class PlaybackCoordinator implements PlaybackController {
     if (!_cursorChanges.isClosed) {
       _cursorChanges.add(paragraph.cursor);
     }
+    _schedulePrefetch(generation);
   }
 
   Future<void> _prepareAndPlayCurrentSegment() async {
@@ -207,6 +211,7 @@ final class PlaybackCoordinator implements PlaybackController {
     if (_segmentIndex + 1 < _segments.length) {
       _segmentIndex++;
       await _prepareAndPlayCurrentSegment();
+      _schedulePrefetch(_playbackGeneration);
       return;
     }
 
@@ -221,5 +226,48 @@ final class PlaybackCoordinator implements PlaybackController {
     }
     await _progress.confirm(next.cursor);
     await _startParagraph(next);
+  }
+
+  void _schedulePrefetch(int generation) {
+    final provider = _provider;
+    if (provider is PrefetchingSpeechProvider) {
+      unawaited(
+        _prefetchNext(provider as PrefetchingSpeechProvider, generation),
+      );
+    }
+  }
+
+  Future<void> _prefetchNext(
+    PrefetchingSpeechProvider provider,
+    int generation,
+  ) async {
+    try {
+      SpeechSegment? segment;
+      if (_segmentIndex + 1 < _segments.length) {
+        segment = _segments[_segmentIndex + 1];
+      } else {
+        final current = _cursor;
+        if (current == null) {
+          return;
+        }
+        final next = await _paragraphs.nextAfter(current);
+        if (next == null || generation != _playbackGeneration) {
+          return;
+        }
+        final segments = _segmenter.split(
+          paragraphId: next.id,
+          text: next.text,
+          maxCharacters: _voiceProfile.maxSegmentCharacters,
+        );
+        if (segments.isNotEmpty) {
+          segment = segments.first;
+        }
+      }
+      if (segment != null && generation == _playbackGeneration) {
+        await provider.prefetch(segment, _voiceProfile);
+      }
+    } catch (_) {
+      // Normal prepare remains the authoritative fallback and error path.
+    }
   }
 }

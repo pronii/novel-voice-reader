@@ -24,6 +24,10 @@ abstract interface class AdjustableSpeechProvider {
   Future<void> setPlaybackSpeed(double speed);
 }
 
+abstract interface class PrefetchingSpeechProvider {
+  Future<void> prefetch(SpeechSegment segment, VoiceProfile profile);
+}
+
 sealed class SpeechEvent {
   const SpeechEvent();
 }

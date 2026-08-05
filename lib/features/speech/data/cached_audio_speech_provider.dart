@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:just_audio/just_audio.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
+import 'package:novel_voice_reader/features/downloads/domain/cache_key.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
@@ -62,7 +64,8 @@ final class CachedAudioSpeechProvider
     implements
         SpeechProvider,
         DisposableSpeechProvider,
-        AdjustableSpeechProvider {
+        AdjustableSpeechProvider,
+        PrefetchingSpeechProvider {
   CachedAudioSpeechProvider({required this.cache, required this.engine}) {
     _completionSubscription = engine.completed.listen((_) => _onCompleted());
   }
@@ -71,6 +74,7 @@ final class CachedAudioSpeechProvider
   final AudioPlaybackEngine engine;
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
   late final StreamSubscription<void> _completionSubscription;
+  final Map<String, Future<File>> _inFlight = {};
   SpeechSegment? _segment;
   bool _started = false;
 
@@ -82,7 +86,7 @@ final class CachedAudioSpeechProvider
     _segment = segment;
     _started = false;
     try {
-      final file = await cache.obtain(segment, profile);
+      final file = await _obtain(segment, profile);
       await engine.setFilePath(file.path);
     } catch (error) {
       final failure = error is AppFailure
@@ -91,6 +95,11 @@ final class CachedAudioSpeechProvider
       _events.add(SpeechFailed(segmentId: segment.id, failure: failure));
       rethrow;
     }
+  }
+
+  @override
+  Future<void> prefetch(SpeechSegment segment, VoiceProfile profile) async {
+    await _obtain(segment, profile);
   }
 
   @override
@@ -161,5 +170,22 @@ final class CachedAudioSpeechProvider
         );
       }
     }
+  }
+
+  Future<File> _obtain(SpeechSegment segment, VoiceProfile profile) {
+    final key = CacheKey.forSegment(segment, profile);
+    final existing = _inFlight[key];
+    if (existing != null) {
+      return existing;
+    }
+
+    late final Future<File> operation;
+    operation = cache.obtain(segment, profile).whenComplete(() {
+      if (identical(_inFlight[key], operation)) {
+        _inFlight.remove(key);
+      }
+    });
+    _inFlight[key] = operation;
+    return operation;
   }
 }
