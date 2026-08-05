@@ -104,6 +104,31 @@ The player and background coordinator continue to advance through paragraphs
 and chapters using the database source. Existing playback speed behavior is
 unchanged.
 
+### Playback Highlight And Follow
+
+The reading position and playback position are separate states. Scrolling may
+persist a new reading position, but it must not pretend that the newly visible
+paragraph is currently playing.
+
+The playback runtime publishes a cursor whenever playback starts a paragraph,
+including automatic paragraph and chapter advancement. While the reader is
+open, it maps that cursor to the owning chapter section and paragraph and uses
+a dedicated playing highlight. Only one paragraph may have the playing
+highlight.
+
+Playback follow is active when playback is started from the reader. As the
+cursor advances, the reader keeps the highlighted paragraph visible without
+resetting the chapter window. If the cursor enters an unloaded adjacent
+chapter, that chapter is loaded into the same continuous window before the
+highlight is applied.
+
+A deliberate user scroll suspends automatic following so the viewport is not
+pulled away from text the user is inspecting. Playback and highlight updates
+continue in the background. Starting playback from a paragraph or explicitly
+selecting the highlighted playback position resumes automatic following.
+Stopping playback clears the playing highlight. Pausing playback retains the
+highlight at the paused paragraph.
+
 ## Loading And Failure States
 
 The initial book load keeps the existing full-page loading and error states.
@@ -128,14 +153,22 @@ Tests must demonstrate:
    the next does not rebuild or reset the list position.
 3. The visible next chapter updates progress with that chapter's ID.
 4. Starting playback from appended chapter text uses the appended chapter ID.
-5. A directory jump centers a new window and positions the selected chapter.
-6. Opening the directory after scrolling marks and locates the visible chapter.
-7. Prepending a previous chapter preserves the visual anchor.
-8. Loading a sixth chapter evicts only the farthest offscreen section, retains
+5. Automatic playback advancement moves the playing highlight to the new
+   paragraph and keeps it visible while follow is active.
+6. Playback advancing into an adjacent chapter loads that section inline and
+   highlights the correct chapter-owned paragraph.
+7. A deliberate manual scroll suspends viewport following without freezing the
+   playback highlight; starting playback from a paragraph resumes following.
+8. Reading-progress updates do not change the playing highlight, and pausing
+   retains it while stopping clears it.
+9. A directory jump centers a new window and positions the selected chapter.
+10. Opening the directory after scrolling marks and locates the visible chapter.
+11. Prepending a previous chapter preserves the visual anchor.
+12. Loading a sixth chapter evicts only the farthest offscreen section, retains
    at most five chapter bodies, and preserves the visual anchor.
-9. Repeated edge notifications do not start duplicate loads.
-10. Adjacent load failure keeps existing text visible and can retry.
-11. The final chapter terminates with `全书读完` and performs no extra load.
+13. Repeated edge notifications do not start duplicate loads.
+14. Adjacent load failure keeps existing text visible and can retry.
+15. The final chapter terminates with `全书读完` and performs no extra load.
 
 Existing tests for saved position restoration, searchable directories,
 playback controls, and progress debounce must continue to pass.
