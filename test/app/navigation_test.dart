@@ -12,6 +12,7 @@ import 'package:novel_voice_reader/features/playback/domain/playback_coordinator
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
+import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
@@ -133,6 +134,138 @@ void main() {
       find.byKey(ValueKey<String>('playing-paragraph-${chapter.id}-0')),
     );
 
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
+  testWidgets('reads continuously across chapters and restores the position', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    final bookId = await _createChapteredBook(
+      database,
+      title: '连续阅读测试书',
+      chapterCount: 7,
+      paragraphCount: 6,
+    );
+    final chapters = await database.chaptersForBook(bookId);
+    await database.upsertProgress(
+      bookId: bookId,
+      chapterId: chapters[2].id,
+      paragraphIndex: 0,
+    );
+
+    await tester.pumpWidget(NovelVoiceReaderApp(database: database));
+    await _pumpUntilFound(tester, find.text('连续阅读测试书'));
+    await tester.tap(find.text('连续阅读测试书'));
+    await _pumpUntilFound(tester, find.text('第3章第1段正文。'));
+    await tester.scrollUntilVisible(
+      find.text('第6章第2段正文。'),
+      320,
+      scrollable: find.descendant(
+        of: find.byType(ScrollablePositionedList),
+        matching: find.byType(Scrollable),
+      ),
+      maxScrolls: 40,
+    );
+    await tester.drag(
+      find.byType(ScrollablePositionedList),
+      const Offset(0, -300),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(find.text('第6章第2段正文。'));
+    ReadingProgressRecord? progress;
+    for (var attempt = 0; attempt < 20; attempt++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      progress = await database.progressForBook(bookId);
+      if (progress?.chapterId == chapters[5].id) {
+        break;
+      }
+    }
+    expect(progress?.chapterId, chapters[5].id);
+
+    await tester.tap(find.byTooltip('返回书架'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('连续阅读测试书'));
+    await _pumpUntilFound(tester, find.text('第6章第2段正文。'));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
+  testWidgets('jumps from the directory to a distant chapter window', (
+    tester,
+  ) async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    await _createChapteredBook(
+      database,
+      title: '目录跳转测试书',
+      chapterCount: 7,
+      paragraphCount: 2,
+    );
+
+    await tester.pumpWidget(NovelVoiceReaderApp(database: database));
+    await _pumpUntilFound(tester, find.text('目录跳转测试书'));
+    await tester.tap(find.text('目录跳转测试书'));
+    await _pumpUntilFound(tester, find.byTooltip('章节目录'));
+    await tester.tap(find.byTooltip('章节目录'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '7');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(ListTile, '第7章'));
+    await _pumpUntilFound(tester, find.text('第7章第1段正文。'));
+
+    expect(find.text('第7章第1段正文。'), findsOneWidget);
+    expect(find.text('第3章第1段正文。'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
+  testWidgets('follows playback into a chapter outside the reading window', (
+    tester,
+  ) async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    final bookId = await _createChapteredBook(
+      database,
+      title: '跨章高亮测试书',
+      chapterCount: 7,
+      paragraphCount: 1,
+    );
+    final chapters = await database.chaptersForBook(bookId);
+    final controller = AttachablePlaybackController();
+    final runtime = PlaybackRuntime(
+      controller: controller,
+      handler: NovelAudioHandler(controller),
+    );
+    final target = PlaybackCursor(chapterId: chapters[6].id, paragraphIndex: 0);
+    await runtime.replaceAndPlayFrom(
+      PlaybackCoordinator(
+        provider: _NavigationSpeechProvider(),
+        progress: _NavigationProgressRepository(),
+        paragraphs: _NavigationParagraphSource(),
+        voiceProfile: VoiceProfile.system(),
+      ),
+      target,
+      token: runtime.beginReplacement(),
+    );
+
+    await tester.pumpWidget(
+      NovelVoiceReaderApp(database: database, playbackRuntime: runtime),
+    );
+    await _pumpUntilFound(tester, find.text('跨章高亮测试书'));
+    await tester.tap(find.text('跨章高亮测试书'));
+    await _pumpUntilFound(
+      tester,
+      find.byKey(ValueKey<String>('playing-paragraph-${chapters[6].id}-0')),
+    );
+
+    expect(find.text('第7章第1段正文。'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 1));
   });
@@ -414,13 +547,51 @@ final class _NavigationSpeechProvider implements SpeechProvider {
   Future<void> play() async {}
 
   @override
-  Future<void> prepare(segment, VoiceProfile profile) async {}
+  Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {}
 
   @override
   Future<void> resume() async {}
 
   @override
   Future<void> stop() => _events.close();
+}
+
+Future<int> _createChapteredBook(
+  AppDatabase database, {
+  required String title,
+  required int chapterCount,
+  required int paragraphCount,
+}) async {
+  final bookId = await database
+      .into(database.books)
+      .insert(BooksCompanion.insert(title: title));
+  for (var chapterIndex = 0; chapterIndex < chapterCount; chapterIndex++) {
+    final chapterId = await database
+        .into(database.chapters)
+        .insert(
+          ChaptersCompanion.insert(
+            bookId: bookId,
+            chapterIndex: chapterIndex,
+            title: '第${chapterIndex + 1}章',
+          ),
+        );
+    for (
+      var paragraphIndex = 0;
+      paragraphIndex < paragraphCount;
+      paragraphIndex++
+    ) {
+      await database
+          .into(database.paragraphs)
+          .insert(
+            ParagraphsCompanion.insert(
+              chapterId: chapterId,
+              paragraphIndex: paragraphIndex,
+              content: '第${chapterIndex + 1}章第${paragraphIndex + 1}段正文。',
+            ),
+          );
+    }
+  }
+  return bookId;
 }
 
 Future<void> _openTencentSettings(WidgetTester tester) async {
