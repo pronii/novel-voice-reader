@@ -44,9 +44,7 @@ final class MiMoTtsClient implements CloudSpeechSynthesizer {
         return await _request(segment, profile, apiKey);
       } on DioException catch (error) {
         if (attempt < _maxAttempts && _isRetriable(error)) {
-          await _delay(
-            Duration(milliseconds: 500 * (1 << (attempt - 1))),
-          );
+          await _delay(Duration(milliseconds: 500 * (1 << (attempt - 1))));
           continue;
         }
         throw _failureFor(error);
@@ -91,10 +89,7 @@ final class MiMoTtsClient implements CloudSpeechSynthesizer {
       data: {
         'model': profile.model,
         'messages': [
-          {
-            'role': 'user',
-            'content': profile.style ?? defaultNarrationStyle,
-          },
+          {'role': 'user', 'content': profile.style ?? defaultNarrationStyle},
           {'role': 'assistant', 'content': segment.text},
         ],
         'audio': {'format': profile.outputFormat, 'voice': profile.voice},

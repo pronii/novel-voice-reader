@@ -18,10 +18,7 @@ void main() {
       dio: Dio()..httpClientAdapter = adapter,
       credentials: SecureCredentials(FakeMiMoSecureStore('mimo-secret')),
     );
-    final profile = VoiceProfile.mimo(
-      voice: '茉莉',
-      style: '温柔沉稳地讲述，语速稍慢。',
-    );
+    final profile = VoiceProfile.mimo(voice: '茉莉', style: '温柔沉稳地讲述，语速稍慢。');
 
     final bytes = await client.synthesize(testSegment, profile);
 
@@ -79,7 +76,10 @@ void main() {
   });
 
   test('rejects invalid Base64 or non-WAV audio', () async {
-    for (final data in ['not-base64', base64Encode([1, 2, 3])]) {
+    for (final data in [
+      'not-base64',
+      base64Encode([1, 2, 3]),
+    ]) {
       final adapter = MiMoRecordingAdapter([
         MiMoOutcome.success(_audioResponseData(data)),
       ]);
@@ -120,52 +120,58 @@ void main() {
     expect(delays, [const Duration(milliseconds: 500)]);
   });
 
-  test('maps authentication and exhausted rate limits to safe failures', () async {
-    for (final scenario in [
-      (status: 401, message: 'MiMo 语音服务认证失败'),
-      (status: 429, message: 'MiMo 语音服务请求过于频繁'),
-    ]) {
+  test(
+    'maps authentication and exhausted rate limits to safe failures',
+    () async {
+      for (final scenario in [
+        (status: 401, message: 'MiMo 语音服务认证失败'),
+        (status: 429, message: 'MiMo 语音服务请求过于频繁'),
+      ]) {
+        final adapter = MiMoRecordingAdapter([
+          MiMoOutcome.status(scenario.status),
+        ]);
+        final client = MiMoTtsClient(
+          dio: Dio()..httpClientAdapter = adapter,
+          credentials: SecureCredentials(FakeMiMoSecureStore('mimo-secret')),
+          maxAttempts: 1,
+        );
+
+        await expectLater(
+          client.synthesize(testSegment, VoiceProfile.mimo()),
+          throwsA(
+            isA<AppFailure>().having(
+              (failure) => failure.message,
+              'message',
+              scenario.message,
+            ),
+          ),
+        );
+      }
+    },
+  );
+
+  test(
+    'tests the entered key without reading or saving secure storage',
+    () async {
       final adapter = MiMoRecordingAdapter([
-        MiMoOutcome.status(scenario.status),
+        MiMoOutcome.success(_audioResponse(testWave)),
       ]);
+      final store = FakeMiMoSecureStore('stored-key');
       final client = MiMoTtsClient(
         dio: Dio()..httpClientAdapter = adapter,
-        credentials: SecureCredentials(FakeMiMoSecureStore('mimo-secret')),
-        maxAttempts: 1,
+        credentials: SecureCredentials(store),
       );
 
-      await expectLater(
-        client.synthesize(testSegment, VoiceProfile.mimo()),
-        throwsA(
-          isA<AppFailure>().having(
-            (failure) => failure.message,
-            'message',
-            scenario.message,
-          ),
-        ),
+      await client.testConnection(
+        apiKey: '  entered-key  ',
+        profile: VoiceProfile.mimo(voice: 'Dean'),
       );
-    }
-  });
 
-  test('tests the entered key without reading or saving secure storage', () async {
-    final adapter = MiMoRecordingAdapter([
-      MiMoOutcome.success(_audioResponse(testWave)),
-    ]);
-    final store = FakeMiMoSecureStore('stored-key');
-    final client = MiMoTtsClient(
-      dio: Dio()..httpClientAdapter = adapter,
-      credentials: SecureCredentials(store),
-    );
-
-    await client.testConnection(
-      apiKey: '  entered-key  ',
-      profile: VoiceProfile.mimo(voice: 'Dean'),
-    );
-
-    expect(adapter.request?.headers['api-key'], 'entered-key');
-    expect(store.reads, 0);
-    expect(store.writes, 0);
-  });
+      expect(adapter.request?.headers['api-key'], 'entered-key');
+      expect(store.reads, 0);
+      expect(store.writes, 0);
+    },
+  );
 }
 
 Map<String, dynamic> _audioResponse(Uint8List bytes) =>

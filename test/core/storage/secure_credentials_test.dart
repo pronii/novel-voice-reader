@@ -111,10 +111,7 @@ void main() {
 
     expect(await credentials.readMiMoApiKey(), 'mimo-secret');
     expect(await credentials.readZhipuApiKey(), 'zhipu-secret');
-    expect(store.values.keys, {
-      'zhipu_tts_api_key',
-      'mimo_tts_api_key',
-    });
+    expect(store.values.keys, {'zhipu_tts_api_key', 'mimo_tts_api_key'});
 
     await credentials.deleteMiMoApiKey();
     expect(await credentials.readMiMoApiKey(), isNull);
