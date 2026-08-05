@@ -6,6 +6,7 @@ import 'package:novel_voice_reader/features/downloads/data/audio_cache_repositor
 import 'package:novel_voice_reader/features/speech/data/azure_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/data/cloud_tts_client.dart';
+import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/system_tts_adapter.dart';
 import 'package:novel_voice_reader/features/speech/data/tencent_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
@@ -49,6 +50,9 @@ final class SpeechProviderFactory {
           credentials: credentials,
           usageCounter: tencentUsageCounter,
         ),
+      ),
+      SpeechProviderType.mimo => _cached(
+        MiMoTtsClient(dio: dio, credentials: credentials),
       ),
     };
   }

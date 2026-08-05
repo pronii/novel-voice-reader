@@ -16,6 +16,7 @@ abstract final class CacheKey {
       profile.voice,
       profile.speed,
       profile.outputFormat,
+      profile.style,
     ]);
     return sha256.convert(utf8.encode(canonical)).toString();
   }

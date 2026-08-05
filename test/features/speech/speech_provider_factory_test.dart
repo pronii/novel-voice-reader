@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/speech/data/azure_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
+import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
 import 'package:novel_voice_reader/features/speech/data/tencent_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
@@ -89,6 +90,31 @@ void main() {
       (cached.cache.synthesizer as TencentTtsClient).usageCounter,
       same(usageCounter),
     );
+    await cached.dispose();
+  });
+
+  test('creates cached MiMo playback for a MiMo profile', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'provider-factory-',
+    );
+    addTearDown(() async {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    });
+    final factory = SpeechProviderFactory(
+      dio: Dio(),
+      credentials: SecureCredentials(EmptySecureStore()),
+      cacheDirectory: directory,
+      tencentUsageCounter: FakeTencentUsageCounter(),
+      audioEngineFactory: FakeAudioPlaybackEngine.new,
+    );
+
+    final provider = factory.create(VoiceProfile.mimo());
+
+    expect(provider, isA<CachedAudioSpeechProvider>());
+    final cached = provider as CachedAudioSpeechProvider;
+    expect(cached.cache.synthesizer, isA<MiMoTtsClient>());
     await cached.dispose();
   });
 }

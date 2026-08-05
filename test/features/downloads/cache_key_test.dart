@@ -84,4 +84,24 @@ void main() {
       isNot(CacheKey.forSegment(secondSegment, profile)),
     );
   });
+
+  test('changes when the MiMo narration style changes', () {
+    const segment = SpeechSegment(
+      id: '1:0',
+      paragraphId: 1,
+      text: '正文',
+      partIndex: 0,
+    );
+
+    final calm = CacheKey.forSegment(
+      segment,
+      VoiceProfile.mimo(style: '平静舒缓地朗读'),
+    );
+    final tense = CacheKey.forSegment(
+      segment,
+      VoiceProfile.mimo(style: '紧张急促地朗读'),
+    );
+
+    expect(calm, isNot(tense));
+  });
 }
