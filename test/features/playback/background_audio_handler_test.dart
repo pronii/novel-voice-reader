@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
@@ -115,6 +117,162 @@ void main() {
 
     expect(replacementProvider.speedChanges, [1.5]);
     expect(handler.playbackState.value.speed, 1.5);
+    await runtime.dispose();
+  });
+
+  test('runtime publishes the active coordinator playback timeline', () async {
+    final provider = RuntimeSpeechProvider();
+    final controller = AttachablePlaybackController();
+    final handler = NovelAudioHandler(controller);
+    final runtime = PlaybackRuntime(controller: controller, handler: handler);
+    await runtime.replaceAndPlayFrom(
+      createCoordinator(provider),
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      token: runtime.beginReplacement(),
+    );
+
+    provider.publishTimeline(
+      const PlaybackTimeline(
+        position: Duration(seconds: 15),
+        duration: Duration(minutes: 1),
+      ),
+    );
+
+    expect(handler.currentTimeline.position, const Duration(seconds: 15));
+    expect(handler.currentTimeline.duration, const Duration(minutes: 1));
+    await runtime.dispose();
+    expect(handler.currentTimeline, PlaybackTimeline.zero);
+  });
+
+  test('skipping after pause republishes the real playing state', () async {
+    final provider = RuntimeSpeechProvider();
+    final controller = AttachablePlaybackController();
+    final handler = NovelAudioHandler(controller);
+    final runtime = PlaybackRuntime(controller: controller, handler: handler);
+    await runtime.replaceAndPlayFrom(
+      createCoordinator(provider, paragraphs: TwoParagraphSource()),
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      token: runtime.beginReplacement(),
+    );
+
+    expect(handler.playbackState.value.playing, isTrue);
+    await handler.pause();
+    expect(handler.playbackState.value.playing, isFalse);
+
+    await handler.skipToNext();
+
+    expect(handler.playbackState.value.playing, isTrue);
+    await runtime.dispose();
+  });
+
+  test('natural completion resets playing state and timeline', () async {
+    final provider = RuntimeSpeechProvider();
+    final controller = AttachablePlaybackController();
+    final handler = NovelAudioHandler(controller);
+    final runtime = PlaybackRuntime(controller: controller, handler: handler);
+    await runtime.replaceAndPlayFrom(
+      createCoordinator(provider),
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      token: runtime.beginReplacement(),
+    );
+    provider.publishTimeline(
+      const PlaybackTimeline(
+        position: Duration(seconds: 30),
+        duration: Duration(seconds: 30),
+      ),
+    );
+
+    provider.complete(provider.prepared.single.id);
+    await pumpEventQueue();
+
+    expect(handler.playbackState.value.playing, isFalse);
+    expect(
+      handler.playbackState.value.processingState,
+      AudioProcessingState.idle,
+    );
+    expect(handler.currentTimeline, PlaybackTimeline.zero);
+    await runtime.dispose();
+  });
+
+  test(
+    'an internal speech segment change clears the previous timeline',
+    () async {
+      final provider = RuntimeSpeechProvider();
+      final controller = AttachablePlaybackController();
+      final handler = NovelAudioHandler(controller);
+      final runtime = PlaybackRuntime(controller: controller, handler: handler);
+      await runtime.replaceAndPlayFrom(
+        createCoordinator(provider, paragraphs: LongParagraphSource()),
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+        token: runtime.beginReplacement(),
+      );
+      provider.publishTimeline(
+        const PlaybackTimeline(
+          position: Duration(seconds: 30),
+          duration: Duration(seconds: 30),
+        ),
+      );
+
+      provider.complete(provider.prepared.single.id);
+      await pumpEventQueue();
+
+      expect(provider.prepared, hasLength(2));
+      expect(handler.currentTimeline, PlaybackTimeline.zero);
+      await runtime.dispose();
+    },
+  );
+
+  test('an asynchronous speech failure resets the playing state', () async {
+    final provider = RuntimeSpeechProvider();
+    final failures = <AppFailure>[];
+    final controller = AttachablePlaybackController();
+    final handler = NovelAudioHandler(controller);
+    final runtime = PlaybackRuntime(controller: controller, handler: handler);
+    await runtime.replaceAndPlayFrom(
+      createCoordinator(provider, onFailure: failures.add),
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      token: runtime.beginReplacement(),
+    );
+    provider.publishTimeline(
+      const PlaybackTimeline(
+        position: Duration(seconds: 5),
+        duration: Duration(seconds: 30),
+      ),
+    );
+
+    provider.fail(provider.prepared.single.id);
+    await pumpEventQueue();
+
+    expect(handler.playbackState.value.playing, isFalse);
+    expect(handler.currentTimeline, PlaybackTimeline.zero);
+    expect(failures, hasLength(1));
+    await runtime.dispose();
+  });
+
+  test('a stale completion cannot mark newer playback idle', () async {
+    final provider = RuntimeSpeechProvider();
+    final paragraphs = DelayedCompletionParagraphSource();
+    final controller = AttachablePlaybackController();
+    final handler = NovelAudioHandler(controller);
+    final runtime = PlaybackRuntime(controller: controller, handler: handler);
+    await runtime.replaceAndPlayFrom(
+      createCoordinator(provider, paragraphs: paragraphs),
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 1),
+      token: runtime.beginReplacement(),
+    );
+
+    provider.complete(provider.prepared.single.id);
+    await paragraphs.nextRequested.future;
+    await handler.skipToPrevious();
+    paragraphs.nextResult.complete(null);
+    await pumpEventQueue();
+
+    expect(controller.cursor?.paragraphIndex, 0);
+    expect(handler.playbackState.value.playing, isTrue);
+    expect(
+      handler.playbackState.value.processingState,
+      AudioProcessingState.ready,
+    );
     await runtime.dispose();
   });
 
@@ -455,13 +613,71 @@ void main() {
   });
 }
 
-PlaybackCoordinator createCoordinator(RuntimeSpeechProvider provider) {
+PlaybackCoordinator createCoordinator(
+  RuntimeSpeechProvider provider, {
+  PlaybackParagraphSource? paragraphs,
+  void Function(AppFailure failure)? onFailure,
+}) {
   return PlaybackCoordinator(
     provider: provider,
     progress: RuntimeProgressRepository(),
-    paragraphs: RuntimeParagraphSource(),
+    paragraphs: paragraphs ?? RuntimeParagraphSource(),
     voiceProfile: VoiceProfile.system(),
+    onFailure: onFailure,
   );
+}
+
+final class DelayedCompletionParagraphSource
+    implements PlaybackParagraphSource {
+  final nextRequested = Completer<void>();
+  final nextResult = Completer<PlaybackParagraph?>();
+
+  @override
+  Future<PlaybackParagraph?> at(PlaybackCursor cursor) async =>
+      PlaybackParagraph(
+        id: cursor.paragraphIndex + 1,
+        cursor: cursor,
+        text: '正文',
+      );
+
+  @override
+  Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor) {
+    if (!nextRequested.isCompleted) nextRequested.complete();
+    return nextResult.future;
+  }
+}
+
+final class TwoParagraphSource implements PlaybackParagraphSource {
+  @override
+  Future<PlaybackParagraph?> at(PlaybackCursor cursor) async =>
+      PlaybackParagraph(
+        id: cursor.paragraphIndex + 1,
+        cursor: cursor,
+        text: '正文',
+      );
+
+  @override
+  Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor) async {
+    if (cursor.paragraphIndex >= 1) return null;
+    final next = PlaybackCursor(
+      chapterId: cursor.chapterId,
+      paragraphIndex: cursor.paragraphIndex + 1,
+    );
+    return at(next);
+  }
+}
+
+final class LongParagraphSource implements PlaybackParagraphSource {
+  @override
+  Future<PlaybackParagraph?> at(PlaybackCursor cursor) async =>
+      PlaybackParagraph(
+        id: 1,
+        cursor: cursor,
+        text: List.filled(1200, '字').join(),
+      );
+
+  @override
+  Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor) async => null;
 }
 
 final class FakePlaybackController implements PlaybackController {
@@ -533,7 +749,8 @@ final class RuntimeSpeechProvider
     implements
         SpeechProvider,
         DisposableSpeechProvider,
-        AdjustableSpeechProvider {
+        AdjustableSpeechProvider,
+        TimedSpeechProvider {
   RuntimeSpeechProvider({
     this.disposeCompleter,
     this.disposeError,
@@ -545,6 +762,8 @@ final class RuntimeSpeechProvider
 
   final StreamController<SpeechEvent> _events =
       StreamController<SpeechEvent>.broadcast();
+  final StreamController<PlaybackTimeline> _timeline =
+      StreamController<PlaybackTimeline>.broadcast(sync: true);
   final Completer<void>? disposeCompleter;
   final Object? disposeError;
   final Object? prepareError;
@@ -559,6 +778,9 @@ final class RuntimeSpeechProvider
   Stream<SpeechEvent> get events => _events.stream;
 
   @override
+  Stream<PlaybackTimeline> get playbackTimeline => _timeline.stream;
+
+  @override
   Future<void> dispose() async {
     disposeCalls++;
     await disposeCompleter?.future;
@@ -567,6 +789,7 @@ final class RuntimeSpeechProvider
       throw error;
     }
     await _events.close();
+    await _timeline.close();
   }
 
   @override
@@ -599,4 +822,13 @@ final class RuntimeSpeechProvider
 
   @override
   Future<void> stop() async {}
+
+  void publishTimeline(PlaybackTimeline timeline) => _timeline.add(timeline);
+
+  void complete(String segmentId) =>
+      _events.add(SpeechCompleted(segmentId: segmentId));
+
+  void fail(String segmentId) => _events.add(
+    SpeechFailed(segmentId: segmentId, failure: const AppFailure('播放失败')),
+  );
 }

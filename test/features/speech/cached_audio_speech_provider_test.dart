@@ -4,12 +4,41 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
+  test('forwards the audio engine playback timeline', () async {
+    final directory = await Directory.systemTemp.createTemp('cached-timeline-');
+    final engine = FakeAudioPlaybackEngine();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: FakeCloudSpeechSynthesizer(),
+      ),
+      engine: engine,
+    );
+    final timelines = <PlaybackTimeline>[];
+    final subscription = (provider as TimedSpeechProvider).playbackTimeline
+        .listen(timelines.add);
+
+    engine.publishTimeline(
+      const PlaybackTimeline(
+        position: Duration(seconds: 12),
+        duration: Duration(seconds: 60),
+      ),
+    );
+
+    expect(timelines.single.position, const Duration(seconds: 12));
+    expect(timelines.single.duration, const Duration(seconds: 60));
+    await subscription.cancel();
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
+
   test('forwards playback speed to an adjustable audio engine', () async {
     final directory = await Directory.systemTemp.createTemp('cached-speed-');
     final engine = AdjustableFakeAudioPlaybackEngine();
@@ -260,8 +289,10 @@ final class ControllableCloudSpeechSynthesizer
   }
 }
 
-class FakeAudioPlaybackEngine implements AudioPlaybackEngine {
+class FakeAudioPlaybackEngine
+    implements AudioPlaybackEngine, TimedAudioPlaybackEngine {
   final _completed = StreamController<void>.broadcast(sync: true);
+  final _timeline = StreamController<PlaybackTimeline>.broadcast(sync: true);
   String? filePath;
   int playCalls = 0;
   int pauseCalls = 0;
@@ -271,6 +302,9 @@ class FakeAudioPlaybackEngine implements AudioPlaybackEngine {
 
   @override
   Stream<void> get completed => _completed.stream;
+
+  @override
+  Stream<PlaybackTimeline> get playbackTimeline => _timeline.stream;
 
   @override
   Future<void> setFilePath(String path) async {
@@ -297,9 +331,12 @@ class FakeAudioPlaybackEngine implements AudioPlaybackEngine {
   Future<void> dispose() async {
     disposeCalls++;
     await _completed.close();
+    await _timeline.close();
   }
 
   void complete() => _completed.add(null);
+
+  void publishTimeline(PlaybackTimeline timeline) => _timeline.add(timeline);
 }
 
 final class AdjustableFakeAudioPlaybackEngine extends FakeAudioPlaybackEngine

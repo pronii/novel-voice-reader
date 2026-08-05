@@ -1,4 +1,5 @@
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
@@ -26,6 +27,10 @@ abstract interface class AdjustableSpeechProvider {
 
 abstract interface class PrefetchingSpeechProvider {
   Future<void> prefetch(SpeechSegment segment, VoiceProfile profile);
+}
+
+abstract interface class TimedSpeechProvider {
+  Stream<PlaybackTimeline> get playbackTimeline;
 }
 
 sealed class SpeechEvent {

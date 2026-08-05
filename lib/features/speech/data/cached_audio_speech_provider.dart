@@ -5,6 +5,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
 import 'package:novel_voice_reader/features/downloads/domain/cache_key.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
@@ -23,12 +24,19 @@ abstract interface class AudioPlaybackEngine {
   Future<void> dispose();
 }
 
+abstract interface class TimedAudioPlaybackEngine {
+  Stream<PlaybackTimeline> get playbackTimeline;
+}
+
 abstract interface class AdjustableAudioPlaybackEngine {
   Future<void> setSpeed(double speed);
 }
 
 final class JustAudioPlaybackEngine
-    implements AudioPlaybackEngine, AdjustableAudioPlaybackEngine {
+    implements
+        AudioPlaybackEngine,
+        AdjustableAudioPlaybackEngine,
+        TimedAudioPlaybackEngine {
   JustAudioPlaybackEngine([AudioPlayer? player])
     : _player = player ?? AudioPlayer();
 
@@ -38,6 +46,12 @@ final class JustAudioPlaybackEngine
   Stream<void> get completed => _player.processingStateStream
       .where((state) => state == ProcessingState.completed)
       .map<void>((_) {});
+
+  @override
+  Stream<PlaybackTimeline> get playbackTimeline => _player.positionStream.map(
+    (position) =>
+        PlaybackTimeline(position: position, duration: _player.duration),
+  );
 
   @override
   Future<void> setFilePath(String path) async {
@@ -65,7 +79,8 @@ final class CachedAudioSpeechProvider
         SpeechProvider,
         DisposableSpeechProvider,
         AdjustableSpeechProvider,
-        PrefetchingSpeechProvider {
+        PrefetchingSpeechProvider,
+        TimedSpeechProvider {
   CachedAudioSpeechProvider({required this.cache, required this.engine}) {
     _completionSubscription = engine.completed.listen((_) => _onCompleted());
   }
@@ -82,6 +97,14 @@ final class CachedAudioSpeechProvider
 
   @override
   Stream<SpeechEvent> get events => _events.stream;
+
+  @override
+  Stream<PlaybackTimeline> get playbackTimeline {
+    final playbackEngine = engine;
+    return playbackEngine is TimedAudioPlaybackEngine
+        ? (playbackEngine as TimedAudioPlaybackEngine).playbackTimeline
+        : const Stream<PlaybackTimeline>.empty();
+  }
 
   @override
   Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {

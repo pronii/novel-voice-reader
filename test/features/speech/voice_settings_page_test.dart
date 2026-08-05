@@ -701,4 +701,62 @@ void main() {
     expect(tests, 0);
     expect(find.text('请输入 MiMo API Key'), findsOneWidget);
   });
+
+  testWidgets('restores the saved MiMo profile without exposing its API key', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          initialProfile: VoiceProfile.mimo(
+            voice: 'Dean',
+            style: '沉稳、有磁性，语速稍慢。',
+            speed: 1.25,
+          ),
+          hasSavedMiMoApiKey: true,
+        ),
+      ),
+    );
+
+    expect(find.text('MiMo API Key'), findsOneWidget);
+    expect(find.text('Dean（英文男声）'), findsOneWidget);
+    expect(find.text('语速 1.3x'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.widgetWithText(TextField, '朗读风格（可选）'))
+          .controller
+          ?.text,
+      '沉稳、有磁性，语速稍慢。',
+    );
+    expect(find.text('已保存，留空则保持不变'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.widgetWithText(TextField, 'MiMo API Key'))
+          .controller
+          ?.text,
+      isEmpty,
+    );
+  });
+
+  testWidgets('tests MiMo with the saved key when the input remains blank', (
+    tester,
+  ) async {
+    VoiceSettingsSubmission? tested;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          initialProfile: VoiceProfile.mimo(style: '自然朗读'),
+          hasSavedMiMoApiKey: true,
+          onTestConnection: (submission) async => tested = submission,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('测试连接'));
+    await tester.pumpAndSettle();
+
+    expect(tested?.profile.style, '自然朗读');
+    expect(tested?.credentials.normalizedApiKey, isNull);
+    expect(find.text('连接成功，API Key 可用'), findsOneWidget);
+  });
 }

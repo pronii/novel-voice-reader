@@ -23,12 +23,16 @@ final class VoiceSettingsSubmission {
 final class VoiceSettingsPage extends StatefulWidget {
   const VoiceSettingsPage({
     super.key,
+    this.initialProfile,
+    this.hasSavedMiMoApiKey = false,
     this.onTestConnection,
     this.onSave,
     this.onLoadTencentUsage,
     this.onClearTencentCredential,
   });
 
+  final VoiceProfile? initialProfile;
+  final bool hasSavedMiMoApiKey;
   final Future<void> Function(VoiceSettingsSubmission submission)?
   onTestConnection;
   final Future<void> Function(VoiceSettingsSubmission submission)? onSave;
@@ -96,6 +100,19 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     'Milo': 'Milo（英文男声）',
     'Dean': 'Dean（英文男声）',
   };
+
+  @override
+  void initState() {
+    super.initState();
+    final profile = widget.initialProfile;
+    if (profile == null) return;
+    _provider = profile.providerType;
+    _speed = profile.speed;
+    if (profile.providerType == SpeechProviderType.mimo) {
+      _mimoVoice = profile.voice ?? VoiceProfile.defaultMiMoVoice;
+      _mimoStyle.text = profile.style ?? '';
+    }
+  }
 
   @override
   void dispose() {
@@ -385,7 +402,10 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
         obscureText: true,
         enableSuggestions: false,
         autocorrect: false,
-        decoration: const InputDecoration(labelText: 'MiMo API Key'),
+        decoration: InputDecoration(
+          labelText: 'MiMo API Key',
+          helperText: widget.hasSavedMiMoApiKey ? '已保存，留空则保持不变' : null,
+        ),
       ),
       const SizedBox(height: 12),
       _connectionButton(),
@@ -483,7 +503,8 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       return;
     }
     if (_provider == SpeechProviderType.mimo &&
-        submission.credentials.normalizedApiKey == null) {
+        submission.credentials.normalizedApiKey == null &&
+        !widget.hasSavedMiMoApiKey) {
       _showMessage('请输入 MiMo API Key');
       return;
     }

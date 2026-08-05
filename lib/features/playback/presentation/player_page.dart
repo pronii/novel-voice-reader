@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 
 final class PlayerPage extends StatefulWidget {
   const PlayerPage({
@@ -9,6 +12,10 @@ final class PlayerPage extends StatefulWidget {
     this.onNext,
     this.onPlay,
     this.onPause,
+    this.initialPlaying = false,
+    this.playingChanges,
+    this.initialTimeline = PlaybackTimeline.zero,
+    this.timelineChanges,
     this.initialSpeed = 1,
     this.onSpeedChanged,
   });
@@ -19,6 +26,10 @@ final class PlayerPage extends StatefulWidget {
   final VoidCallback? onNext;
   final VoidCallback? onPlay;
   final VoidCallback? onPause;
+  final bool initialPlaying;
+  final Stream<bool>? playingChanges;
+  final PlaybackTimeline initialTimeline;
+  final Stream<PlaybackTimeline>? timelineChanges;
   final double initialSpeed;
   final Future<void> Function(double speed)? onSpeedChanged;
 
@@ -27,14 +38,27 @@ final class PlayerPage extends StatefulWidget {
 }
 
 final class _PlayerPageState extends State<PlayerPage> {
-  bool _playing = false;
+  late bool _playing;
+  late PlaybackTimeline _timeline;
+  StreamSubscription<bool>? _playingSubscription;
+  StreamSubscription<PlaybackTimeline>? _timelineSubscription;
   late double _speed;
   Future<void> _speedChanges = Future<void>.value();
 
   @override
   void initState() {
     super.initState();
+    _playing = widget.initialPlaying;
+    _timeline = widget.initialTimeline;
     _speed = widget.initialSpeed;
+    _subscribeToPlayback();
+  }
+
+  @override
+  void dispose() {
+    unawaited(_playingSubscription?.cancel());
+    unawaited(_timelineSubscription?.cancel());
+    super.dispose();
   }
 
   @override
@@ -63,7 +87,14 @@ final class _PlayerPageState extends State<PlayerPage> {
               const SizedBox(height: 8),
               Text(widget.chapterTitle, textAlign: TextAlign.center),
               const SizedBox(height: 32),
-              const LinearProgressIndicator(value: 0),
+              LinearProgressIndicator(value: _progress),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(child: Text(_positionLabel)),
+                  Text(_remainingLabel),
+                ],
+              ),
               const SizedBox(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -123,11 +154,57 @@ final class _PlayerPageState extends State<PlayerPage> {
   }
 
   void _togglePlayback() {
-    setState(() => _playing = !_playing);
     if (_playing) {
-      widget.onPlay?.call();
-    } else {
       widget.onPause?.call();
+    } else {
+      widget.onPlay?.call();
     }
+  }
+
+  void _subscribeToPlayback() {
+    _playingSubscription = widget.playingChanges?.listen((playing) {
+      if (mounted && playing != _playing) {
+        setState(() => _playing = playing);
+      }
+    });
+    _timelineSubscription = widget.timelineChanges?.listen((timeline) {
+      if (mounted && timeline != _timeline) {
+        setState(() => _timeline = timeline);
+      }
+    });
+  }
+
+  double? get _progress {
+    final duration = _timeline.duration;
+    if (duration == null || duration <= Duration.zero) return null;
+    return (_timeline.position.inMicroseconds / duration.inMicroseconds).clamp(
+      0,
+      1,
+    );
+  }
+
+  String get _positionLabel {
+    final duration = _timeline.duration;
+    if (duration == null || duration <= Duration.zero) return '--:-- / --:--';
+    return '${_formatDuration(_timeline.position)} / ${_formatDuration(duration)}';
+  }
+
+  String get _remainingLabel {
+    final duration = _timeline.duration;
+    if (duration == null || duration <= Duration.zero) return '剩余 --:--';
+    final remaining = duration - _timeline.position;
+    final adjusted = Duration(
+      microseconds:
+          (remaining.inMicroseconds.clamp(0, duration.inMicroseconds) / _speed)
+              .round(),
+    );
+    return '剩余 ${_formatDuration(adjusted)}';
+  }
+
+  static String _formatDuration(Duration duration) {
+    final totalSeconds = duration.inSeconds.clamp(0, 359999);
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 }

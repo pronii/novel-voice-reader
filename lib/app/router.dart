@@ -21,6 +21,7 @@ import 'package:novel_voice_reader/features/library/data/txt_book_parser.dart';
 import 'package:novel_voice_reader/features/library/presentation/library_page.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/playback/presentation/player_page.dart';
 import 'package:novel_voice_reader/features/reader/application/reader_chapter_window_controller.dart';
 import 'package:novel_voice_reader/features/reader/data/reading_progress_repository.dart';
@@ -472,6 +473,12 @@ final class _PlayerRoutePage extends ConsumerWidget {
             value.chapters.firstOrNull?.title ??
             '未命名章节',
         initialSpeed: handler?.playbackState.value.speed ?? 1,
+        initialPlaying: handler?.playbackState.value.playing ?? false,
+        playingChanges: handler?.playbackState
+            .map((state) => state.playing)
+            .distinct(),
+        initialTimeline: handler?.currentTimeline ?? PlaybackTimeline.zero,
+        timelineChanges: handler?.timelineChanges,
         onSpeedChanged: handler?.setSpeed,
         onPlay: handler?.play,
         onPause: handler?.pause,
@@ -482,125 +489,167 @@ final class _PlayerRoutePage extends ConsumerWidget {
   }
 }
 
+final class _VoiceSettingsInitialData {
+  const _VoiceSettingsInitialData({
+    required this.profile,
+    required this.hasSavedMiMoApiKey,
+  });
+
+  final VoiceProfile profile;
+  final bool hasSavedMiMoApiKey;
+}
+
+final _secureCredentialsProvider = Provider.autoDispose<SecureCredentials>(
+  (ref) => SecureCredentials(
+    FlutterSecureKeyValueStore(const FlutterSecureStorage()),
+  ),
+);
+
+final _voiceSettingsInitialDataProvider =
+    FutureProvider.autoDispose<_VoiceSettingsInitialData>((ref) async {
+      final database = ref.watch(databaseProvider);
+      final credentials = ref.watch(_secureCredentialsProvider);
+      final profile = database == null
+          ? VoiceProfile.system()
+          : await loadActiveVoiceProfile(database);
+      String? mimoApiKey;
+      try {
+        mimoApiKey = await credentials.readMiMoApiKey();
+      } catch (_) {
+        mimoApiKey = null;
+      }
+      return _VoiceSettingsInitialData(
+        profile: profile,
+        hasSavedMiMoApiKey: mimoApiKey?.trim().isNotEmpty ?? false,
+      );
+    });
+
 final class _VoiceSettingsRoutePage extends ConsumerWidget {
   const _VoiceSettingsRoutePage();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final database = ref.watch(databaseProvider);
-    final credentials = SecureCredentials(
-      FlutterSecureKeyValueStore(const FlutterSecureStorage()),
-    );
-    return VoiceSettingsPage(
-      onTestConnection: (submission) async {
-        final profile = submission.profile;
-        switch (profile.providerType) {
-          case SpeechProviderType.zhipu:
-            await ZhipuTtsClient(
-              dio: createSpeechDio(),
-              credentials: credentials,
-            ).testConnection(
-              apiKey: submission.credentials.normalizedApiKey ?? '',
-              profile: profile,
-            );
-          case SpeechProviderType.tencent:
-            if (database == null) {
-              throw const AppFailure('本机额度记录不可用');
-            }
-            await TencentTtsClient(
-              dio: createSpeechDio(),
-              credentials: credentials,
-              usageCounter: TencentTtsUsageRepository(database),
-            ).testConnection(
-              credentials: submission.credentials,
-              profile: profile,
-            );
-          case SpeechProviderType.mimo:
-            await MiMoTtsClient(
-              dio: createSpeechDio(),
-              credentials: credentials,
-            ).testConnection(
-              apiKey: submission.credentials.normalizedApiKey ?? '',
-              profile: profile,
-            );
-          case SpeechProviderType.system ||
-              SpeechProviderType.cloud ||
-              SpeechProviderType.azure:
-            throw const AppFailure('当前语音服务不支持连接测试');
-        }
-      },
-      onSave: (submission) async {
-        final profile = submission.profile;
-        Future<void> persistProfile() async {
-          if (database == null) return;
-          await database.transaction(() async {
-            await database
-                .into(database.voiceProfiles)
-                .insert(
-                  VoiceProfilesCompanion.insert(
-                    providerType: profile.providerType.name,
-                    baseUrl: Value(profile.baseUrl),
-                    model: Value(profile.model),
-                    voice: Value(profile.voice),
-                    speed: Value(profile.speed),
-                    pitch: Value(profile.pitch),
-                    outputFormat: Value(profile.outputFormat),
-                    style: Value(profile.style),
-                  ),
-                );
-            if (profile.providerType == SpeechProviderType.tencent) {
-              await TencentTtsUsageRepository(
-                database,
-              ).setMonthlyQuota(submission.monthlyQuotaCharacters);
-            }
-          });
-        }
-
-        if (profile.providerType == SpeechProviderType.tencent) {
-          await credentials.runWithTencentCredentialUpdate(
-            secretId: submission.credentials.normalizedSecretId,
-            secretKey: submission.credentials.normalizedSecretKey,
-            commit: persistProfile,
-          );
-          return;
-        }
-
-        if (profile.providerType == SpeechProviderType.mimo) {
-          await credentials.runWithMiMoApiKeyUpdate(
-            apiKey: submission.credentials.normalizedApiKey,
-            commit: persistProfile,
-          );
-          return;
-        }
-
-        await persistProfile();
-        final apiKey = submission.credentials.normalizedApiKey;
-        if (apiKey != null) {
+    final credentials = ref.watch(_secureCredentialsProvider);
+    final initialData = ref.watch(_voiceSettingsInitialDataProvider);
+    return initialData.when(
+      loading: () =>
+          const Scaffold(body: Center(child: CircularProgressIndicator())),
+      error: (_, _) => const Scaffold(body: Center(child: Text('语音设置加载失败'))),
+      data: (initial) => VoiceSettingsPage(
+        initialProfile: initial.profile,
+        hasSavedMiMoApiKey: initial.hasSavedMiMoApiKey,
+        onTestConnection: (submission) async {
+          final profile = submission.profile;
           switch (profile.providerType) {
-            case SpeechProviderType.azure:
-              await credentials.writeAzureSubscriptionKey(apiKey);
             case SpeechProviderType.zhipu:
-              await credentials.writeZhipuApiKey(apiKey);
-            case SpeechProviderType.cloud:
-              await credentials.writeApiKey(apiKey);
+              await ZhipuTtsClient(
+                dio: createSpeechDio(),
+                credentials: credentials,
+              ).testConnection(
+                apiKey: submission.credentials.normalizedApiKey ?? '',
+                profile: profile,
+              );
+            case SpeechProviderType.tencent:
+              if (database == null) {
+                throw const AppFailure('本机额度记录不可用');
+              }
+              await TencentTtsClient(
+                dio: createSpeechDio(),
+                credentials: credentials,
+                usageCounter: TencentTtsUsageRepository(database),
+              ).testConnection(
+                credentials: submission.credentials,
+                profile: profile,
+              );
+            case SpeechProviderType.mimo:
+              final apiKey =
+                  submission.credentials.normalizedApiKey ??
+                  await credentials.readMiMoApiKey() ??
+                  '';
+              await MiMoTtsClient(
+                dio: createSpeechDio(),
+                credentials: credentials,
+              ).testConnection(apiKey: apiKey, profile: profile);
             case SpeechProviderType.system ||
-                SpeechProviderType.tencent ||
-                SpeechProviderType.mimo:
-              break;
+                SpeechProviderType.cloud ||
+                SpeechProviderType.azure:
+              throw const AppFailure('当前语音服务不支持连接测试');
           }
-        }
-      },
-      onLoadTencentUsage: database == null
-          ? null
-          : () => TencentTtsUsageRepository(database).current(),
-      onClearTencentCredential: (field) async {
-        switch (field) {
-          case TencentCredentialField.secretId:
-            await credentials.deleteTencentSecretId();
-          case TencentCredentialField.secretKey:
-            await credentials.deleteTencentSecretKey();
-        }
-      },
+        },
+        onSave: (submission) async {
+          final profile = submission.profile;
+          Future<void> persistProfile() async {
+            if (database == null) return;
+            await database.transaction(() async {
+              await database
+                  .into(database.voiceProfiles)
+                  .insert(
+                    VoiceProfilesCompanion.insert(
+                      providerType: profile.providerType.name,
+                      baseUrl: Value(profile.baseUrl),
+                      model: Value(profile.model),
+                      voice: Value(profile.voice),
+                      speed: Value(profile.speed),
+                      pitch: Value(profile.pitch),
+                      outputFormat: Value(profile.outputFormat),
+                      style: Value(profile.style),
+                    ),
+                  );
+              if (profile.providerType == SpeechProviderType.tencent) {
+                await TencentTtsUsageRepository(
+                  database,
+                ).setMonthlyQuota(submission.monthlyQuotaCharacters);
+              }
+            });
+          }
+
+          if (profile.providerType == SpeechProviderType.tencent) {
+            await credentials.runWithTencentCredentialUpdate(
+              secretId: submission.credentials.normalizedSecretId,
+              secretKey: submission.credentials.normalizedSecretKey,
+              commit: persistProfile,
+            );
+            return;
+          }
+
+          if (profile.providerType == SpeechProviderType.mimo) {
+            await credentials.runWithMiMoApiKeyUpdate(
+              apiKey: submission.credentials.normalizedApiKey,
+              commit: persistProfile,
+            );
+            return;
+          }
+
+          await persistProfile();
+          final apiKey = submission.credentials.normalizedApiKey;
+          if (apiKey != null) {
+            switch (profile.providerType) {
+              case SpeechProviderType.azure:
+                await credentials.writeAzureSubscriptionKey(apiKey);
+              case SpeechProviderType.zhipu:
+                await credentials.writeZhipuApiKey(apiKey);
+              case SpeechProviderType.cloud:
+                await credentials.writeApiKey(apiKey);
+              case SpeechProviderType.system ||
+                  SpeechProviderType.tencent ||
+                  SpeechProviderType.mimo:
+                break;
+            }
+          }
+        },
+        onLoadTencentUsage: database == null
+            ? null
+            : () => TencentTtsUsageRepository(database).current(),
+        onClearTencentCredential: (field) async {
+          switch (field) {
+            case TencentCredentialField.secretId:
+              await credentials.deleteTencentSecretId();
+            case TencentCredentialField.secretKey:
+              await credentials.deleteTencentSecretKey();
+          }
+        },
+      ),
     );
   }
 }

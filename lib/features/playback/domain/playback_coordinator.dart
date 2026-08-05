@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
@@ -44,6 +45,8 @@ abstract interface class PlaybackProgressRepository {
   Future<void> confirm(PlaybackCursor cursor);
 }
 
+enum PlaybackActivity { playing, paused, completed, failed }
+
 final class PlaybackCoordinator implements PlaybackController {
   factory PlaybackCoordinator({
     required SpeechProvider provider,
@@ -74,6 +77,15 @@ final class PlaybackCoordinator implements PlaybackController {
     _subscription = _provider.events.listen((event) {
       unawaited(_handleSpeechEvent(event));
     });
+    final provider = _provider;
+    if (provider is TimedSpeechProvider) {
+      _timelineSubscription = (provider as TimedSpeechProvider).playbackTimeline
+          .listen((timeline) {
+            if (_acceptTimeline && !_timelineChanges.isClosed) {
+              _timelineChanges.add(timeline);
+            }
+          });
+    }
   }
 
   final SpeechProvider _provider;
@@ -83,8 +95,13 @@ final class PlaybackCoordinator implements PlaybackController {
   final SpeechSegmenter _segmenter;
   final void Function(AppFailure failure)? _onFailure;
   late final StreamSubscription<SpeechEvent> _subscription;
+  StreamSubscription<PlaybackTimeline>? _timelineSubscription;
   final StreamController<PlaybackCursor> _cursorChanges =
       StreamController<PlaybackCursor>.broadcast(sync: true);
+  final StreamController<PlaybackTimeline> _timelineChanges =
+      StreamController<PlaybackTimeline>.broadcast(sync: true);
+  final StreamController<PlaybackActivity> _activityChanges =
+      StreamController<PlaybackActivity>.broadcast(sync: true);
 
   PlaybackCursor? _cursor;
   List<SpeechSegment> _segments = const [];
@@ -94,11 +111,16 @@ final class PlaybackCoordinator implements PlaybackController {
   Future<void>? _activePrefetch;
   int? _queuedPrefetchGeneration;
   bool _disposing = false;
+  bool _acceptTimeline = false;
 
   @override
   PlaybackCursor? get cursor => _cursor;
 
   Stream<PlaybackCursor> get cursorChanges => _cursorChanges.stream;
+
+  Stream<PlaybackTimeline> get timelineChanges => _timelineChanges.stream;
+
+  Stream<PlaybackActivity> get activityChanges => _activityChanges.stream;
 
   @override
   Future<void> playFrom(PlaybackCursor cursor) async {
@@ -116,10 +138,16 @@ final class PlaybackCoordinator implements PlaybackController {
       await _progress.confirm(cursor);
     }
     await _provider.pause();
+    _publishActivity(PlaybackActivity.paused);
   }
 
   @override
-  Future<void> resume() => _provider.resume();
+  Future<void> resume() async {
+    await _provider.resume();
+    if (_cursor != null) {
+      _publishActivity(PlaybackActivity.playing);
+    }
+  }
 
   @override
   Future<void> setSpeed(double speed) async {
@@ -163,10 +191,12 @@ final class PlaybackCoordinator implements PlaybackController {
 
   Future<void> dispose() async {
     _disposing = true;
+    _acceptTimeline = false;
     _playbackGeneration++;
     _queuedPrefetchGeneration = null;
     try {
       await _subscription.cancel();
+      await _timelineSubscription?.cancel();
       await _activePrefetch;
       final provider = _provider;
       if (provider is DisposableSpeechProvider) {
@@ -176,6 +206,8 @@ final class PlaybackCoordinator implements PlaybackController {
       }
     } finally {
       await _cursorChanges.close();
+      await _timelineChanges.close();
+      await _activityChanges.close();
     }
   }
 
@@ -198,11 +230,15 @@ final class PlaybackCoordinator implements PlaybackController {
   }
 
   Future<bool> _prepareAndPlayCurrentSegment(int generation) async {
+    _acceptTimeline = false;
+    _timelineChanges.add(PlaybackTimeline.zero);
     final segment = _segments[_segmentIndex];
     await _provider.prepare(segment, _voiceProfile);
     if (generation != _playbackGeneration) {
       return false;
     }
+    _acceptTimeline = true;
+    _timelineChanges.add(PlaybackTimeline.zero);
     final provider = _provider;
     if (provider is AdjustableSpeechProvider) {
       await (provider as AdjustableSpeechProvider).setPlaybackSpeed(_speed);
@@ -211,11 +247,21 @@ final class PlaybackCoordinator implements PlaybackController {
       }
     }
     await _provider.play();
-    return generation == _playbackGeneration;
+    final current = generation == _playbackGeneration;
+    if (current) {
+      _publishActivity(PlaybackActivity.playing);
+    }
+    return current;
   }
 
   Future<void> _handleSpeechEvent(SpeechEvent event) async {
     if (event is SpeechFailed) {
+      if (_segments.isEmpty || event.segmentId != _segments[_segmentIndex].id) {
+        return;
+      }
+      _acceptTimeline = false;
+      _timelineChanges.add(PlaybackTimeline.zero);
+      _publishActivity(PlaybackActivity.failed);
       _onFailure?.call(event.failure);
       return;
     }
@@ -224,8 +270,8 @@ final class PlaybackCoordinator implements PlaybackController {
         event.segmentId != _segments[_segmentIndex].id) {
       return;
     }
+    final generation = _playbackGeneration;
     if (_segmentIndex + 1 < _segments.length) {
-      final generation = _playbackGeneration;
       _segmentIndex++;
       if (!await _prepareAndPlayCurrentSegment(generation)) {
         return;
@@ -239,11 +285,23 @@ final class PlaybackCoordinator implements PlaybackController {
       return;
     }
     final next = await _paragraphs.nextAfter(current);
+    if (generation != _playbackGeneration) {
+      return;
+    }
     if (next == null) {
       await _progress.confirm(current);
+      if (generation != _playbackGeneration) {
+        return;
+      }
+      _acceptTimeline = false;
+      _timelineChanges.add(PlaybackTimeline.zero);
+      _publishActivity(PlaybackActivity.completed);
       return;
     }
     await _progress.confirm(next.cursor);
+    if (generation != _playbackGeneration) {
+      return;
+    }
     await _startParagraph(next);
   }
 
@@ -309,6 +367,12 @@ final class PlaybackCoordinator implements PlaybackController {
       }
     } catch (_) {
       // Normal prepare remains the authoritative fallback and error path.
+    }
+  }
+
+  void _publishActivity(PlaybackActivity activity) {
+    if (!_activityChanges.isClosed) {
+      _activityChanges.add(activity);
     }
   }
 }

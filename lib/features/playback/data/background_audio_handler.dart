@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 
 final class AttachablePlaybackController implements PlaybackController {
@@ -95,6 +96,8 @@ final class PlaybackRuntime {
       StreamController<PlaybackCursor?>.broadcast(sync: true);
   PlaybackCoordinator? _coordinator;
   StreamSubscription<PlaybackCursor>? _cursorSubscription;
+  StreamSubscription<PlaybackTimeline>? _timelineSubscription;
+  StreamSubscription<PlaybackActivity>? _activitySubscription;
   late final StreamSubscription<PlaybackState> _playbackStateSubscription;
   Future<void> _replacement = Future<void>.value();
   Future<void>? _disposeFuture;
@@ -182,13 +185,39 @@ final class PlaybackRuntime {
       rethrow;
     }
     await _cursorSubscription?.cancel();
+    await _timelineSubscription?.cancel();
+    await _activitySubscription?.cancel();
     final generation = ++_coordinatorGeneration;
     _coordinator = next;
+    handler.publishTimeline(PlaybackTimeline.zero);
     _cursorSubscription = next.cursorChanges.listen((cursor) {
       if (generation == _coordinatorGeneration &&
           identical(_coordinator, next) &&
           !_cursorChanges.isClosed) {
         _publishCursor(cursor);
+      }
+    });
+    _timelineSubscription = next.timelineChanges.listen((timeline) {
+      if (generation == _coordinatorGeneration &&
+          identical(_coordinator, next)) {
+        handler.publishTimeline(timeline);
+      }
+    });
+    _activitySubscription = next.activityChanges.listen((activity) {
+      if (generation != _coordinatorGeneration ||
+          !identical(_coordinator, next)) {
+        return;
+      }
+      switch (activity) {
+        case PlaybackActivity.playing:
+          handler.markPlaying();
+        case PlaybackActivity.paused:
+          handler.markPaused();
+        case PlaybackActivity.completed:
+          handler.markIdle();
+        case PlaybackActivity.failed:
+          handler.publishTimeline(PlaybackTimeline.zero);
+          handler.markPaused();
       }
     });
     if (previous != null) {
@@ -202,6 +231,10 @@ final class PlaybackRuntime {
     _coordinatorGeneration++;
     await _cursorSubscription?.cancel();
     _cursorSubscription = null;
+    await _timelineSubscription?.cancel();
+    _timelineSubscription = null;
+    await _activitySubscription?.cancel();
+    _activitySubscription = null;
     handler.markIdle();
     _publishCursor(null);
     if (current == null) {
@@ -217,6 +250,10 @@ final class PlaybackRuntime {
       _coordinatorGeneration++;
       await _cursorSubscription?.cancel();
       _cursorSubscription = null;
+      await _timelineSubscription?.cancel();
+      _timelineSubscription = null;
+      await _activitySubscription?.cancel();
+      _activitySubscription = null;
       controller.detach(coordinator);
       handler.markIdle();
       _publishCursor(null);
@@ -262,7 +299,14 @@ final class NovelAudioHandler extends BaseAudioHandler {
   }
 
   final PlaybackController _controller;
+  final StreamController<PlaybackTimeline> _timelineChanges =
+      StreamController<PlaybackTimeline>.broadcast(sync: true);
+  PlaybackTimeline _currentTimeline = PlaybackTimeline.zero;
   double _speed = 1;
+
+  Stream<PlaybackTimeline> get timelineChanges => _timelineChanges.stream;
+
+  PlaybackTimeline get currentTimeline => _currentTimeline;
 
   void publishNowPlaying({
     required int bookId,
@@ -270,7 +314,28 @@ final class NovelAudioHandler extends BaseAudioHandler {
     required String chapterTitle,
   }) {
     mediaItem.add(
-      MediaItem(id: 'book-$bookId', title: bookTitle, album: chapterTitle),
+      MediaItem(
+        id: 'book-$bookId',
+        title: bookTitle,
+        album: chapterTitle,
+        duration: _currentTimeline.duration,
+      ),
+    );
+  }
+
+  void publishTimeline(PlaybackTimeline timeline) {
+    if (_currentTimeline == timeline) return;
+    _currentTimeline = timeline;
+    _timelineChanges.add(timeline);
+    final item = mediaItem.value;
+    if (item != null && item.duration != timeline.duration) {
+      mediaItem.add(item.copyWith(duration: timeline.duration));
+    }
+    playbackState.add(
+      _state(
+        playing: playbackState.value.playing,
+        updatePosition: timeline.position,
+      ),
     );
   }
 
@@ -278,7 +343,12 @@ final class NovelAudioHandler extends BaseAudioHandler {
     playbackState.add(_state(playing: true));
   }
 
+  void markPaused() {
+    playbackState.add(_state(playing: false));
+  }
+
   void markIdle() {
+    publishTimeline(PlaybackTimeline.zero);
     playbackState.add(
       _state(
         playing: false,
@@ -324,7 +394,7 @@ final class NovelAudioHandler extends BaseAudioHandler {
   @override
   Future<void> onTaskRemoved() => pause();
 
-  PlaybackState _state({required bool playing}) {
+  PlaybackState _state({required bool playing, Duration? updatePosition}) {
     return PlaybackState(
       controls: [
         MediaControl.skipToPrevious,
@@ -335,6 +405,7 @@ final class NovelAudioHandler extends BaseAudioHandler {
       processingState: AudioProcessingState.ready,
       playing: playing,
       speed: _speed,
+      updatePosition: updatePosition ?? _currentTimeline.position,
     );
   }
 }

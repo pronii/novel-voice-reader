@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -366,13 +367,14 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    FlutterSecureStorage.setMockInitialValues({});
+    addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
     final database = AppDatabase.forTesting(NativeDatabase.memory());
 
     await tester.pumpWidget(NovelVoiceReaderApp(database: database));
     await _pumpUntilFound(tester, find.byTooltip('语音设置'));
     await tester.tap(find.byTooltip('语音设置'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+    await _pumpUntilFound(tester, find.byType(SingleChildScrollView));
     await tester.drag(
       find.byType(SingleChildScrollView),
       const Offset(-500, 0),
@@ -518,6 +520,49 @@ void main() {
 
     expect(await database.select(database.voiceProfiles).get(), isEmpty);
     expect(secureValues['mimo_tts_api_key'], 'old-key');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
+  testWidgets('restores saved MiMo style and credential status on reopen', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    FlutterSecureStorage.setMockInitialValues({
+      'mimo_tts_api_key': 'stored-secret',
+    });
+    addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    await database
+        .into(database.voiceProfiles)
+        .insert(
+          VoiceProfilesCompanion.insert(
+            providerType: 'mimo',
+            voice: const Value('Dean'),
+            speed: const Value(1.25),
+            style: const Value('沉稳自然地朗读'),
+          ),
+        );
+
+    await tester.pumpWidget(NovelVoiceReaderApp(database: database));
+    await _pumpUntilFound(tester, find.byTooltip('语音设置'));
+    await tester.tap(find.byTooltip('语音设置'));
+    await _pumpUntilFound(tester, find.text('MiMo API Key'));
+
+    expect(find.text('Dean（英文男声）'), findsOneWidget);
+    expect(find.text('已保存，留空则保持不变'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.widgetWithText(TextField, '朗读风格（可选）'))
+          .controller
+          ?.text,
+      '沉稳自然地朗读',
+    );
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
