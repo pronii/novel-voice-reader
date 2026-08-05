@@ -118,6 +118,45 @@ void main() {
     await runtime.dispose();
   });
 
+  test(
+    'runtime retains cursor on pause and clears it on stop or dispose',
+    () async {
+      final controller = AttachablePlaybackController();
+      final handler = NovelAudioHandler(controller);
+      final runtime = PlaybackRuntime(controller: controller, handler: handler);
+      final cursors = <PlaybackCursor?>[];
+      final subscription = runtime.cursorChanges.listen(cursors.add);
+      const firstCursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+      const secondCursor = PlaybackCursor(chapterId: 2, paragraphIndex: 3);
+
+      await runtime.replaceAndPlayFrom(
+        createCoordinator(RuntimeSpeechProvider()),
+        firstCursor,
+        token: runtime.beginReplacement(),
+      );
+      await handler.pause();
+      expect(cursors, const [firstCursor]);
+      await handler.stop();
+      expect(cursors, const [firstCursor, null]);
+      await handler.play();
+      await runtime.replaceAndPlayFrom(
+        createCoordinator(RuntimeSpeechProvider()),
+        secondCursor,
+        token: runtime.beginReplacement(),
+      );
+      await runtime.dispose();
+
+      expect(cursors, const [
+        firstCursor,
+        null,
+        firstCursor,
+        secondCursor,
+        null,
+      ]);
+      await subscription.cancel();
+    },
+  );
+
   test('serializes a speed change with coordinator attachment', () async {
     final firstProvider = RuntimeSpeechProvider();
     final restoreCompleter = Completer<void>();
@@ -198,6 +237,38 @@ void main() {
     expect(secondProvider.prepared, hasLength(1));
     await runtime.dispose();
   });
+
+  test(
+    'a replaced coordinator cannot publish a late playback cursor',
+    () async {
+      final latePlay = Completer<void>();
+      final firstProvider = RuntimeSpeechProvider(playCompleter: latePlay);
+      final secondProvider = RuntimeSpeechProvider();
+      final first = createCoordinator(firstProvider);
+      final second = createCoordinator(secondProvider);
+      final controller = AttachablePlaybackController();
+      final runtime = PlaybackRuntime(
+        controller: controller,
+        handler: NovelAudioHandler(controller),
+      );
+      final cursors = <PlaybackCursor?>[];
+      final subscription = runtime.cursorChanges.listen(cursors.add);
+      const oldCursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+      const currentCursor = PlaybackCursor(chapterId: 2, paragraphIndex: 0);
+      await runtime.replace(first);
+      final oldStart = first.playFrom(oldCursor);
+      await pumpEventQueue();
+
+      await runtime.replace(second);
+      await second.playFrom(currentCursor);
+      latePlay.complete();
+      await oldStart;
+
+      expect(cursors, const [currentCursor]);
+      await runtime.dispose();
+      await subscription.cancel();
+    },
+  );
 
   test(
     'runtime disposes previous playback before starting its replacement',
@@ -467,6 +538,7 @@ final class RuntimeSpeechProvider
     this.disposeCompleter,
     this.disposeError,
     this.prepareError,
+    this.playCompleter,
     this.speedCompleter,
     this.speedError,
   });
@@ -476,6 +548,7 @@ final class RuntimeSpeechProvider
   final Completer<void>? disposeCompleter;
   final Object? disposeError;
   final Object? prepareError;
+  final Completer<void>? playCompleter;
   final Completer<void>? speedCompleter;
   final Object? speedError;
   final List<SpeechSegment> prepared = [];
@@ -500,7 +573,7 @@ final class RuntimeSpeechProvider
   Future<void> pause() async {}
 
   @override
-  Future<void> play() async {}
+  Future<void> play() async => playCompleter?.future;
 
   @override
   Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {

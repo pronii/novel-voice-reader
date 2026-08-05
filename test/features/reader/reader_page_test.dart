@@ -60,6 +60,108 @@ void main() {
     );
   });
 
+  testWidgets('highlights the currently playing paragraph independently', (
+    tester,
+  ) async {
+    PlaybackCursor? playbackCursor = const PlaybackCursor(
+      chapterId: 10,
+      paragraphIndex: 0,
+    );
+    late StateSetter setHostState;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            setHostState = setState;
+            return _reader(
+              paragraphs: _paragraphs(10, ['第一段。', '第二段。']),
+              playbackCursor: playbackCursor,
+            );
+          },
+        ),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey<String>('playing-paragraph-10-0')),
+      findsOneWidget,
+    );
+    setHostState(() {
+      playbackCursor = const PlaybackCursor(chapterId: 10, paragraphIndex: 1);
+    });
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey<String>('playing-paragraph-10-0')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('playing-paragraph-10-1')),
+      findsOneWidget,
+    );
+
+    setHostState(() => playbackCursor = null);
+    await tester.pump();
+    expect(startsWithPlayingParagraph, findsNothing);
+  });
+
+  testWidgets('follows playback until the user scrolls manually', (
+    tester,
+  ) async {
+    _useNarrowViewport(tester);
+    PlaybackCursor? playbackCursor = const PlaybackCursor(
+      chapterId: 10,
+      paragraphIndex: 0,
+    );
+    late StateSetter setHostState;
+    final paragraphs = List.generate(
+      30,
+      (index) => ReaderParagraph(
+        id: 100 + index,
+        chapterId: 10,
+        index: index,
+        text: '第${index + 1}段。用于验证播放跟随的长正文内容。',
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            setHostState = setState;
+            return _reader(
+              paragraphs: paragraphs,
+              playbackCursor: playbackCursor,
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    setHostState(() {
+      playbackCursor = const PlaybackCursor(chapterId: 10, paragraphIndex: 20);
+    });
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey<String>('playing-paragraph-10-20')),
+      findsOneWidget,
+    );
+
+    await tester.drag(
+      find.byType(ScrollablePositionedList),
+      const Offset(0, 800),
+    );
+    await tester.pumpAndSettle();
+    setHostState(() {
+      playbackCursor = const PlaybackCursor(chapterId: 10, paragraphIndex: 29);
+    });
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('playing-paragraph-10-29')),
+      findsNothing,
+    );
+  });
+
   testWidgets('opens the chapter list and selects a chapter', (tester) async {
     int? selectedChapterId;
     final chapters = const [
@@ -356,6 +458,7 @@ ReaderPage _reader({
     paragraphIndex: 0,
   ),
   bool playbackStarting = false,
+  PlaybackCursor? playbackCursor,
   ValueChanged<int>? onChapterSelected,
   ValueChanged<ReaderParagraph>? onReadingPositionChanged,
   ValueChanged<ReaderParagraph>? onPlayFrom,
@@ -373,11 +476,19 @@ ReaderPage _reader({
     currentChapterId: chapter.id,
     initialCursor: initialCursor,
     playbackStarting: playbackStarting,
+    playbackCursor: playbackCursor,
+    playbackActive: playbackCursor != null,
     onChapterSelected: onChapterSelected,
     onReadingPositionChanged: onReadingPositionChanged,
     onPlayFrom: onPlayFrom,
   );
 }
+
+final startsWithPlayingParagraph = find.byWidgetPredicate(
+  (widget) =>
+      widget.key is ValueKey<String> &&
+      (widget.key! as ValueKey<String>).value.startsWith('playing-paragraph-'),
+);
 
 List<ReaderParagraph> _paragraphs(int chapterId, List<String> texts) {
   return List.generate(

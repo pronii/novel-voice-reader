@@ -173,6 +173,10 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
   Future<void>? _chapterWindowInitialization;
   PlaybackCursor? _navigationCursor;
   int? _visibleChapterId;
+  PlaybackRuntime? _observedPlaybackRuntime;
+  StreamSubscription<PlaybackCursor?>? _playbackCursorSubscription;
+  int _playbackSubscriptionGeneration = 0;
+  PlaybackCursor? _playbackCursor;
   PlaybackRuntime? _pendingPlaybackRuntime;
   PlaybackReplacementToken? _pendingPlaybackReplacement;
   bool _playbackStarting = false;
@@ -186,12 +190,14 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     }
     _chapterWindow?.removeListener(_onChapterWindowChanged);
     _chapterWindow?.dispose();
+    unawaited(_playbackCursorSubscription?.cancel());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final bookId = widget.bookId;
+    _observePlaybackRuntime(ref.watch(playbackRuntimeProvider));
     final data = ref.watch(readerPageDataProvider(ReaderPageRequest(bookId)));
     return data.when(
       loading: () =>
@@ -238,6 +244,8 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
           initialCursor: _navigationCursor,
           navigationGeneration: window.navigationGeneration,
           playbackStarting: _playbackStarting,
+          playbackCursor: _playbackCursor,
+          playbackActive: _playbackCursor != null,
           onBackToLibrary: _backToLibrary,
           onChapterSelected: (chapterId) =>
               unawaited(_selectChapter(chapterId)),
@@ -251,6 +259,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
           onPlayFrom: (paragraph) => unawaited(_playFrom(data, paragraph)),
           onLoadPrevious: window.loadPrevious,
           onLoadNext: window.loadNext,
+          onPlaybackChapterNeeded: _ensurePlaybackChapter,
         );
       },
     );
@@ -278,6 +287,30 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  void _observePlaybackRuntime(PlaybackRuntime? runtime) {
+    if (identical(_observedPlaybackRuntime, runtime)) {
+      return;
+    }
+    final generation = ++_playbackSubscriptionGeneration;
+    unawaited(_playbackCursorSubscription?.cancel());
+    _observedPlaybackRuntime = runtime;
+    _playbackCursor = runtime?.currentCursor;
+    _playbackCursorSubscription = runtime?.cursorChanges.listen((cursor) {
+      if (mounted && generation == _playbackSubscriptionGeneration) {
+        setState(() => _playbackCursor = cursor);
+      }
+    });
+  }
+
+  Future<void> _ensurePlaybackChapter(int chapterId) async {
+    final window = _chapterWindow;
+    if (window == null ||
+        window.sections.any((section) => section.chapter.id == chapterId)) {
+      return;
+    }
+    await window.centerOn(chapterId: chapterId);
   }
 
   Future<void> _playFrom(ReaderPageData data, ReaderParagraph paragraph) async {

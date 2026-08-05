@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:drift/native.dart';
@@ -10,6 +11,8 @@ import 'package:novel_voice_reader/features/playback/data/background_audio_handl
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
+import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
+import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 void main() {
@@ -90,6 +93,47 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
+  testWidgets('shows playback highlight when opening an already playing book', (
+    tester,
+  ) async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    final bookId = await database.createBookWithChapter(
+      title: '高亮测试书',
+      chapterTitle: '第一章',
+      paragraphs: const ['第一段。'],
+    );
+    final chapter = (await database.chaptersForBook(bookId)).single;
+    final controller = AttachablePlaybackController();
+    final runtime = PlaybackRuntime(
+      controller: controller,
+      handler: NovelAudioHandler(controller),
+    );
+    final cursor = PlaybackCursor(chapterId: chapter.id, paragraphIndex: 0);
+    await runtime.replaceAndPlayFrom(
+      PlaybackCoordinator(
+        provider: _NavigationSpeechProvider(),
+        progress: _NavigationProgressRepository(),
+        paragraphs: _NavigationParagraphSource(),
+        voiceProfile: VoiceProfile.system(),
+      ),
+      cursor,
+      token: runtime.beginReplacement(),
+    );
+
+    await tester.pumpWidget(
+      NovelVoiceReaderApp(database: database, playbackRuntime: runtime),
+    );
+    await _pumpUntilFound(tester, find.text('高亮测试书'));
+    await tester.tap(find.text('高亮测试书'));
+    await _pumpUntilFound(
+      tester,
+      find.byKey(ValueKey<String>('playing-paragraph-${chapter.id}-0')),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 1));
   });
 
@@ -338,6 +382,45 @@ final class _SpeedPlaybackController implements PlaybackController {
 
   @override
   Future<void> setSpeed(double speed) async => speedChanges.add(speed);
+}
+
+final class _NavigationParagraphSource implements PlaybackParagraphSource {
+  @override
+  Future<PlaybackParagraph?> at(PlaybackCursor cursor) async {
+    return PlaybackParagraph(id: 1, cursor: cursor, text: '第一段。');
+  }
+
+  @override
+  Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor) async => null;
+}
+
+final class _NavigationProgressRepository
+    implements PlaybackProgressRepository {
+  @override
+  Future<void> confirm(PlaybackCursor cursor) async {}
+}
+
+final class _NavigationSpeechProvider implements SpeechProvider {
+  final StreamController<SpeechEvent> _events =
+      StreamController<SpeechEvent>.broadcast();
+
+  @override
+  Stream<SpeechEvent> get events => _events.stream;
+
+  @override
+  Future<void> pause() async {}
+
+  @override
+  Future<void> play() async {}
+
+  @override
+  Future<void> prepare(segment, VoiceProfile profile) async {}
+
+  @override
+  Future<void> resume() async {}
+
+  @override
+  Future<void> stop() => _events.close();
 }
 
 Future<void> _openTencentSettings(WidgetTester tester) async {

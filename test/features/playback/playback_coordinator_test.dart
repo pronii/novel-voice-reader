@@ -8,6 +8,31 @@ import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart'
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
+  test('publishes the cursor when each paragraph starts playing', () async {
+    final provider = FakeSpeechProvider();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+      voiceProfile: VoiceProfile.system(),
+    );
+    final cursors = <PlaybackCursor>[];
+    final subscription = coordinator.cursorChanges.listen(cursors.add);
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    provider.completeCurrent();
+    await pumpEventQueue();
+
+    expect(cursors, const [
+      PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      PlaybackCursor(chapterId: 1, paragraphIndex: 1),
+    ]);
+    await subscription.cancel();
+    await coordinator.dispose();
+  });
+
   test('advances and confirms progress after paragraph completion', () async {
     final provider = FakeSpeechProvider();
     final progress = FakeProgressRepository();

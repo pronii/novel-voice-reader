@@ -83,6 +83,8 @@ final class PlaybackCoordinator implements PlaybackController {
   final SpeechSegmenter _segmenter;
   final void Function(AppFailure failure)? _onFailure;
   late final StreamSubscription<SpeechEvent> _subscription;
+  final StreamController<PlaybackCursor> _cursorChanges =
+      StreamController<PlaybackCursor>.broadcast(sync: true);
 
   PlaybackCursor? _cursor;
   List<SpeechSegment> _segments = const [];
@@ -91,6 +93,8 @@ final class PlaybackCoordinator implements PlaybackController {
 
   @override
   PlaybackCursor? get cursor => _cursor;
+
+  Stream<PlaybackCursor> get cursorChanges => _cursorChanges.stream;
 
   @override
   Future<void> playFrom(PlaybackCursor cursor) async {
@@ -154,17 +158,20 @@ final class PlaybackCoordinator implements PlaybackController {
   }
 
   Future<void> dispose() async {
-    await _subscription.cancel();
-    final provider = _provider;
-    if (provider is DisposableSpeechProvider) {
-      await (provider as DisposableSpeechProvider).dispose();
-    } else {
-      await provider.stop();
+    try {
+      await _subscription.cancel();
+      final provider = _provider;
+      if (provider is DisposableSpeechProvider) {
+        await (provider as DisposableSpeechProvider).dispose();
+      } else {
+        await provider.stop();
+      }
+    } finally {
+      await _cursorChanges.close();
     }
   }
 
   Future<void> _startParagraph(PlaybackParagraph paragraph) async {
-    _cursor = paragraph.cursor;
     _segments = _segmenter.split(
       paragraphId: paragraph.id,
       text: paragraph.text,
@@ -172,6 +179,10 @@ final class PlaybackCoordinator implements PlaybackController {
     );
     _segmentIndex = 0;
     await _prepareAndPlayCurrentSegment();
+    _cursor = paragraph.cursor;
+    if (!_cursorChanges.isClosed) {
+      _cursorChanges.add(paragraph.cursor);
+    }
   }
 
   Future<void> _prepareAndPlayCurrentSegment() async {

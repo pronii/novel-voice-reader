@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
@@ -75,15 +77,34 @@ final class PlaybackRuntime {
     void Function(Object error, StackTrace stackTrace)?
     onCoordinatorDisposeError,
   }) : _onCoordinatorDisposeError =
-           onCoordinatorDisposeError ?? _reportCoordinatorDisposeError;
+           onCoordinatorDisposeError ?? _reportCoordinatorDisposeError {
+    _playbackStateSubscription = handler.playbackState.listen((state) {
+      if (state.processingState == AudioProcessingState.idle) {
+        _publishCursor(null);
+      } else if (state.playing && _currentCursor == null) {
+        _publishCursor(controller.cursor);
+      }
+    });
+  }
 
   final AttachablePlaybackController controller;
   final NovelAudioHandler handler;
   final void Function(Object error, StackTrace stackTrace)
   _onCoordinatorDisposeError;
+  final StreamController<PlaybackCursor?> _cursorChanges =
+      StreamController<PlaybackCursor?>.broadcast(sync: true);
   PlaybackCoordinator? _coordinator;
+  StreamSubscription<PlaybackCursor>? _cursorSubscription;
+  late final StreamSubscription<PlaybackState> _playbackStateSubscription;
   Future<void> _replacement = Future<void>.value();
+  Future<void>? _disposeFuture;
   int _replacementGeneration = 0;
+  int _coordinatorGeneration = 0;
+  PlaybackCursor? _currentCursor;
+
+  Stream<PlaybackCursor?> get cursorChanges => _cursorChanges.stream;
+
+  PlaybackCursor? get currentCursor => _currentCursor;
 
   PlaybackReplacementToken beginReplacement() {
     return PlaybackReplacementToken._(++_replacementGeneration);
@@ -129,7 +150,11 @@ final class PlaybackRuntime {
   }
 
   Future<void> dispose() {
-    return _enqueue(_disposeCurrent);
+    return _disposeFuture ??= _enqueue(() async {
+      await _disposeCurrent();
+      await _playbackStateSubscription.cancel();
+      await _cursorChanges.close();
+    });
   }
 
   Future<T> _enqueue<T>(Future<T> Function() action) {
@@ -156,7 +181,16 @@ final class PlaybackRuntime {
       await _dispose(next);
       rethrow;
     }
+    await _cursorSubscription?.cancel();
+    final generation = ++_coordinatorGeneration;
     _coordinator = next;
+    _cursorSubscription = next.cursorChanges.listen((cursor) {
+      if (generation == _coordinatorGeneration &&
+          identical(_coordinator, next) &&
+          !_cursorChanges.isClosed) {
+        _publishCursor(cursor);
+      }
+    });
     if (previous != null) {
       await _dispose(previous);
     }
@@ -165,7 +199,11 @@ final class PlaybackRuntime {
   Future<void> _disposeCurrent() async {
     final current = _coordinator;
     _coordinator = null;
+    _coordinatorGeneration++;
+    await _cursorSubscription?.cancel();
+    _cursorSubscription = null;
     handler.markIdle();
+    _publishCursor(null);
     if (current == null) {
       return;
     }
@@ -176,8 +214,12 @@ final class PlaybackRuntime {
   Future<void> _removeCurrent(PlaybackCoordinator coordinator) async {
     if (identical(_coordinator, coordinator)) {
       _coordinator = null;
+      _coordinatorGeneration++;
+      await _cursorSubscription?.cancel();
+      _cursorSubscription = null;
       controller.detach(coordinator);
       handler.markIdle();
+      _publishCursor(null);
     }
     await _dispose(coordinator);
   }
@@ -187,6 +229,16 @@ final class PlaybackRuntime {
       await coordinator.dispose();
     } catch (error, stackTrace) {
       _onCoordinatorDisposeError(error, stackTrace);
+    }
+  }
+
+  void _publishCursor(PlaybackCursor? cursor) {
+    if (_currentCursor == cursor) {
+      return;
+    }
+    _currentCursor = cursor;
+    if (!_cursorChanges.isClosed) {
+      _cursorChanges.add(cursor);
     }
   }
 

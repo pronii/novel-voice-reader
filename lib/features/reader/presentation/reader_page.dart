@@ -14,6 +14,8 @@ typedef ReaderEdgeLoadCallback =
       required ReaderViewportAnchor anchor,
     });
 
+typedef ReaderPlaybackChapterCallback = Future<void> Function(int chapterId);
+
 final class ReaderPage extends StatefulWidget {
   const ReaderPage({
     super.key,
@@ -25,6 +27,8 @@ final class ReaderPage extends StatefulWidget {
     this.initialCursor,
     this.navigationGeneration = 0,
     this.playbackStarting = false,
+    this.playbackCursor,
+    this.playbackActive = false,
     this.onBackToLibrary,
     this.onChapterSelected,
     this.onVisibleChapterChanged,
@@ -33,6 +37,7 @@ final class ReaderPage extends StatefulWidget {
     this.onOpenPlayer,
     this.onLoadPrevious,
     this.onLoadNext,
+    this.onPlaybackChapterNeeded,
   });
 
   final int bookId;
@@ -43,6 +48,8 @@ final class ReaderPage extends StatefulWidget {
   final PlaybackCursor? initialCursor;
   final int navigationGeneration;
   final bool playbackStarting;
+  final PlaybackCursor? playbackCursor;
+  final bool playbackActive;
   final VoidCallback? onBackToLibrary;
   final ValueChanged<int>? onChapterSelected;
   final ValueChanged<int>? onVisibleChapterChanged;
@@ -51,6 +58,7 @@ final class ReaderPage extends StatefulWidget {
   final VoidCallback? onOpenPlayer;
   final ReaderEdgeLoadCallback? onLoadPrevious;
   final ReaderEdgeLoadCallback? onLoadNext;
+  final ReaderPlaybackChapterCallback? onPlaybackChapterNeeded;
 
   @override
   State<ReaderPage> createState() => _ReaderPageState();
@@ -67,6 +75,8 @@ final class _ReaderPageState extends State<ReaderPage> {
   bool _scrollMoved = false;
   bool _loadingPrevious = false;
   bool _loadingNext = false;
+  bool _playbackFollow = true;
+  int? _requestedPlaybackChapterId;
   int _scrollGeneration = 0;
   double _fontSize = 19;
 
@@ -91,6 +101,13 @@ final class _ReaderPageState extends State<ReaderPage> {
     super.initState();
     _resetNavigationState();
     _itemPositions.itemPositions.addListener(_onItemPositionsChanged);
+    if (widget.playbackCursor != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_followPlayingParagraph());
+        }
+      });
+    }
   }
 
   @override
@@ -103,6 +120,14 @@ final class _ReaderPageState extends State<ReaderPage> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _jumpToInitialPosition();
+        }
+      });
+    }
+    if (oldWidget.playbackCursor != widget.playbackCursor ||
+        !identical(oldWidget.sections, widget.sections)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(_followPlayingParagraph());
         }
       });
     }
@@ -217,43 +242,56 @@ final class _ReaderPageState extends State<ReaderPage> {
 
   Widget _buildParagraph(BuildContext context, ReaderParagraph paragraph) {
     final active = paragraph.id == _activeParagraphId;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: InkWell(
-        key: ValueKey<String>(
-          active
-              ? 'active-paragraph-${paragraph.id}'
-              : 'paragraph-${paragraph.id}',
-        ),
-        borderRadius: BorderRadius.circular(6),
-        onTap: () => _selectParagraph(paragraph),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: active
-                ? Theme.of(context).colorScheme.secondaryContainer
-                : null,
-            borderRadius: BorderRadius.circular(6),
+    final playing =
+        widget.playbackActive &&
+        widget.playbackCursor?.chapterId == paragraph.chapterId &&
+        widget.playbackCursor?.paragraphIndex == paragraph.index;
+    return KeyedSubtree(
+      key: playing
+          ? ValueKey<String>(
+              'playing-paragraph-${paragraph.chapterId}-${paragraph.index}',
+            )
+          : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: InkWell(
+          key: ValueKey<String>(
+            active
+                ? 'active-paragraph-${paragraph.id}'
+                : 'paragraph-${paragraph.id}',
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                paragraph.text,
-                style: TextStyle(fontSize: _fontSize, height: 1.8),
-              ),
-              if (active)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: widget.playbackStarting
-                        ? null
-                        : () => _play(paragraph),
-                    icon: const Icon(Icons.play_arrow),
-                    label: const Text('从这里朗读'),
-                  ),
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => _selectParagraph(paragraph),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: playing
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : active
+                  ? Theme.of(context).colorScheme.secondaryContainer
+                  : null,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  paragraph.text,
+                  style: TextStyle(fontSize: _fontSize, height: 1.8),
                 ),
-            ],
+                if (active)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: widget.playbackStarting
+                          ? null
+                          : () => _play(paragraph),
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('从这里朗读'),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -306,7 +344,10 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   bool _onScrollNotification(ScrollNotification notification) {
-    if (notification is ScrollUpdateNotification) {
+    if (notification is ScrollStartNotification &&
+        notification.dragDetails != null) {
+      _playbackFollow = false;
+    } else if (notification is ScrollUpdateNotification) {
       final scrollDelta = notification.scrollDelta;
       if (scrollDelta != null && scrollDelta != 0) {
         _scrollMoved = true;
@@ -511,9 +552,58 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   void _play(ReaderParagraph paragraph) {
+    _playbackFollow = true;
     setState(() => _activeParagraphId = paragraph.id);
     _reportReadingPosition(paragraph);
     widget.onPlayFrom?.call(paragraph);
+  }
+
+  Future<void> _followPlayingParagraph() async {
+    final cursor = widget.playbackCursor;
+    if (!_playbackFollow || cursor == null || !widget.playbackActive) {
+      return;
+    }
+    var index = _playingParagraphIndex(cursor);
+    if (index < 0) {
+      final callback = widget.onPlaybackChapterNeeded;
+      if (callback == null || _requestedPlaybackChapterId == cursor.chapterId) {
+        return;
+      }
+      _requestedPlaybackChapterId = cursor.chapterId;
+      try {
+        await callback(cursor.chapterId);
+      } finally {
+        if (_requestedPlaybackChapterId == cursor.chapterId) {
+          _requestedPlaybackChapterId = null;
+        }
+      }
+      if (!mounted || !_playbackFollow || widget.playbackCursor != cursor) {
+        return;
+      }
+      index = _playingParagraphIndex(cursor);
+    }
+    if (index < 0 || !_itemScrollController.isAttached) {
+      return;
+    }
+    final visible = _visiblePositions();
+    if (visible.any((position) => position.index == index)) {
+      return;
+    }
+    await _itemScrollController.scrollTo(
+      index: index,
+      alignment: 0.35,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOut,
+    );
+  }
+
+  int _playingParagraphIndex(PlaybackCursor cursor) {
+    return _items.indexWhere(
+      (item) =>
+          item is ReaderParagraphItem &&
+          item.paragraph.chapterId == cursor.chapterId &&
+          item.paragraph.index == cursor.paragraphIndex,
+    );
   }
 
   Future<void> _showChapterList() async {
