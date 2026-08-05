@@ -36,7 +36,16 @@ void main() {
       chapters.first.id,
     );
     expect(chapters.map((chapter) => chapter.title), ['第一章', '第二章']);
-    expect(firstParagraphs.map((paragraph) => paragraph.content), ['第一段']);
+    expect(firstParagraphs.map((paragraph) => paragraph.paragraphIndex), [
+      0,
+      1,
+      2,
+    ]);
+    expect(firstParagraphs.map((paragraph) => paragraph.content), [
+      '第一段',
+      '第二段',
+      '第三段',
+    ]);
   });
 
   test('writes parsed paragraphs through Drift batches', () async {
@@ -63,6 +72,28 @@ void main() {
     expect(interceptor.batchedCalls, 2);
     expect(interceptor.insertCalls, 3);
     expect(secondParagraphs.map((paragraph) => paragraph.content), ['第二段']);
+  });
+
+  test('rolls back the whole book when a paragraph batch fails', () async {
+    final interceptor = _StatementCountingInterceptor(failOnBatch: 2);
+    await database.close();
+    database = AppDatabase.forTesting(
+      NativeDatabase.memory().interceptWith(interceptor),
+    );
+    final repository = BookImportRepository(
+      database: database,
+      txtParser: const FakeBookParser(),
+      epubParser: const FakeBookParser(),
+    );
+
+    await expectLater(
+      repository.importBytes(Uint8List(0), fileName: '测试.epub'),
+      throwsStateError,
+    );
+
+    expect(await database.select(database.books).get(), isEmpty);
+    expect(await database.select(database.chapters).get(), isEmpty);
+    expect(await database.select(database.paragraphs).get(), isEmpty);
   });
 
   test('rejects unsupported file extensions before parsing', () async {
@@ -119,6 +150,9 @@ void main() {
 }
 
 final class _StatementCountingInterceptor extends QueryInterceptor {
+  _StatementCountingInterceptor({this.failOnBatch});
+
+  final int? failOnBatch;
   int batchedCalls = 0;
   int insertCalls = 0;
 
@@ -128,6 +162,9 @@ final class _StatementCountingInterceptor extends QueryInterceptor {
     BatchedStatements statements,
   ) {
     batchedCalls++;
+    if (batchedCalls == failOnBatch) {
+      throw StateError('Injected paragraph batch failure.');
+    }
     return super.runBatched(executor, statements);
   }
 
@@ -150,7 +187,7 @@ final class FakeBookParser implements BookParser {
     return const ParsedBook(
       title: '测试书',
       chapters: [
-        ParsedChapter(title: '第一章', paragraphs: ['第一段']),
+        ParsedChapter(title: '第一章', paragraphs: ['第一段', '第二段', '第三段']),
         ParsedChapter(title: '第二章', paragraphs: ['第二段']),
       ],
     );

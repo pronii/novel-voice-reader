@@ -133,7 +133,95 @@ void main() {
     await provider.dispose();
     await directory.delete(recursive: true);
   });
+
+  test('prepare reuses an in-flight prefetch request', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'cached-prefetch-in-flight-',
+    );
+    final engine = FakeAudioPlaybackEngine();
+    final synthesizer = ControllableCloudSpeechSynthesizer();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: synthesizer,
+      ),
+      engine: engine,
+    );
+    const segment = SpeechSegment(
+      id: '11:0',
+      paragraphId: 11,
+      text: '并发预取正文',
+      partIndex: 0,
+    );
+    final profile = _cloudProfile();
+
+    final prefetch = (provider as PrefetchingSpeechProvider).prefetch(
+      segment,
+      profile,
+    );
+    await synthesizer.waitForRequests(1);
+    final prepare = provider.prepare(segment, profile);
+    await pumpEventQueue();
+
+    expect(synthesizer.requests, hasLength(1));
+    synthesizer.complete(0);
+    await Future.wait([prefetch, prepare]);
+    expect(engine.filePaths, hasLength(1));
+
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
+
+  test('a stale prepare cannot replace the newest audio source', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'cached-latest-prepare-',
+    );
+    final engine = FakeAudioPlaybackEngine();
+    final synthesizer = ControllableCloudSpeechSynthesizer();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: synthesizer,
+      ),
+      engine: engine,
+    );
+    const firstSegment = SpeechSegment(
+      id: '12:0',
+      paragraphId: 12,
+      text: '旧段落',
+      partIndex: 0,
+    );
+    const secondSegment = SpeechSegment(
+      id: '13:0',
+      paragraphId: 13,
+      text: '新段落',
+      partIndex: 0,
+    );
+    final profile = _cloudProfile();
+
+    final firstPrepare = provider.prepare(firstSegment, profile);
+    await synthesizer.waitForRequests(1);
+    final secondPrepare = provider.prepare(secondSegment, profile);
+    await synthesizer.waitForRequests(2);
+    synthesizer.complete(1);
+    await secondPrepare;
+    synthesizer.complete(0);
+    await firstPrepare;
+
+    expect(engine.filePaths, hasLength(1));
+
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
 }
+
+VoiceProfile _cloudProfile() => VoiceProfile.cloud(
+  baseUrl: 'https://example.com',
+  model: 'tts-model',
+  voice: 'voice-a',
+  speed: 1,
+  outputFormat: 'mp3',
+);
 
 final class FakeCloudSpeechSynthesizer implements CloudSpeechSynthesizer {
   int calls = 0;
@@ -148,6 +236,30 @@ final class FakeCloudSpeechSynthesizer implements CloudSpeechSynthesizer {
   }
 }
 
+final class ControllableCloudSpeechSynthesizer
+    implements CloudSpeechSynthesizer {
+  final List<Completer<Uint8List>> requests = [];
+
+  @override
+  Future<Uint8List> synthesize(SpeechSegment segment, VoiceProfile profile) {
+    final request = Completer<Uint8List>();
+    requests.add(request);
+    return request.future;
+  }
+
+  void complete(int index) {
+    requests[index].complete(
+      Uint8List.fromList(const [0x49, 0x44, 0x33, 0x04]),
+    );
+  }
+
+  Future<void> waitForRequests(int count) async {
+    while (requests.length < count) {
+      await Future<void>.delayed(Duration.zero);
+    }
+  }
+}
+
 class FakeAudioPlaybackEngine implements AudioPlaybackEngine {
   final _completed = StreamController<void>.broadcast(sync: true);
   String? filePath;
@@ -155,6 +267,7 @@ class FakeAudioPlaybackEngine implements AudioPlaybackEngine {
   int pauseCalls = 0;
   int stopCalls = 0;
   int disposeCalls = 0;
+  final List<String> filePaths = [];
 
   @override
   Stream<void> get completed => _completed.stream;
@@ -162,6 +275,7 @@ class FakeAudioPlaybackEngine implements AudioPlaybackEngine {
   @override
   Future<void> setFilePath(String path) async {
     filePath = path;
+    filePaths.add(path);
   }
 
   @override

@@ -91,6 +91,9 @@ final class PlaybackCoordinator implements PlaybackController {
   int _segmentIndex = 0;
   double _speed = 1;
   int _playbackGeneration = 0;
+  Future<void>? _activePrefetch;
+  int? _queuedPrefetchGeneration;
+  bool _disposing = false;
 
   @override
   PlaybackCursor? get cursor => _cursor;
@@ -159,9 +162,12 @@ final class PlaybackCoordinator implements PlaybackController {
   }
 
   Future<void> dispose() async {
+    _disposing = true;
     _playbackGeneration++;
+    _queuedPrefetchGeneration = null;
     try {
       await _subscription.cancel();
+      await _activePrefetch;
       final provider = _provider;
       if (provider is DisposableSpeechProvider) {
         await (provider as DisposableSpeechProvider).dispose();
@@ -181,7 +187,9 @@ final class PlaybackCoordinator implements PlaybackController {
       maxCharacters: _voiceProfile.maxSegmentCharacters,
     );
     _segmentIndex = 0;
-    await _prepareAndPlayCurrentSegment();
+    if (!await _prepareAndPlayCurrentSegment(generation)) {
+      return;
+    }
     _cursor = paragraph.cursor;
     if (!_cursorChanges.isClosed) {
       _cursorChanges.add(paragraph.cursor);
@@ -189,13 +197,21 @@ final class PlaybackCoordinator implements PlaybackController {
     _schedulePrefetch(generation);
   }
 
-  Future<void> _prepareAndPlayCurrentSegment() async {
-    await _provider.prepare(_segments[_segmentIndex], _voiceProfile);
+  Future<bool> _prepareAndPlayCurrentSegment(int generation) async {
+    final segment = _segments[_segmentIndex];
+    await _provider.prepare(segment, _voiceProfile);
+    if (generation != _playbackGeneration) {
+      return false;
+    }
     final provider = _provider;
     if (provider is AdjustableSpeechProvider) {
       await (provider as AdjustableSpeechProvider).setPlaybackSpeed(_speed);
+      if (generation != _playbackGeneration) {
+        return false;
+      }
     }
     await _provider.play();
+    return generation == _playbackGeneration;
   }
 
   Future<void> _handleSpeechEvent(SpeechEvent event) async {
@@ -209,9 +225,12 @@ final class PlaybackCoordinator implements PlaybackController {
       return;
     }
     if (_segmentIndex + 1 < _segments.length) {
+      final generation = _playbackGeneration;
       _segmentIndex++;
-      await _prepareAndPlayCurrentSegment();
-      _schedulePrefetch(_playbackGeneration);
+      if (!await _prepareAndPlayCurrentSegment(generation)) {
+        return;
+      }
+      _schedulePrefetch(generation);
       return;
     }
 
@@ -230,11 +249,33 @@ final class PlaybackCoordinator implements PlaybackController {
 
   void _schedulePrefetch(int generation) {
     final provider = _provider;
-    if (provider is PrefetchingSpeechProvider) {
-      unawaited(
-        _prefetchNext(provider as PrefetchingSpeechProvider, generation),
-      );
+    if (provider is! PrefetchingSpeechProvider || _disposing) {
+      return;
     }
+    _queuedPrefetchGeneration = generation;
+    if (_activePrefetch == null) {
+      _startQueuedPrefetch(provider as PrefetchingSpeechProvider);
+    }
+  }
+
+  void _startQueuedPrefetch(PrefetchingSpeechProvider provider) {
+    final generation = _queuedPrefetchGeneration;
+    if (generation == null || _disposing) {
+      return;
+    }
+    _queuedPrefetchGeneration = null;
+    final operation = _prefetchNext(provider, generation);
+    _activePrefetch = operation;
+    unawaited(
+      operation.whenComplete(() {
+        if (identical(_activePrefetch, operation)) {
+          _activePrefetch = null;
+        }
+        if (!_disposing && _queuedPrefetchGeneration != null) {
+          _startQueuedPrefetch(provider);
+        }
+      }),
+    );
   }
 
   Future<void> _prefetchNext(

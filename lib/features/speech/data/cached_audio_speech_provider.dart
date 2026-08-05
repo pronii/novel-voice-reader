@@ -75,20 +75,36 @@ final class CachedAudioSpeechProvider
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
   late final StreamSubscription<void> _completionSubscription;
   final Map<String, Future<File>> _inFlight = {};
+  Future<void> _sourceUpdates = Future<void>.value();
   SpeechSegment? _segment;
   bool _started = false;
+  int _prepareGeneration = 0;
 
   @override
   Stream<SpeechEvent> get events => _events.stream;
 
   @override
   Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {
-    _segment = segment;
-    _started = false;
+    final generation = ++_prepareGeneration;
     try {
       final file = await _obtain(segment, profile);
-      await engine.setFilePath(file.path);
+      if (generation != _prepareGeneration) {
+        return;
+      }
+      await _enqueueSourceUpdate(() async {
+        if (generation != _prepareGeneration) {
+          return;
+        }
+        await engine.setFilePath(file.path);
+        if (generation == _prepareGeneration) {
+          _segment = segment;
+          _started = false;
+        }
+      });
     } catch (error) {
+      if (generation != _prepareGeneration) {
+        return;
+      }
       final failure = error is AppFailure
           ? error
           : const AppFailure('云端语音播放准备失败');
@@ -143,7 +159,9 @@ final class CachedAudioSpeechProvider
 
   @override
   Future<void> dispose() async {
+    _prepareGeneration++;
     await _completionSubscription.cancel();
+    await _sourceUpdates;
     await engine.dispose();
     await _events.close();
   }
@@ -186,6 +204,15 @@ final class CachedAudioSpeechProvider
       }
     });
     _inFlight[key] = operation;
+    return operation;
+  }
+
+  Future<void> _enqueueSourceUpdate(Future<void> Function() update) {
+    final operation = _sourceUpdates.then((_) => update());
+    _sourceUpdates = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
     return operation;
   }
 }

@@ -76,6 +76,83 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('only the newest concurrent play request can start audio', () async {
+    final provider = ControllablePrepareSpeechProvider();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+      voiceProfile: VoiceProfile.system(),
+    );
+
+    final first = coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    await provider.waitForPrepares(1);
+    final second = coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 1),
+    );
+    await provider.waitForPrepares(2);
+    provider.completePrepare(1);
+    await second;
+    provider.completePrepare(0);
+    await first;
+
+    expect(provider.playCalls, 1);
+    expect(
+      coordinator.cursor,
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 1),
+    );
+    await coordinator.dispose();
+  });
+
+  test('serializes prefetches across rapid playback changes', () async {
+    final provider = FakeSpeechProvider()..prefetchBlock = Completer<void>();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource(const ['第一段', '第二段', '第三段']),
+      voiceProfile: VoiceProfile.system(),
+    );
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    await provider.waitForActivePrefetches(1);
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 1),
+    );
+    await pumpEventQueue();
+
+    expect(provider.maxActivePrefetches, 1);
+    provider.prefetchBlock!.complete();
+    await provider.waitForActivePrefetches(0);
+    await coordinator.dispose();
+  });
+
+  test('dispose waits for the active prefetch', () async {
+    final provider = FakeSpeechProvider()..prefetchBlock = Completer<void>();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+      voiceProfile: VoiceProfile.system(),
+    );
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    await provider.waitForActivePrefetches(1);
+    var disposed = false;
+
+    final disposal = coordinator.dispose().then((_) => disposed = true);
+    await pumpEventQueue();
+
+    expect(disposed, isFalse);
+    provider.prefetchBlock!.complete();
+    await disposal;
+    expect(disposed, isTrue);
+  });
+
   test('pause persists the current cursor and delegates to provider', () async {
     final provider = FakeSpeechProvider();
     final progress = FakeProgressRepository();
@@ -218,6 +295,9 @@ final class FakeSpeechProvider
   int pauseCalls = 0;
   final List<double> speedChanges = [];
   Object? speedFailure;
+  Completer<void>? prefetchBlock;
+  int activePrefetches = 0;
+  int maxActivePrefetches = 0;
 
   @override
   Stream<SpeechEvent> get events => _events.stream;
@@ -230,6 +310,21 @@ final class FakeSpeechProvider
   @override
   Future<void> prefetch(SpeechSegment segment, VoiceProfile profile) async {
     prefetched.add(segment);
+    activePrefetches++;
+    if (activePrefetches > maxActivePrefetches) {
+      maxActivePrefetches = activePrefetches;
+    }
+    try {
+      await prefetchBlock?.future;
+    } finally {
+      activePrefetches--;
+    }
+  }
+
+  Future<void> waitForActivePrefetches(int count) async {
+    while (activePrefetches != count) {
+      await Future<void>.delayed(Duration.zero);
+    }
   }
 
   @override
@@ -258,4 +353,40 @@ final class FakeSpeechProvider
   void completeCurrent() {
     _events.add(SpeechCompleted(segmentId: prepared.last.id));
   }
+}
+
+final class ControllablePrepareSpeechProvider implements SpeechProvider {
+  final _events = StreamController<SpeechEvent>.broadcast(sync: true);
+  final List<Completer<void>> _prepares = [];
+  int playCalls = 0;
+
+  @override
+  Stream<SpeechEvent> get events => _events.stream;
+
+  @override
+  Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {
+    final prepare = Completer<void>();
+    _prepares.add(prepare);
+    await prepare.future;
+  }
+
+  @override
+  Future<void> play() async => playCalls++;
+
+  @override
+  Future<void> pause() async {}
+
+  @override
+  Future<void> resume() async {}
+
+  @override
+  Future<void> stop() async {}
+
+  Future<void> waitForPrepares(int count) async {
+    while (_prepares.length < count) {
+      await Future<void>.delayed(Duration.zero);
+    }
+  }
+
+  void completePrepare(int index) => _prepares[index].complete();
 }
