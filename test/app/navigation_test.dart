@@ -93,6 +93,28 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1));
   });
 
+  testWidgets('opens a book with no chapters without loading forever', (
+    tester,
+  ) async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    await database
+        .into(database.books)
+        .insert(BooksCompanion.insert(title: '空书'));
+
+    await tester.pumpWidget(NovelVoiceReaderApp(database: database));
+    await _pumpUntilFound(tester, find.text('空书'));
+    await tester.tap(find.text('空书'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byTooltip('返回书架'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
   testWidgets('reopens the newly selected chapter after a pending scroll', (
     tester,
   ) async {

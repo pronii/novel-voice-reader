@@ -2,7 +2,8 @@ import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
-import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
+import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
+import 'package:novel_voice_reader/features/reader/domain/reader_content.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 final databaseProvider = Provider<AppDatabase?>((ref) => null);
@@ -117,58 +118,66 @@ final readerPageDataProvider = FutureProvider.autoDispose
         database.books,
       )..where((row) => row.id.equals(bookId))).getSingle();
       final chapters = await database.chaptersForBook(bookId);
+      final readerChapters = [
+        for (final record in chapters)
+          ReaderChapter(
+            id: record.id,
+            index: record.chapterIndex,
+            title: record.title,
+          ),
+      ];
       if (chapters.isEmpty) {
         return ReaderPageData(
           book: book,
-          chapter: null,
           chapters: const [],
-          paragraphs: const [],
-          activeParagraphId: null,
+          savedCursor: null,
         );
       }
       final progress = await database.progressForBook(bookId);
       final requestedChapterId = request.chapterId;
-      final chapter = requestedChapterId != null
-          ? chapters.firstWhere(
-              (candidate) => candidate.id == requestedChapterId,
-              orElse: () => chapters.first,
-            )
-          : progress == null
-          ? chapters.first
-          : chapters.firstWhere(
-              (candidate) => candidate.id == progress.chapterId,
-              orElse: () => chapters.first,
-            );
-      final records = await database.paragraphsForChapter(chapter.id);
-      final savedParagraphIndex = progress?.chapterId == chapter.id
+      final requestedChapter = requestedChapterId == null
+          ? null
+          : readerChapters.where(
+              (chapter) => chapter.id == requestedChapterId,
+            ).firstOrNull;
+      final progressChapter = progress == null
+          ? null
+          : readerChapters.where(
+              (chapter) => chapter.id == progress.chapterId,
+            ).firstOrNull;
+      final selectedChapter =
+          requestedChapter ?? progressChapter ?? readerChapters.first;
+      final savedParagraphIndex = progress?.chapterId == selectedChapter.id
           ? progress?.paragraphIndex ?? 0
           : 0;
-      final activeIndex = savedParagraphIndex.clamp(
-        0,
-        records.isEmpty ? 0 : records.length - 1,
-      );
       return ReaderPageData(
         book: book,
-        chapter: chapter,
-        chapters: [
-          for (final record in chapters)
-            ReaderChapter(
-              id: record.id,
-              index: record.chapterIndex,
-              title: record.title,
-            ),
-        ],
-        paragraphs: [
-          for (final record in records)
-            ReaderParagraph(
-              id: record.id,
-              index: record.paragraphIndex,
-              text: record.content,
-            ),
-        ],
-        activeParagraphId: records.isEmpty ? null : records[activeIndex].id,
+        chapters: readerChapters,
+        savedCursor: PlaybackCursor(
+          chapterId: selectedChapter.id,
+          paragraphIndex: savedParagraphIndex,
+        ),
       );
     });
+
+Future<ReaderChapterSection> loadReaderChapterSection(
+  AppDatabase database,
+  ReaderChapter chapter,
+) async {
+  final records = await database.paragraphsForChapter(chapter.id);
+  return ReaderChapterSection(
+    chapter: chapter,
+    paragraphs: [
+      for (final record in records)
+        ReaderParagraph(
+          id: record.id,
+          chapterId: chapter.id,
+          index: record.paragraphIndex,
+          text: record.content,
+        ),
+    ],
+  );
+}
 
 final class ReaderPageRequest {
   const ReaderPageRequest(this.bookId, [this.chapterId]);
@@ -190,19 +199,11 @@ final class ReaderPageRequest {
 final class ReaderPageData {
   const ReaderPageData({
     required this.book,
-    required this.chapter,
     required this.chapters,
-    required this.paragraphs,
-    required this.activeParagraphId,
+    required this.savedCursor,
   });
 
   final BookRecord book;
-  final ChapterRecord? chapter;
   final List<ReaderChapter> chapters;
-  final List<ReaderParagraph> paragraphs;
-  final int? activeParagraphId;
-
-  int get currentChapterIndex => chapter == null
-      ? -1
-      : chapters.indexWhere((candidate) => candidate.id == chapter!.id);
+  final PlaybackCursor? savedCursor;
 }

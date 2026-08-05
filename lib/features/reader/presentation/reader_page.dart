@@ -1,106 +1,116 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:novel_voice_reader/features/reader/application/reader_chapter_window_controller.dart';
+import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
+import 'package:novel_voice_reader/features/reader/domain/reader_content.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
-final class ReaderChapter {
-  const ReaderChapter({
-    required this.id,
-    required this.index,
-    required this.title,
-  });
+export 'package:novel_voice_reader/features/reader/domain/reader_content.dart';
 
-  final int id;
-  final int index;
-  final String title;
-}
-
-final class ReaderParagraph {
-  const ReaderParagraph({
-    required this.id,
-    required this.index,
-    required this.text,
-  });
-
-  final int id;
-  final int index;
-  final String text;
-}
+typedef ReaderEdgeLoadCallback =
+    Future<ReaderWindowMutation> Function({
+      required Set<int> visibleChapterIds,
+      required ReaderViewportAnchor anchor,
+    });
 
 final class ReaderPage extends StatefulWidget {
   const ReaderPage({
     super.key,
     required this.bookId,
     required this.bookTitle,
-    required this.chapterTitle,
-    required this.paragraphs,
-    this.chapters = const [],
+    required this.chapters,
+    required this.sections,
     this.currentChapterId,
-    this.initialActiveParagraphId,
+    this.initialCursor,
+    this.navigationGeneration = 0,
     this.playbackStarting = false,
     this.onBackToLibrary,
     this.onChapterSelected,
+    this.onVisibleChapterChanged,
     this.onReadingPositionChanged,
     this.onPlayFrom,
     this.onOpenPlayer,
+    this.onLoadPrevious,
+    this.onLoadNext,
   });
 
   final int bookId;
   final String bookTitle;
-  final String chapterTitle;
   final List<ReaderChapter> chapters;
+  final List<ReaderChapterSection> sections;
   final int? currentChapterId;
-  final List<ReaderParagraph> paragraphs;
-  final int? initialActiveParagraphId;
+  final PlaybackCursor? initialCursor;
+  final int navigationGeneration;
   final bool playbackStarting;
   final VoidCallback? onBackToLibrary;
   final ValueChanged<int>? onChapterSelected;
+  final ValueChanged<int>? onVisibleChapterChanged;
   final ValueChanged<ReaderParagraph>? onReadingPositionChanged;
   final ValueChanged<ReaderParagraph>? onPlayFrom;
   final VoidCallback? onOpenPlayer;
+  final ReaderEdgeLoadCallback? onLoadPrevious;
+  final ReaderEdgeLoadCallback? onLoadNext;
 
   @override
   State<ReaderPage> createState() => _ReaderPageState();
 }
 
 final class _ReaderPageState extends State<ReaderPage> {
-  static const double _nextChapterOverscrollThreshold = 48;
-
   final ItemPositionsListener _itemPositions = ItemPositionsListener.create();
+  final ItemScrollController _itemScrollController = ItemScrollController();
   Timer? _progressDebounce;
   ReaderParagraph? _pendingProgressParagraph;
   int? _activeParagraphId;
   int? _lastReportedParagraphId;
+  int? _visibleChapterId;
   bool _scrollMoved = false;
+  bool _loadingPrevious = false;
+  bool _loadingNext = false;
   int _scrollGeneration = 0;
   double _fontSize = 19;
-  double _bottomOverscroll = 0;
-  bool _nextChapterTransitionLocked = false;
+
+  List<ReaderContentItem> get _items {
+    final items = <ReaderContentItem>[
+      for (final section in widget.sections) ...[
+        ReaderChapterHeadingItem(section.chapter),
+        for (final paragraph in section.paragraphs)
+          ReaderParagraphItem(paragraph),
+      ],
+    ];
+    if (widget.sections.isNotEmpty &&
+        widget.chapters.isNotEmpty &&
+        widget.sections.last.chapter.id == widget.chapters.last.id) {
+      items.add(ReaderBookEndItem(widget.sections.last.chapter.id));
+    }
+    return items;
+  }
 
   @override
   void initState() {
     super.initState();
-    _activeParagraphId =
-        widget.initialActiveParagraphId ?? widget.paragraphs.firstOrNull?.id;
-    _lastReportedParagraphId = _activeParagraphId;
+    _resetNavigationState();
+    _itemPositions.itemPositions.addListener(_onItemPositionsChanged);
   }
 
   @override
   void didUpdateWidget(covariant ReaderPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.currentChapterId != widget.currentChapterId) {
-      _bottomOverscroll = 0;
-      _nextChapterTransitionLocked = false;
+    if (oldWidget.navigationGeneration != widget.navigationGeneration) {
       _invalidatePendingProgressReport();
       _scrollMoved = false;
-      _activeParagraphId =
-          widget.initialActiveParagraphId ?? widget.paragraphs.firstOrNull?.id;
-      _lastReportedParagraphId = _activeParagraphId;
+      _resetNavigationState();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _jumpToInitialPosition();
+        }
+      });
     }
   }
 
   @override
   void dispose() {
+    _itemPositions.itemPositions.removeListener(_onItemPositionsChanged);
     final pendingParagraph = _pendingProgressParagraph;
     _progressDebounce?.cancel();
     _progressDebounce = null;
@@ -115,6 +125,7 @@ final class _ReaderPageState extends State<ReaderPage> {
 
   @override
   Widget build(BuildContext context) {
+    final items = _items;
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -150,114 +161,152 @@ final class _ReaderPageState extends State<ReaderPage> {
           ),
         ],
       ),
-      body: NotificationListener<ScrollNotification>(
-        onNotification: _onScrollNotification,
-        child: ScrollablePositionedList.builder(
-          key: ValueKey<int?>(widget.currentChapterId),
-          initialScrollIndex: _initialScrollIndex,
-          itemPositionsListener: _itemPositions,
-          itemCount: widget.paragraphs.length + 1,
-          itemBuilder: (context, index) {
-            if (index == 0) {
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.chapterTitle,
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    if (widget.paragraphs.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 48),
-                        child: Center(child: Text('本章没有可朗读内容')),
-                      ),
-                  ],
-                ),
-              );
-            }
-            final paragraph = widget.paragraphs[index - 1];
-            final active = paragraph.id == _activeParagraphId;
-            return Padding(
-              padding: EdgeInsets.fromLTRB(
-                12,
-                0,
-                12,
-                index == widget.paragraphs.length ? 48 : 0,
+      body: items.isEmpty
+          ? const Center(child: Text('图书没有可阅读内容'))
+          : NotificationListener<ScrollNotification>(
+              onNotification: _onScrollNotification,
+              child: ScrollablePositionedList.builder(
+                initialScrollIndex: _initialScrollIndex,
+                itemScrollController: _itemScrollController,
+                itemPositionsListener: _itemPositions,
+                itemCount: items.length,
+                itemBuilder: (context, index) =>
+                    _buildItem(context, items[index]),
               ),
-              child: InkWell(
-                key: ValueKey<String>(
-                  active
-                      ? 'active-paragraph-${paragraph.id}'
-                      : 'paragraph-${paragraph.id}',
-                ),
-                borderRadius: BorderRadius.circular(6),
-                onTap: () => _selectParagraph(paragraph),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: active
-                        ? Theme.of(context).colorScheme.secondaryContainer
-                        : null,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        paragraph.text,
-                        style: TextStyle(fontSize: _fontSize, height: 1.8),
-                      ),
-                      if (active)
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton.icon(
-                            onPressed: widget.playbackStarting
-                                ? null
-                                : () => _play(paragraph),
-                            icon: const Icon(Icons.play_arrow),
-                            label: const Text('从这里朗读'),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
+            ),
+    );
+  }
+
+  Widget _buildItem(BuildContext context, ReaderContentItem item) {
+    return switch (item) {
+      ReaderChapterHeadingItem(:final chapter) => _buildChapterHeading(
+        context,
+        chapter,
+      ),
+      ReaderParagraphItem(:final paragraph) => _buildParagraph(
+        context,
+        paragraph,
+      ),
+      ReaderBookEndItem() => const Padding(
+        padding: EdgeInsets.fromLTRB(20, 36, 20, 52),
+        child: Center(child: Text('全书读完')),
+      ),
+    };
+  }
+
+  Widget _buildChapterHeading(BuildContext context, ReaderChapter chapter) {
+    final section = widget.sections
+        .where((candidate) => candidate.chapter.id == chapter.id)
+        .firstOrNull;
+    return Padding(
+      key: ValueKey<String>('chapter-heading-${chapter.id}'),
+      padding: const EdgeInsets.fromLTRB(20, 28, 20, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(chapter.title, style: Theme.of(context).textTheme.headlineSmall),
+          if (section != null && section.paragraphs.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 24, bottom: 12),
+              child: Center(child: Text('本章没有可朗读内容')),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildParagraph(BuildContext context, ReaderParagraph paragraph) {
+    final active = paragraph.id == _activeParagraphId;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: InkWell(
+        key: ValueKey<String>(
+          active
+              ? 'active-paragraph-${paragraph.id}'
+              : 'paragraph-${paragraph.id}',
+        ),
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => _selectParagraph(paragraph),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: active
+                ? Theme.of(context).colorScheme.secondaryContainer
+                : null,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                paragraph.text,
+                style: TextStyle(fontSize: _fontSize, height: 1.8),
               ),
-            );
-          },
+              if (active)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: widget.playbackStarting
+                        ? null
+                        : () => _play(paragraph),
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('从这里朗读'),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   int get _initialScrollIndex {
-    final activeIndex = widget.paragraphs.indexWhere(
-      (paragraph) => paragraph.id == widget.initialActiveParagraphId,
+    final items = _items;
+    final cursor = widget.initialCursor;
+    if (cursor != null) {
+      final paragraphIndex = items.indexWhere(
+        (item) =>
+            item is ReaderParagraphItem &&
+            item.paragraph.chapterId == cursor.chapterId &&
+            item.paragraph.index == cursor.paragraphIndex,
+      );
+      if (paragraphIndex >= 0) {
+        return paragraphIndex;
+      }
+    }
+    final chapterId =
+        widget.currentChapterId ?? cursor?.chapterId ?? _visibleChapterId;
+    final headingIndex = items.indexWhere(
+      (item) => item is ReaderChapterHeadingItem && item.chapterId == chapterId,
     );
-    return activeIndex < 0 ? 0 : activeIndex + 1;
+    return headingIndex < 0 ? 0 : headingIndex;
+  }
+
+  void _resetNavigationState() {
+    final cursor = widget.initialCursor;
+    _visibleChapterId = cursor?.chapterId ?? widget.currentChapterId;
+    final paragraphs = widget.sections.expand((section) => section.paragraphs);
+    _activeParagraphId = cursor == null
+        ? paragraphs.firstOrNull?.id
+        : paragraphs
+              .where(
+                (paragraph) =>
+                    paragraph.chapterId == cursor.chapterId &&
+                    paragraph.index == cursor.paragraphIndex,
+              )
+              .firstOrNull
+              ?.id;
+    _lastReportedParagraphId = _activeParagraphId;
+  }
+
+  void _jumpToInitialPosition() {
+    if (_itemScrollController.isAttached && _items.isNotEmpty) {
+      _itemScrollController.jumpTo(index: _initialScrollIndex);
+    }
   }
 
   bool _onScrollNotification(ScrollNotification notification) {
-    if (notification is OverscrollNotification &&
-        notification.overscroll > 0 &&
-        notification.metrics.extentAfter == 0) {
-      _bottomOverscroll += notification.overscroll;
-      if (!_nextChapterTransitionLocked &&
-          _bottomOverscroll >= _nextChapterOverscrollThreshold) {
-        _continueToNextChapter();
-      }
-    } else if (notification.metrics.extentAfter > 0) {
-      _bottomOverscroll = 0;
-    }
-
-    if (notification is ScrollStartNotification) {
-      _scrollMoved = false;
-      _invalidatePendingProgressReport();
-    } else if (notification is ScrollUpdateNotification) {
+    if (notification is ScrollUpdateNotification) {
       final scrollDelta = notification.scrollDelta;
       if (scrollDelta != null && scrollDelta != 0) {
         _scrollMoved = true;
@@ -278,41 +327,146 @@ final class _ReaderPageState extends State<ReaderPage> {
     return false;
   }
 
-  void _continueToNextChapter() {
-    final currentChapterIndex = widget.chapters.indexWhere(
-      (chapter) => chapter.id == widget.currentChapterId,
+  void _onItemPositionsChanged() {
+    if (!mounted) {
+      return;
+    }
+    _updateVisibleChapter();
+    _maybeLoadEdges();
+  }
+
+  List<ItemPosition> _visiblePositions() {
+    return _itemPositions.itemPositions.value
+        .where(
+          (position) =>
+              position.index >= 0 &&
+              position.index < _items.length &&
+              position.itemTrailingEdge > 0 &&
+              position.itemLeadingEdge < 1,
+        )
+        .toList()
+      ..sort((a, b) => a.index.compareTo(b.index));
+  }
+
+  void _updateVisibleChapter() {
+    final visible = _visiblePositions();
+    if (visible.isEmpty) {
+      return;
+    }
+    final chapterId = _items[visible.first.index].chapterId;
+    if (chapterId != _visibleChapterId) {
+      _visibleChapterId = chapterId;
+      widget.onVisibleChapterChanged?.call(chapterId);
+    }
+  }
+
+  void _maybeLoadEdges() {
+    final visible = _visiblePositions();
+    final items = _items;
+    if (visible.isEmpty || items.isEmpty) {
+      return;
+    }
+    final first = visible.first;
+    final last = visible.last;
+    final anchor = ReaderViewportAnchor(
+      itemKey: items[first.index].key,
+      alignment: first.itemLeadingEdge,
     );
-    if (currentChapterIndex < 0 ||
-        currentChapterIndex + 1 >= widget.chapters.length) {
+    final visibleChapterIds = {
+      for (final position in visible) items[position.index].chapterId,
+    };
+    if (first.index <= 3 &&
+        widget.onLoadPrevious != null &&
+        !_loadingPrevious) {
+      unawaited(
+        _loadPrevious(visibleChapterIds: visibleChapterIds, anchor: anchor),
+      );
+    }
+    if (items.length - 1 - last.index <= 3 &&
+        widget.onLoadNext != null &&
+        !_loadingNext) {
+      unawaited(
+        _loadNext(visibleChapterIds: visibleChapterIds, anchor: anchor),
+      );
+    }
+  }
+
+  Future<void> _loadPrevious({
+    required Set<int> visibleChapterIds,
+    required ReaderViewportAnchor anchor,
+  }) async {
+    final callback = widget.onLoadPrevious;
+    if (callback == null || _loadingPrevious) {
       return;
     }
-    final onChapterSelected = widget.onChapterSelected;
-    if (onChapterSelected == null) {
+    _loadingPrevious = true;
+    try {
+      final mutation = await callback(
+        visibleChapterIds: visibleChapterIds,
+        anchor: anchor,
+      );
+      _restoreAnchor(mutation.anchor);
+    } catch (_) {
+      // Existing text remains readable; the next edge approach retries.
+    } finally {
+      _loadingPrevious = false;
+    }
+  }
+
+  Future<void> _loadNext({
+    required Set<int> visibleChapterIds,
+    required ReaderViewportAnchor anchor,
+  }) async {
+    final callback = widget.onLoadNext;
+    if (callback == null || _loadingNext) {
       return;
     }
-    _bottomOverscroll = 0;
-    _nextChapterTransitionLocked = true;
-    _invalidatePendingProgressReport();
-    onChapterSelected(widget.chapters[currentChapterIndex + 1].id);
+    _loadingNext = true;
+    try {
+      final mutation = await callback(
+        visibleChapterIds: visibleChapterIds,
+        anchor: anchor,
+      );
+      _restoreAnchor(mutation.anchor);
+    } catch (_) {
+      // Existing text remains readable; the next edge approach retries.
+    } finally {
+      _loadingNext = false;
+    }
+  }
+
+  void _restoreAnchor(ReaderViewportAnchor? anchor) {
+    if (anchor == null) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_itemScrollController.isAttached) {
+        return;
+      }
+      final index = _items.indexWhere((item) => item.key == anchor.itemKey);
+      if (index >= 0) {
+        _itemScrollController.jumpTo(index: index, alignment: anchor.alignment);
+      }
+    });
   }
 
   void _scheduleVisiblePositionReport() {
     _progressDebounce?.cancel();
     _progressDebounce = null;
-    final visible =
-        _itemPositions.itemPositions.value
-            .where(
-              (position) =>
-                  position.index > 0 &&
-                  position.index <= widget.paragraphs.length &&
-                  position.itemTrailingEdge > 0,
-            )
-            .toList()
-          ..sort((a, b) => a.index.compareTo(b.index));
+    final visible = _visiblePositions();
     if (visible.isEmpty) {
       return;
     }
-    final paragraph = widget.paragraphs[visible.first.index - 1];
+    final visibleItems = [
+      for (final position in visible) _items[position.index],
+    ];
+    final firstParagraph = visibleItems
+        .whereType<ReaderParagraphItem>()
+        .firstOrNull;
+    if (firstParagraph == null) {
+      return;
+    }
+    final paragraph = firstParagraph.paragraph;
     if (paragraph.id == _lastReportedParagraphId) {
       return;
     }
@@ -334,6 +488,8 @@ final class _ReaderPageState extends State<ReaderPage> {
   void _reportReadingPosition(ReaderParagraph paragraph) {
     _invalidatePendingProgressReport();
     _lastReportedParagraphId = paragraph.id;
+    _visibleChapterId = paragraph.chapterId;
+    widget.onVisibleChapterChanged?.call(paragraph.chapterId);
     widget.onReadingPositionChanged?.call(paragraph);
   }
 
@@ -345,7 +501,8 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   void _playActive() {
-    final active = widget.paragraphs
+    final active = widget.sections
+        .expand((section) => section.paragraphs)
         .where((paragraph) => paragraph.id == _activeParagraphId)
         .firstOrNull;
     if (active != null) {
@@ -372,8 +529,12 @@ final class _ReaderPageState extends State<ReaderPage> {
             return chapter.title.toLowerCase().contains(normalizedQuery) ||
                 '${chapter.index + 1}'.contains(normalizedQuery);
           }).toList();
+          final currentChapterId =
+              _visibleChapterId ??
+              widget.currentChapterId ??
+              widget.initialCursor?.chapterId;
           final currentChapterIndex = filteredChapters.indexWhere(
-            (chapter) => chapter.id == widget.currentChapterId,
+            (chapter) => chapter.id == currentChapterId,
           );
 
           return SafeArea(
@@ -413,8 +574,7 @@ final class _ReaderPageState extends State<ReaderPage> {
                         itemCount: filteredChapters.length,
                         itemBuilder: (context, index) {
                           final chapter = filteredChapters[index];
-                          final selected =
-                              chapter.id == widget.currentChapterId;
+                          final selected = chapter.id == currentChapterId;
                           return ListTile(
                             title: Text(chapter.title),
                             leading: SizedBox(
@@ -423,12 +583,7 @@ final class _ReaderPageState extends State<ReaderPage> {
                             ),
                             trailing: selected ? const Icon(Icons.check) : null,
                             selected: selected,
-                            onTap: () {
-                              if (!selected) {
-                                _invalidatePendingProgressReport();
-                              }
-                              Navigator.of(context).pop(chapter.id);
-                            },
+                            onTap: () => Navigator.of(context).pop(chapter.id),
                           );
                         },
                       ),
@@ -442,6 +597,7 @@ final class _ReaderPageState extends State<ReaderPage> {
       ),
     );
     if (selectedChapterId != null) {
+      _invalidatePendingProgressReport();
       widget.onChapterSelected?.call(selectedChapterId);
     }
   }

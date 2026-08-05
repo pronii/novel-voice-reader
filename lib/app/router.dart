@@ -22,6 +22,7 @@ import 'package:novel_voice_reader/features/library/presentation/library_page.da
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/playback/presentation/player_page.dart';
+import 'package:novel_voice_reader/features/reader/application/reader_chapter_window_controller.dart';
 import 'package:novel_voice_reader/features/reader/data/reading_progress_repository.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
@@ -168,7 +169,10 @@ final class _ReaderRoutePage extends ConsumerStatefulWidget {
 }
 
 final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
-  int? _selectedChapterId;
+  ReaderChapterWindowController? _chapterWindow;
+  Future<void>? _chapterWindowInitialization;
+  PlaybackCursor? _navigationCursor;
+  int? _visibleChapterId;
   PlaybackRuntime? _pendingPlaybackRuntime;
   PlaybackReplacementToken? _pendingPlaybackReplacement;
   bool _playbackStarting = false;
@@ -180,41 +184,100 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     if (pendingReplacement != null && runtime != null) {
       runtime.cancelReplacement(pendingReplacement);
     }
+    _chapterWindow?.removeListener(_onChapterWindowChanged);
+    _chapterWindow?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final bookId = widget.bookId;
-    final data = ref.watch(
-      readerPageDataProvider(ReaderPageRequest(bookId, _selectedChapterId)),
-    );
+    final data = ref.watch(readerPageDataProvider(ReaderPageRequest(bookId)));
     return data.when(
       loading: () =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (_, _) => const Scaffold(body: Center(child: Text('小说内容加载失败'))),
-      data: (value) => ReaderPage(
-        bookId: bookId,
-        bookTitle: value.book.title,
-        chapterTitle: value.chapter?.title ?? '未命名章节',
-        chapters: value.chapters,
-        currentChapterId: value.chapter?.id,
-        paragraphs: value.paragraphs,
-        initialActiveParagraphId: value.activeParagraphId,
-        playbackStarting: _playbackStarting,
-        onBackToLibrary: _backToLibrary,
-        onChapterSelected: (chapterId) => _selectChapter(value, chapterId),
-        onReadingPositionChanged: (paragraph) {
-          final database = ref.read(databaseProvider);
-          final chapter = value.chapter;
-          if (database != null && chapter != null) {
-            unawaited(_persistReadingPosition(database, chapter.id, paragraph));
-          }
-        },
-        onOpenPlayer: () => context.push('/player/$bookId'),
-        onPlayFrom: (paragraph) => unawaited(_playFrom(value, paragraph)),
-      ),
+      data: (value) => _buildInitializedReader(value),
     );
+  }
+
+  Widget _buildInitializedReader(ReaderPageData data) {
+    final database = ref.read(databaseProvider);
+    if (database == null) {
+      return const Scaffold(body: Center(child: Text('小说内容加载失败')));
+    }
+    if (data.chapters.isEmpty) {
+      return ReaderPage(
+        bookId: widget.bookId,
+        bookTitle: data.book.title,
+        chapters: const [],
+        sections: const [],
+        onBackToLibrary: _backToLibrary,
+      );
+    }
+    final initialization = _ensureChapterWindow(data, database);
+    return FutureBuilder<void>(
+      future: initialization,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const Scaffold(body: Center(child: Text('小说内容加载失败')));
+        }
+        final window = _chapterWindow;
+        if (snapshot.connectionState != ConnectionState.done ||
+            window == null) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return ReaderPage(
+          bookId: widget.bookId,
+          bookTitle: data.book.title,
+          chapters: data.chapters,
+          sections: window.sections,
+          currentChapterId: _visibleChapterId ?? _navigationCursor?.chapterId,
+          initialCursor: _navigationCursor,
+          navigationGeneration: window.navigationGeneration,
+          playbackStarting: _playbackStarting,
+          onBackToLibrary: _backToLibrary,
+          onChapterSelected: (chapterId) =>
+              unawaited(_selectChapter(chapterId)),
+          onVisibleChapterChanged: (chapterId) {
+            _visibleChapterId = chapterId;
+          },
+          onReadingPositionChanged: (paragraph) {
+            unawaited(_persistReadingPosition(database, paragraph));
+          },
+          onOpenPlayer: () => context.push('/player/${widget.bookId}'),
+          onPlayFrom: (paragraph) => unawaited(_playFrom(data, paragraph)),
+          onLoadPrevious: window.loadPrevious,
+          onLoadNext: window.loadNext,
+        );
+      },
+    );
+  }
+
+  Future<void> _ensureChapterWindow(ReaderPageData data, AppDatabase database) {
+    final existing = _chapterWindowInitialization;
+    if (existing != null) {
+      return existing;
+    }
+    _navigationCursor = data.savedCursor;
+    _visibleChapterId = data.savedCursor?.chapterId;
+    final window = ReaderChapterWindowController(
+      chapters: data.chapters,
+      loadSection: (chapter) => loadReaderChapterSection(database, chapter),
+    );
+    window.addListener(_onChapterWindowChanged);
+    _chapterWindow = window;
+    return _chapterWindowInitialization = window.initialize(
+      chapterId: data.savedCursor?.chapterId ?? data.chapters.first.id,
+    );
+  }
+
+  void _onChapterWindowChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _playFrom(ReaderPageData data, ReaderParagraph paragraph) async {
@@ -225,7 +288,9 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     try {
       final database = ref.read(databaseProvider);
       final runtime = ref.read(playbackRuntimeProvider);
-      final chapter = data.chapter;
+      final chapter = data.chapters
+          .where((chapter) => chapter.id == paragraph.chapterId)
+          .firstOrNull;
       if (database == null || runtime == null || chapter == null) {
         return;
       }
@@ -257,7 +322,10 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
       );
       final started = await runtime.replaceAndPlayFrom(
         coordinator,
-        PlaybackCursor(chapterId: chapter.id, paragraphIndex: paragraph.index),
+        PlaybackCursor(
+          chapterId: paragraph.chapterId,
+          paragraphIndex: paragraph.index,
+        ),
         token: replacementToken,
       );
       if (!started) {
@@ -304,14 +372,17 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     }
   }
 
-  void _selectChapter(ReaderPageData data, int chapterId) {
-    if (chapterId == data.chapter?.id) {
+  Future<void> _selectChapter(int chapterId) async {
+    final window = _chapterWindow;
+    if (window == null || chapterId == _navigationCursor?.chapterId) {
       return;
     }
-    setState(() => _selectedChapterId = chapterId);
+    _navigationCursor = PlaybackCursor(chapterId: chapterId, paragraphIndex: 0);
+    _visibleChapterId = chapterId;
+    await window.centerOn(chapterId: chapterId);
     final database = ref.read(databaseProvider);
     if (database != null) {
-      unawaited(_persistSelectedChapter(database, chapterId));
+      await _persistSelectedChapter(database, chapterId);
     }
   }
 
@@ -331,12 +402,11 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
 
   Future<void> _persistReadingPosition(
     AppDatabase database,
-    int chapterId,
     ReaderParagraph paragraph,
   ) async {
     await database.upsertProgress(
       bookId: widget.bookId,
-      chapterId: chapterId,
+      chapterId: paragraph.chapterId,
       paragraphIndex: paragraph.index,
     );
     await (database.update(database.books)
@@ -360,7 +430,13 @@ final class _PlayerRoutePage extends ConsumerWidget {
       error: (_, _) => const Scaffold(body: Center(child: Text('播放器加载失败'))),
       data: (value) => PlayerPage(
         bookTitle: value.book.title,
-        chapterTitle: value.chapter?.title ?? '未命名章节',
+        chapterTitle:
+            value.chapters
+                .where((chapter) => chapter.id == value.savedCursor?.chapterId)
+                .firstOrNull
+                ?.title ??
+            value.chapters.firstOrNull?.title ??
+            '未命名章节',
         initialSpeed: handler?.playbackState.value.speed ?? 1,
         onSpeedChanged: handler?.setSpeed,
         onPlay: handler?.play,
