@@ -565,6 +565,14 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
           return;
         }
 
+        if (profile.providerType == SpeechProviderType.mimo) {
+          await credentials.runWithMiMoApiKeyUpdate(
+            apiKey: submission.credentials.normalizedApiKey,
+            commit: persistProfile,
+          );
+          return;
+        }
+
         await persistProfile();
         final apiKey = submission.credentials.normalizedApiKey;
         if (apiKey != null) {
@@ -575,9 +583,9 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
               await credentials.writeZhipuApiKey(apiKey);
             case SpeechProviderType.cloud:
               await credentials.writeApiKey(apiKey);
-            case SpeechProviderType.mimo:
-              await credentials.writeMiMoApiKey(apiKey);
-            case SpeechProviderType.system || SpeechProviderType.tencent:
+            case SpeechProviderType.system ||
+                SpeechProviderType.tencent ||
+                SpeechProviderType.mimo:
               break;
           }
         }

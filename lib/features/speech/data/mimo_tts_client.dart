@@ -39,6 +39,35 @@ final class MiMoTtsClient implements CloudSpeechSynthesizer {
       throw const AppFailure('尚未配置 MiMo API Key');
     }
 
+    return _requestWithRetry(segment, profile, apiKey);
+  }
+
+  Future<void> testConnection({
+    required String apiKey,
+    required VoiceProfile profile,
+  }) async {
+    _validateProfile(profile);
+    final normalizedKey = apiKey.trim();
+    if (normalizedKey.isEmpty) {
+      throw const AppFailure('请输入 MiMo API Key');
+    }
+    await _requestWithRetry(
+      const SpeechSegment(
+        id: 'mimo-connection-test',
+        paragraphId: -1,
+        text: '测试',
+        partIndex: 0,
+      ),
+      profile,
+      normalizedKey,
+    );
+  }
+
+  Future<Uint8List> _requestWithRetry(
+    SpeechSegment segment,
+    VoiceProfile profile,
+    String apiKey,
+  ) async {
     for (var attempt = 1; attempt <= _maxAttempts; attempt++) {
       try {
         return await _request(segment, profile, apiKey);
@@ -52,31 +81,6 @@ final class MiMoTtsClient implements CloudSpeechSynthesizer {
     }
 
     throw const AppFailure('MiMo 语音服务请求失败');
-  }
-
-  Future<void> testConnection({
-    required String apiKey,
-    required VoiceProfile profile,
-  }) async {
-    _validateProfile(profile);
-    final normalizedKey = apiKey.trim();
-    if (normalizedKey.isEmpty) {
-      throw const AppFailure('请输入 MiMo API Key');
-    }
-    try {
-      await _request(
-        const SpeechSegment(
-          id: 'mimo-connection-test',
-          paragraphId: -1,
-          text: '测试',
-          partIndex: 0,
-        ),
-        profile,
-        normalizedKey,
-      );
-    } on DioException catch (error) {
-      throw _failureFor(error);
-    }
   }
 
   Future<Uint8List> _request(

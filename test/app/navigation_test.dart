@@ -490,6 +490,77 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
   });
+
+  testWidgets('does not persist MiMo profile when secure key write fails', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final secureValues = _FailOnceMap(const {
+      'mimo_tts_api_key': 'old-key',
+    }, failingKey: 'mimo_tts_api_key');
+    FlutterSecureStorage.setMockInitialValues(secureValues);
+    addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+
+    await tester.pumpWidget(NovelVoiceReaderApp(database: database));
+    await _openMiMoSettings(tester);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'MiMo API Key'),
+      'new-key',
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await _pumpUntilFound(tester, find.text('语音设置保存失败'));
+
+    expect(await database.select(database.voiceProfiles).get(), isEmpty);
+    expect(secureValues['mimo_tts_api_key'], 'old-key');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+  });
+
+  testWidgets('rolls back MiMo key when profile persistence fails', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final secureValues = <String, String>{'mimo_tts_api_key': 'old-key'};
+    FlutterSecureStorage.setMockInitialValues(secureValues);
+    addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    await database.customStatement('''
+      CREATE TRIGGER fail_mimo_profile_insert
+      BEFORE INSERT ON voice_profiles
+      BEGIN
+        SELECT RAISE(FAIL, 'profile write failed');
+      END;
+    ''');
+
+    await tester.pumpWidget(NovelVoiceReaderApp(database: database));
+    await _openMiMoSettings(tester);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'MiMo API Key'),
+      'new-key',
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await _pumpUntilFound(tester, find.text('语音设置保存失败'));
+
+    expect(await database.select(database.voiceProfiles).get(), isEmpty);
+    expect(secureValues['mimo_tts_api_key'], 'old-key');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+  });
 }
 
 final class _SpeedPlaybackController implements PlaybackController {
@@ -601,6 +672,16 @@ Future<void> _openTencentSettings(WidgetTester tester) async {
   await tester.drag(find.byType(SingleChildScrollView), const Offset(-500, 0));
   await tester.pump(const Duration(milliseconds: 300));
   await tester.tap(find.text('腾讯云'));
+  await tester.pump(const Duration(milliseconds: 300));
+}
+
+Future<void> _openMiMoSettings(WidgetTester tester) async {
+  await _pumpUntilFound(tester, find.byTooltip('语音设置'));
+  await tester.tap(find.byTooltip('语音设置'));
+  await _pumpUntilFound(tester, find.byType(SingleChildScrollView));
+  await tester.drag(find.byType(SingleChildScrollView), const Offset(-700, 0));
+  await tester.pump(const Duration(milliseconds: 300));
+  await tester.tap(find.text('MiMo'));
   await tester.pump(const Duration(milliseconds: 300));
 }
 

@@ -82,6 +82,32 @@ final class SecureCredentials {
 
   Future<void> deleteMiMoApiKey() => _storage.delete(_mimoApiKeyKey);
 
+  Future<T> runWithMiMoApiKeyUpdate<T>({
+    required String? apiKey,
+    required Future<T> Function() commit,
+  }) async {
+    if (apiKey == null) {
+      return commit();
+    }
+
+    final previousApiKey = await readMiMoApiKey();
+    var wroteApiKey = false;
+    try {
+      await writeMiMoApiKey(apiKey);
+      wroteApiKey = true;
+      return await commit();
+    } catch (error, stackTrace) {
+      if (wroteApiKey) {
+        if (previousApiKey == null) {
+          await deleteMiMoApiKey();
+        } else {
+          await writeMiMoApiKey(previousApiKey);
+        }
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
   Future<T> runWithTencentCredentialUpdate<T>({
     required String? secretId,
     required String? secretKey,

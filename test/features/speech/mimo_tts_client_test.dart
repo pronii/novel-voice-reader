@@ -172,6 +172,27 @@ void main() {
       expect(store.writes, 0);
     },
   );
+
+  test('connection testing retries a transient rate limit', () async {
+    final delays = <Duration>[];
+    final adapter = MiMoRecordingAdapter([
+      const MiMoOutcome.status(429),
+      MiMoOutcome.success(_audioResponse(testWave)),
+    ]);
+    final client = MiMoTtsClient(
+      dio: Dio()..httpClientAdapter = adapter,
+      credentials: SecureCredentials(FakeMiMoSecureStore('stored-key')),
+      delay: (duration) async => delays.add(duration),
+    );
+
+    await client.testConnection(
+      apiKey: 'entered-key',
+      profile: VoiceProfile.mimo(),
+    );
+
+    expect(adapter.calls, 2);
+    expect(delays, [const Duration(milliseconds: 500)]);
+  });
 }
 
 Map<String, dynamic> _audioResponse(Uint8List bytes) =>
