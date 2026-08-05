@@ -40,6 +40,7 @@ VoiceProfile voiceProfileFromRecord(VoiceProfileRecord? record) {
     'azure' => _azureProfileFromRecord(record),
     'zhipu' => _zhipuProfileFromRecord(record),
     'tencent' => _tencentProfileFromRecord(record),
+    'mimo' => _mimoProfileFromRecord(record),
     _ => VoiceProfile.system(),
   };
 }
@@ -85,6 +86,18 @@ VoiceProfile _tencentProfileFromRecord(VoiceProfileRecord record) {
   }
   try {
     return VoiceProfile.tencent(voiceType: voiceType, speed: record.speed);
+  } on ArgumentError {
+    return VoiceProfile.system();
+  }
+}
+
+VoiceProfile _mimoProfileFromRecord(VoiceProfileRecord record) {
+  try {
+    return VoiceProfile.mimo(
+      voice: record.voice ?? VoiceProfile.defaultMiMoVoice,
+      style: record.style,
+      speed: record.speed,
+    );
   } on ArgumentError {
     return VoiceProfile.system();
   }
@@ -137,14 +150,14 @@ final readerPageDataProvider = FutureProvider.autoDispose
       final requestedChapterId = request.chapterId;
       final requestedChapter = requestedChapterId == null
           ? null
-          : readerChapters.where(
-              (chapter) => chapter.id == requestedChapterId,
-            ).firstOrNull;
+          : readerChapters
+                .where((chapter) => chapter.id == requestedChapterId)
+                .firstOrNull;
       final progressChapter = progress == null
           ? null
-          : readerChapters.where(
-              (chapter) => chapter.id == progress.chapterId,
-            ).firstOrNull;
+          : readerChapters
+                .where((chapter) => chapter.id == progress.chapterId)
+                .firstOrNull;
       final selectedChapter =
           requestedChapter ?? progressChapter ?? readerChapters.first;
       final savedParagraphIndex = progress?.chapterId == selectedChapter.id

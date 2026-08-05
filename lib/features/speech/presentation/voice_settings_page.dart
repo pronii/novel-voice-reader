@@ -51,6 +51,8 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   );
   final _azureSubscriptionKey = TextEditingController();
   final _zhipuApiKey = TextEditingController();
+  final _mimoApiKey = TextEditingController();
+  final _mimoStyle = TextEditingController();
   final _tencentSecretId = TextEditingController();
   final _tencentSecretKey = TextEditingController();
   final _tencentCustomVoice = TextEditingController();
@@ -59,6 +61,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   SpeechProviderType _provider = SpeechProviderType.system;
   String _zhipuVoice = VoiceProfile.defaultZhipuVoice;
   String _tencentVoice = '1001';
+  String _mimoVoice = VoiceProfile.defaultMiMoVoice;
   double _speed = 1;
   bool _saving = false;
   bool _testingConnection = false;
@@ -83,6 +86,17 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     'custom': '自定义 VoiceType',
   };
 
+  static const _mimoVoiceLabels = <String, String>{
+    '冰糖': '冰糖（中文女声）',
+    '茉莉': '茉莉（中文女声）',
+    '苏打': '苏打（中文男声）',
+    '白桦': '白桦（中文男声）',
+    'Mia': 'Mia（英文女声）',
+    'Chloe': 'Chloe（英文女声）',
+    'Milo': 'Milo（英文男声）',
+    'Dean': 'Dean（英文男声）',
+  };
+
   @override
   void dispose() {
     _baseUrl.dispose();
@@ -93,6 +107,8 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     _azureVoice.dispose();
     _azureSubscriptionKey.dispose();
     _zhipuApiKey.dispose();
+    _mimoApiKey.dispose();
+    _mimoStyle.dispose();
     _tencentSecretId.dispose();
     _tencentSecretKey.dispose();
     _tencentCustomVoice.dispose();
@@ -106,6 +122,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     final azure = _provider == SpeechProviderType.azure;
     final zhipu = _provider == SpeechProviderType.zhipu;
     final tencent = _provider == SpeechProviderType.tencent;
+    final mimo = _provider == SpeechProviderType.mimo;
     return Scaffold(
       appBar: AppBar(title: const Text('语音设置')),
       body: ListView(
@@ -141,6 +158,11 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
                   icon: Icon(Icons.graphic_eq),
                   label: Text('腾讯云'),
                 ),
+                ButtonSegment(
+                  value: SpeechProviderType.mimo,
+                  icon: Icon(Icons.auto_awesome_outlined),
+                  label: Text('MiMo'),
+                ),
               ],
               selected: {_provider},
               onSelectionChanged: (values) {
@@ -162,6 +184,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
           if (azure) ..._azureFields(),
           if (zhipu) ..._zhipuFields(),
           if (tencent) ..._tencentFields(),
+          if (mimo) ..._mimoFields(),
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: _saving || _testingConnection ? null : _save,
@@ -328,6 +351,47 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     ];
   }
 
+  List<Widget> _mimoFields() {
+    return [
+      const SizedBox(height: 12),
+      DropdownButtonFormField<String>(
+        initialValue: _mimoVoice,
+        decoration: const InputDecoration(labelText: '音色'),
+        items: [
+          for (final voice in VoiceProfile.mimoVoices)
+            DropdownMenuItem(
+              value: voice,
+              child: Text(_mimoVoiceLabels[voice] ?? voice),
+            ),
+        ],
+        onChanged: (value) {
+          if (value != null) setState(() => _mimoVoice = value);
+        },
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _mimoStyle,
+        minLines: 2,
+        maxLines: 4,
+        decoration: const InputDecoration(
+          labelText: '朗读风格（可选）',
+          hintText: '例如：沉稳、有磁性，语速稍慢，根据剧情自然调整情绪。',
+          alignLabelWithHint: true,
+        ),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _mimoApiKey,
+        obscureText: true,
+        enableSuggestions: false,
+        autocorrect: false,
+        decoration: const InputDecoration(labelText: 'MiMo API Key'),
+      ),
+      const SizedBox(height: 12),
+      _connectionButton(),
+    ];
+  }
+
   Widget _connectionButton() {
     return OutlinedButton.icon(
       onPressed:
@@ -418,6 +482,11 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       _showMessage('请输入智谱 API Key');
       return;
     }
+    if (_provider == SpeechProviderType.mimo &&
+        submission.credentials.normalizedApiKey == null) {
+      _showMessage('请输入 MiMo API Key');
+      return;
+    }
     if (_provider == SpeechProviderType.tencent &&
         (submission.credentials.normalizedSecretId == null ||
             submission.credentials.normalizedSecretKey == null)) {
@@ -485,6 +554,9 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
           secretId: _tencentSecretId.text,
           secretKey: _tencentSecretKey.text,
         ),
+        SpeechProviderType.mimo => SpeechCredentialsInput(
+          apiKey: _mimoApiKey.text,
+        ),
       },
       monthlyQuotaCharacters: quota,
     );
@@ -513,6 +585,11 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
         voiceType: _tencentVoice == 'custom'
             ? int.parse(_tencentCustomVoice.text.trim())
             : int.parse(_tencentVoice),
+        speed: _speed,
+      ),
+      SpeechProviderType.mimo => VoiceProfile.mimo(
+        voice: _mimoVoice,
+        style: _mimoStyle.text,
         speed: _speed,
       ),
     };

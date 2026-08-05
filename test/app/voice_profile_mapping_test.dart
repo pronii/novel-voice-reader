@@ -101,4 +101,24 @@ void main() {
 
     expect(profile.providerType, SpeechProviderType.system);
   });
+
+  test('maps a stored MiMo profile including narration style', () {
+    const record = VoiceProfileRecord(
+      id: 8,
+      providerType: 'mimo',
+      baseUrl: 'https://api.xiaomimimo.com',
+      model: 'mimo-v2.5-tts',
+      voice: '茉莉',
+      speed: 1.1,
+      outputFormat: 'wav',
+      style: '温柔沉稳地讲述',
+    );
+
+    final profile = voiceProfileFromRecord(record);
+
+    expect(profile.providerType, SpeechProviderType.mimo);
+    expect(profile.voice, '茉莉');
+    expect(profile.style, '温柔沉稳地讲述');
+    expect(profile.speed, 1.1);
+  });
 }

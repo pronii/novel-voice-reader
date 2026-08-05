@@ -598,4 +598,107 @@ void main() {
     expect(find.text('请输入有效的数字 VoiceType'), findsOneWidget);
     expect(saves, 0);
   });
+
+  testWidgets('saves a MiMo preset voice, narration style, and API key', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    VoiceSettingsSubmission? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onSave: (submission) async => saved = submission,
+        ),
+      ),
+    );
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-700, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MiMo'));
+    await tester.pump();
+    await tester.tap(find.text('冰糖（中文女声）'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dean（英文男声）').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, '朗读风格（可选）'),
+      '  沉稳、有磁性，语速稍慢。  ',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'MiMo API Key'),
+      '  mimo-secret  ',
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存'));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(saved?.profile.providerType, SpeechProviderType.mimo);
+    expect(saved?.profile.voice, 'Dean');
+    expect(saved?.profile.style, '沉稳、有磁性，语速稍慢。');
+    expect(saved?.credentials.normalizedApiKey, 'mimo-secret');
+  });
+
+  testWidgets('tests the entered MiMo key without saving it', (tester) async {
+    VoiceSettingsSubmission? tested;
+    var saves = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onTestConnection: (submission) async => tested = submission,
+          onSave: (submission) async => saves++,
+        ),
+      ),
+    );
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-700, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MiMo'));
+    await tester.pump();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'MiMo API Key'),
+      'entered-key',
+    );
+    await tester.tap(find.text('测试连接'));
+    await tester.pumpAndSettle();
+
+    expect(tested?.profile.providerType, SpeechProviderType.mimo);
+    expect(tested?.credentials.normalizedApiKey, 'entered-key');
+    expect(saves, 0);
+    expect(find.text('连接成功，API Key 可用'), findsOneWidget);
+  });
+
+  testWidgets('requires a non-empty MiMo key before testing', (tester) async {
+    var tests = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onTestConnection: (submission) async => tests++,
+        ),
+      ),
+    );
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(-700, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MiMo'));
+    await tester.pump();
+    await tester.tap(find.text('测试连接'));
+    await tester.pump();
+
+    expect(tests, 0);
+    expect(find.text('请输入 MiMo API Key'), findsOneWidget);
+  });
 }

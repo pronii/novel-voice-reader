@@ -1451,6 +1451,15 @@ class $VoiceProfilesTable extends VoiceProfiles
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _styleMeta = const VerificationMeta('style');
+  @override
+  late final GeneratedColumn<String> style = GeneratedColumn<String>(
+    'style',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1461,6 +1470,7 @@ class $VoiceProfilesTable extends VoiceProfiles
     speed,
     pitch,
     outputFormat,
+    style,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1527,6 +1537,12 @@ class $VoiceProfilesTable extends VoiceProfiles
         ),
       );
     }
+    if (data.containsKey('style')) {
+      context.handle(
+        _styleMeta,
+        style.isAcceptableOrUnknown(data['style']!, _styleMeta),
+      );
+    }
     return context;
   }
 
@@ -1568,6 +1584,10 @@ class $VoiceProfilesTable extends VoiceProfiles
         DriftSqlType.string,
         data['${effectivePrefix}output_format'],
       ),
+      style: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}style'],
+      ),
     );
   }
 
@@ -1587,6 +1607,7 @@ class VoiceProfileRecord extends DataClass
   final double speed;
   final double? pitch;
   final String? outputFormat;
+  final String? style;
   const VoiceProfileRecord({
     required this.id,
     required this.providerType,
@@ -1596,6 +1617,7 @@ class VoiceProfileRecord extends DataClass
     required this.speed,
     this.pitch,
     this.outputFormat,
+    this.style,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1617,6 +1639,9 @@ class VoiceProfileRecord extends DataClass
     }
     if (!nullToAbsent || outputFormat != null) {
       map['output_format'] = Variable<String>(outputFormat);
+    }
+    if (!nullToAbsent || style != null) {
+      map['style'] = Variable<String>(style);
     }
     return map;
   }
@@ -1641,6 +1666,9 @@ class VoiceProfileRecord extends DataClass
       outputFormat: outputFormat == null && nullToAbsent
           ? const Value.absent()
           : Value(outputFormat),
+      style: style == null && nullToAbsent
+          ? const Value.absent()
+          : Value(style),
     );
   }
 
@@ -1658,6 +1686,7 @@ class VoiceProfileRecord extends DataClass
       speed: serializer.fromJson<double>(json['speed']),
       pitch: serializer.fromJson<double?>(json['pitch']),
       outputFormat: serializer.fromJson<String?>(json['outputFormat']),
+      style: serializer.fromJson<String?>(json['style']),
     );
   }
   @override
@@ -1672,6 +1701,7 @@ class VoiceProfileRecord extends DataClass
       'speed': serializer.toJson<double>(speed),
       'pitch': serializer.toJson<double?>(pitch),
       'outputFormat': serializer.toJson<String?>(outputFormat),
+      'style': serializer.toJson<String?>(style),
     };
   }
 
@@ -1684,6 +1714,7 @@ class VoiceProfileRecord extends DataClass
     double? speed,
     Value<double?> pitch = const Value.absent(),
     Value<String?> outputFormat = const Value.absent(),
+    Value<String?> style = const Value.absent(),
   }) => VoiceProfileRecord(
     id: id ?? this.id,
     providerType: providerType ?? this.providerType,
@@ -1693,6 +1724,7 @@ class VoiceProfileRecord extends DataClass
     speed: speed ?? this.speed,
     pitch: pitch.present ? pitch.value : this.pitch,
     outputFormat: outputFormat.present ? outputFormat.value : this.outputFormat,
+    style: style.present ? style.value : this.style,
   );
   VoiceProfileRecord copyWithCompanion(VoiceProfilesCompanion data) {
     return VoiceProfileRecord(
@@ -1708,6 +1740,7 @@ class VoiceProfileRecord extends DataClass
       outputFormat: data.outputFormat.present
           ? data.outputFormat.value
           : this.outputFormat,
+      style: data.style.present ? data.style.value : this.style,
     );
   }
 
@@ -1721,7 +1754,8 @@ class VoiceProfileRecord extends DataClass
           ..write('voice: $voice, ')
           ..write('speed: $speed, ')
           ..write('pitch: $pitch, ')
-          ..write('outputFormat: $outputFormat')
+          ..write('outputFormat: $outputFormat, ')
+          ..write('style: $style')
           ..write(')'))
         .toString();
   }
@@ -1736,6 +1770,7 @@ class VoiceProfileRecord extends DataClass
     speed,
     pitch,
     outputFormat,
+    style,
   );
   @override
   bool operator ==(Object other) =>
@@ -1748,7 +1783,8 @@ class VoiceProfileRecord extends DataClass
           other.voice == this.voice &&
           other.speed == this.speed &&
           other.pitch == this.pitch &&
-          other.outputFormat == this.outputFormat);
+          other.outputFormat == this.outputFormat &&
+          other.style == this.style);
 }
 
 class VoiceProfilesCompanion extends UpdateCompanion<VoiceProfileRecord> {
@@ -1760,6 +1796,7 @@ class VoiceProfilesCompanion extends UpdateCompanion<VoiceProfileRecord> {
   final Value<double> speed;
   final Value<double?> pitch;
   final Value<String?> outputFormat;
+  final Value<String?> style;
   const VoiceProfilesCompanion({
     this.id = const Value.absent(),
     this.providerType = const Value.absent(),
@@ -1769,6 +1806,7 @@ class VoiceProfilesCompanion extends UpdateCompanion<VoiceProfileRecord> {
     this.speed = const Value.absent(),
     this.pitch = const Value.absent(),
     this.outputFormat = const Value.absent(),
+    this.style = const Value.absent(),
   });
   VoiceProfilesCompanion.insert({
     this.id = const Value.absent(),
@@ -1779,6 +1817,7 @@ class VoiceProfilesCompanion extends UpdateCompanion<VoiceProfileRecord> {
     this.speed = const Value.absent(),
     this.pitch = const Value.absent(),
     this.outputFormat = const Value.absent(),
+    this.style = const Value.absent(),
   }) : providerType = Value(providerType);
   static Insertable<VoiceProfileRecord> custom({
     Expression<int>? id,
@@ -1789,6 +1828,7 @@ class VoiceProfilesCompanion extends UpdateCompanion<VoiceProfileRecord> {
     Expression<double>? speed,
     Expression<double>? pitch,
     Expression<String>? outputFormat,
+    Expression<String>? style,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -1799,6 +1839,7 @@ class VoiceProfilesCompanion extends UpdateCompanion<VoiceProfileRecord> {
       if (speed != null) 'speed': speed,
       if (pitch != null) 'pitch': pitch,
       if (outputFormat != null) 'output_format': outputFormat,
+      if (style != null) 'style': style,
     });
   }
 
@@ -1811,6 +1852,7 @@ class VoiceProfilesCompanion extends UpdateCompanion<VoiceProfileRecord> {
     Value<double>? speed,
     Value<double?>? pitch,
     Value<String?>? outputFormat,
+    Value<String?>? style,
   }) {
     return VoiceProfilesCompanion(
       id: id ?? this.id,
@@ -1821,6 +1863,7 @@ class VoiceProfilesCompanion extends UpdateCompanion<VoiceProfileRecord> {
       speed: speed ?? this.speed,
       pitch: pitch ?? this.pitch,
       outputFormat: outputFormat ?? this.outputFormat,
+      style: style ?? this.style,
     );
   }
 
@@ -1851,6 +1894,9 @@ class VoiceProfilesCompanion extends UpdateCompanion<VoiceProfileRecord> {
     if (outputFormat.present) {
       map['output_format'] = Variable<String>(outputFormat.value);
     }
+    if (style.present) {
+      map['style'] = Variable<String>(style.value);
+    }
     return map;
   }
 
@@ -1864,7 +1910,8 @@ class VoiceProfilesCompanion extends UpdateCompanion<VoiceProfileRecord> {
           ..write('voice: $voice, ')
           ..write('speed: $speed, ')
           ..write('pitch: $pitch, ')
-          ..write('outputFormat: $outputFormat')
+          ..write('outputFormat: $outputFormat, ')
+          ..write('style: $style')
           ..write(')'))
         .toString();
   }
@@ -5788,6 +5835,7 @@ typedef $$VoiceProfilesTableCreateCompanionBuilder =
       Value<double> speed,
       Value<double?> pitch,
       Value<String?> outputFormat,
+      Value<String?> style,
     });
 typedef $$VoiceProfilesTableUpdateCompanionBuilder =
     VoiceProfilesCompanion Function({
@@ -5799,6 +5847,7 @@ typedef $$VoiceProfilesTableUpdateCompanionBuilder =
       Value<double> speed,
       Value<double?> pitch,
       Value<String?> outputFormat,
+      Value<String?> style,
     });
 
 class $$VoiceProfilesTableFilterComposer
@@ -5847,6 +5896,11 @@ class $$VoiceProfilesTableFilterComposer
 
   ColumnFilters<String> get outputFormat => $composableBuilder(
     column: $table.outputFormat,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get style => $composableBuilder(
+    column: $table.style,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5899,6 +5953,11 @@ class $$VoiceProfilesTableOrderingComposer
     column: $table.outputFormat,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get style => $composableBuilder(
+    column: $table.style,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$VoiceProfilesTableAnnotationComposer
@@ -5937,6 +5996,9 @@ class $$VoiceProfilesTableAnnotationComposer
     column: $table.outputFormat,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get style =>
+      $composableBuilder(column: $table.style, builder: (column) => column);
 }
 
 class $$VoiceProfilesTableTableManager
@@ -5982,6 +6044,7 @@ class $$VoiceProfilesTableTableManager
                 Value<double> speed = const Value.absent(),
                 Value<double?> pitch = const Value.absent(),
                 Value<String?> outputFormat = const Value.absent(),
+                Value<String?> style = const Value.absent(),
               }) => VoiceProfilesCompanion(
                 id: id,
                 providerType: providerType,
@@ -5991,6 +6054,7 @@ class $$VoiceProfilesTableTableManager
                 speed: speed,
                 pitch: pitch,
                 outputFormat: outputFormat,
+                style: style,
               ),
           createCompanionCallback:
               ({
@@ -6002,6 +6066,7 @@ class $$VoiceProfilesTableTableManager
                 Value<double> speed = const Value.absent(),
                 Value<double?> pitch = const Value.absent(),
                 Value<String?> outputFormat = const Value.absent(),
+                Value<String?> style = const Value.absent(),
               }) => VoiceProfilesCompanion.insert(
                 id: id,
                 providerType: providerType,
@@ -6011,6 +6076,7 @@ class $$VoiceProfilesTableTableManager
                 speed: speed,
                 pitch: pitch,
                 outputFormat: outputFormat,
+                style: style,
               ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))

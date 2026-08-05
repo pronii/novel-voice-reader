@@ -63,6 +63,7 @@ class VoiceProfiles extends Table {
   RealColumn get speed => real().withDefault(const Constant(1))();
   RealColumn get pitch => real().nullable()();
   TextColumn get outputFormat => text().nullable()();
+  TextColumn get style => text().nullable()();
 }
 
 @DataClassName('DownloadPolicyRecord')
@@ -144,13 +145,16 @@ final class AppDatabase extends _$AppDatabase {
       AppDatabase(executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onUpgrade: (migrator, from, to) async {
       if (from < 2) {
         await migrator.createTable(tencentTtsMonthlyUsages);
+      }
+      if (from < 3) {
+        await migrator.addColumn(voiceProfiles, voiceProfiles.style);
       }
     },
     beforeOpen: (_) async {

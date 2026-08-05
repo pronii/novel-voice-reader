@@ -27,6 +27,7 @@ import 'package:novel_voice_reader/features/reader/data/reading_progress_reposit
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
+import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/tencent_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
 import 'package:novel_voice_reader/features/speech/data/zhipu_tts_client.dart';
@@ -514,6 +515,14 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
               credentials: submission.credentials,
               profile: profile,
             );
+          case SpeechProviderType.mimo:
+            await MiMoTtsClient(
+              dio: createSpeechDio(),
+              credentials: credentials,
+            ).testConnection(
+              apiKey: submission.credentials.normalizedApiKey ?? '',
+              profile: profile,
+            );
           case SpeechProviderType.system ||
               SpeechProviderType.cloud ||
               SpeechProviderType.azure:
@@ -536,6 +545,7 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
                     speed: Value(profile.speed),
                     pitch: Value(profile.pitch),
                     outputFormat: Value(profile.outputFormat),
+                    style: Value(profile.style),
                   ),
                 );
             if (profile.providerType == SpeechProviderType.tencent) {
@@ -565,6 +575,8 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
               await credentials.writeZhipuApiKey(apiKey);
             case SpeechProviderType.cloud:
               await credentials.writeApiKey(apiKey);
+            case SpeechProviderType.mimo:
+              await credentials.writeMiMoApiKey(apiKey);
             case SpeechProviderType.system || SpeechProviderType.tencent:
               break;
           }
