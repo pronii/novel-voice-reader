@@ -74,8 +74,36 @@ void main() {
     expect(() => VoiceProfile.tencent(voiceType: 0), throwsArgumentError);
   });
 
+  test('uses the fixed MiMo speech configuration and trims style', () {
+    final profile = VoiceProfile.mimo(
+      voice: '茉莉',
+      style: '  温柔沉稳地讲述，语速稍慢。  ',
+      speed: 1.2,
+    );
+
+    expect(profile.providerType, SpeechProviderType.mimo);
+    expect(profile.normalizedBaseUrl, 'https://api.xiaomimimo.com');
+    expect(profile.model, 'mimo-v2.5-tts');
+    expect(profile.voice, '茉莉');
+    expect(profile.style, '温柔沉稳地讲述，语速稍慢。');
+    expect(profile.speed, 1.2);
+    expect(profile.outputFormat, 'wav');
+  });
+
+  test('defaults MiMo to the Chinese Bingtang voice', () {
+    final profile = VoiceProfile.mimo();
+
+    expect(profile.voice, '冰糖');
+    expect(profile.style, isNull);
+  });
+
+  test('rejects an unsupported MiMo preset voice', () {
+    expect(() => VoiceProfile.mimo(voice: 'unknown'), throwsArgumentError);
+  });
+
   test('keeps the existing segment limit for non-Tencent providers', () {
     expect(VoiceProfile.system().maxSegmentCharacters, 1000);
     expect(VoiceProfile.zhipu().maxSegmentCharacters, 1000);
+    expect(VoiceProfile.mimo().maxSegmentCharacters, 1000);
   });
 }

@@ -101,6 +101,25 @@ void main() {
     await credentials.deleteTencentSecretKey();
     expect(await credentials.readTencentSecretKey(), isNull);
   });
+
+  test('MiMo API key uses a separate normalized secure value', () async {
+    final store = FakeSecureKeyValueStore();
+    final credentials = SecureCredentials(store);
+    await credentials.writeZhipuApiKey('zhipu-secret');
+
+    await credentials.writeMiMoApiKey('  mimo-secret  ');
+
+    expect(await credentials.readMiMoApiKey(), 'mimo-secret');
+    expect(await credentials.readZhipuApiKey(), 'zhipu-secret');
+    expect(store.values.keys, {
+      'zhipu_tts_api_key',
+      'mimo_tts_api_key',
+    });
+
+    await credentials.deleteMiMoApiKey();
+    expect(await credentials.readMiMoApiKey(), isNull);
+    expect(await credentials.readZhipuApiKey(), 'zhipu-secret');
+  });
 }
 
 final class FakeSecureKeyValueStore implements SecureKeyValueStore {

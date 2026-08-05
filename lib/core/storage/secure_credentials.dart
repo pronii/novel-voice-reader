@@ -33,6 +33,7 @@ final class SecureCredentials {
   static const _zhipuApiKeyKey = 'zhipu_tts_api_key';
   static const _tencentSecretIdKey = 'tencent_tts_secret_id';
   static const _tencentSecretKeyKey = 'tencent_tts_secret_key';
+  static const _mimoApiKeyKey = 'mimo_tts_api_key';
 
   final SecureKeyValueStore _storage;
 
@@ -73,6 +74,13 @@ final class SecureCredentials {
 
   Future<void> deleteTencentSecretKey() =>
       _storage.delete(_tencentSecretKeyKey);
+
+  Future<String?> readMiMoApiKey() => _storage.read(_mimoApiKeyKey);
+
+  Future<void> writeMiMoApiKey(String value) =>
+      _storage.write(_mimoApiKeyKey, value.trim());
+
+  Future<void> deleteMiMoApiKey() => _storage.delete(_mimoApiKeyKey);
 
   Future<T> runWithTencentCredentialUpdate<T>({
     required String? secretId,

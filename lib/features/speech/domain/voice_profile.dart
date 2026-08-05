@@ -1,4 +1,4 @@
-enum SpeechProviderType { system, cloud, azure, zhipu, tencent }
+enum SpeechProviderType { system, cloud, azure, zhipu, tencent, mimo }
 
 final class VoiceProfile {
   static const defaultAzureVoice = 'zh-CN-XiaoxiaoNeural';
@@ -9,6 +9,19 @@ final class VoiceProfile {
   static const tencentBaseUrl = 'https://tts.tencentcloudapi.com';
   static const defaultTencentVoiceType = 1001;
   static const defaultZhipuVoice = 'tongtong';
+  static const mimoBaseUrl = 'https://api.xiaomimimo.com';
+  static const mimoModel = 'mimo-v2.5-tts';
+  static const defaultMiMoVoice = '冰糖';
+  static const mimoVoices = <String>[
+    '冰糖',
+    '茉莉',
+    '苏打',
+    '白桦',
+    'Mia',
+    'Chloe',
+    'Milo',
+    'Dean',
+  ];
   static const zhipuVoices = <String>[
     'tongtong',
     'chuichui',
@@ -112,6 +125,30 @@ final class VoiceProfile {
     );
   }
 
+  factory VoiceProfile.mimo({
+    String voice = defaultMiMoVoice,
+    String? style,
+    double speed = 1,
+  }) {
+    _validateSpeed(speed);
+    final normalizedVoice = voice.trim();
+    if (!mimoVoices.contains(normalizedVoice)) {
+      throw ArgumentError.value(voice, 'voice', 'Unsupported MiMo voice.');
+    }
+    final normalizedStyle = style?.trim();
+    return VoiceProfile._(
+      providerType: SpeechProviderType.mimo,
+      baseUrl: mimoBaseUrl,
+      model: mimoModel,
+      voice: normalizedVoice,
+      speed: speed,
+      outputFormat: 'wav',
+      style: normalizedStyle == null || normalizedStyle.isEmpty
+          ? null
+          : normalizedStyle,
+    );
+  }
+
   const VoiceProfile._({
     required this.providerType,
     this.baseUrl,
@@ -120,6 +157,7 @@ final class VoiceProfile {
     required this.speed,
     this.pitch,
     this.outputFormat,
+    this.style,
   });
 
   final SpeechProviderType providerType;
@@ -129,6 +167,7 @@ final class VoiceProfile {
   final double speed;
   final double? pitch;
   final String? outputFormat;
+  final String? style;
 
   String get normalizedBaseUrl {
     final value = baseUrl;
