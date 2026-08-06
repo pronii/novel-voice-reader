@@ -40,7 +40,7 @@ final class ReaderChapterWindowController extends ChangeNotifier {
   Future<ReaderWindowMutation>? _previousLoad;
   Future<ReaderWindowMutation>? _nextLoad;
 
-  List<ReaderChapterSection> get sections => List.unmodifiable(_sections);
+  List<ReaderChapterSection> get sections => _sections;
 
   List<ReaderContentItem> get items {
     final result = <ReaderContentItem>[
