@@ -124,7 +124,8 @@ final class _ReaderPageState extends State<ReaderPage> {
         }
       });
     }
-    if (oldWidget.playbackCursor != widget.playbackCursor ||
+    if (oldWidget.playbackStarting != widget.playbackStarting ||
+        oldWidget.playbackCursor != widget.playbackCursor ||
         !identical(oldWidget.sections, widget.sections)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
