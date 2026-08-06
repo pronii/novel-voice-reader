@@ -28,6 +28,19 @@ void main() {
     );
   });
 
+  test('returns the same sections list until the window changes', () async {
+    final controller = ReaderChapterWindowController(
+      chapters: _chapters(2),
+      loadSection: _RecordingSectionLoader().call,
+    );
+    await controller.initialize(chapterId: 100);
+
+    final first = controller.sections;
+    final second = controller.sections;
+
+    expect(identical(first, second), isTrue);
+  });
+
   test('flattens sections into globally unique stable item keys', () async {
     final chapters = _chapters(2);
     final controller = ReaderChapterWindowController(

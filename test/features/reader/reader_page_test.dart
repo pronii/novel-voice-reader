@@ -162,6 +162,62 @@ void main() {
     );
   });
 
+  testWidgets('keeps a requested playback target visible while startup rebuilds', (
+    tester,
+  ) async {
+    _useNarrowViewport(tester);
+    final paragraphs = List.generate(
+      30,
+      (index) => ReaderParagraph(
+        id: 100 + index,
+        chapterId: 10,
+        index: index,
+        text: '第${index + 1}段。用于验证播放目标交接的长正文内容。',
+      ),
+    );
+    var playbackStarting = false;
+    late StateSetter setHostState;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            setHostState = setState;
+            return _reader(
+              paragraphs: paragraphs,
+              playbackStarting: playbackStarting,
+              playbackCursor: const PlaybackCursor(
+                chapterId: 10,
+                paragraphIndex: 0,
+              ),
+              onPlayFrom: (paragraph) {
+                expect(paragraph.index, 20);
+                setHostState(() => playbackStarting = true);
+              },
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final target = find.byKey(const ValueKey<String>('paragraph-120'));
+    await tester.scrollUntilVisible(
+      target,
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(target);
+    await tester.pump();
+    await tester.tap(find.text('从这里朗读'));
+    await tester.pumpAndSettle();
+
+    expect(target, findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('playing-paragraph-10-0')),
+      findsNothing,
+    );
+  });
+
   testWidgets('opens the chapter list and selects a chapter', (tester) async {
     int? selectedChapterId;
     final chapters = const [
