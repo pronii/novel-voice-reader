@@ -130,11 +130,17 @@ final class PlaybackCoordinator implements PlaybackController {
 
   @override
   Future<void> playFrom(PlaybackCursor cursor) async {
+    final generation = ++_playbackGeneration;
+    _acceptTimeline = false;
+    _segments = const [];
     final paragraph = await _paragraphs.at(cursor);
+    if (generation != _playbackGeneration) {
+      return;
+    }
     if (paragraph == null) {
       throw StateError('Playback cursor does not point to a paragraph.');
     }
-    await _startParagraph(paragraph);
+    await _startParagraph(paragraph, generation: generation);
   }
 
   @override
@@ -217,8 +223,11 @@ final class PlaybackCoordinator implements PlaybackController {
     }
   }
 
-  Future<void> _startParagraph(PlaybackParagraph paragraph) async {
-    final generation = ++_playbackGeneration;
+  Future<void> _startParagraph(
+    PlaybackParagraph paragraph, {
+    int? generation,
+  }) async {
+    generation ??= ++_playbackGeneration;
     int? chapterCharacters;
     final paragraphs = _paragraphs;
     if (paragraphs is PlaybackChapterTextSource) {
