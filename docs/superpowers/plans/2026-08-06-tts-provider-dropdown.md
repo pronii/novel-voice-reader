@@ -38,4 +38,3 @@
 - [ ] Add a test helper that opens key `tts-provider-dropdown` and taps the requested provider label.
 - [ ] Replace horizontal drags and direct offstage label taps with the helper.
 - [ ] Run the voice settings and navigation tests, then the full suite.
-

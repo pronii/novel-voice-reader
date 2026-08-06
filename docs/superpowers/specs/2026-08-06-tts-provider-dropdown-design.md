@@ -17,4 +17,3 @@ Replace the overflowing horizontal TTS provider selector with a narrow-screen-sa
 - Change only provider selection UI and its widget tests.
 - Keep provider values, save behavior, credentials, speed, connection tests, and page navigation unchanged.
 - Verify the menu at a 320-pixel logical width and update existing tests to select providers through the dropdown.
-
