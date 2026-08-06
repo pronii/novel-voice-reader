@@ -176,6 +176,16 @@ void main() {
       ),
     );
     var playbackStarting = false;
+    var playbackCursor = const PlaybackCursor(
+      chapterId: 10,
+      paragraphIndex: 0,
+    );
+    var sections = [
+      ReaderChapterSection(
+        chapter: const ReaderChapter(id: 10, index: 0, title: '第一章'),
+        paragraphs: paragraphs,
+      ),
+    ];
     late StateSetter setHostState;
     await tester.pumpWidget(
       MaterialApp(
@@ -183,15 +193,15 @@ void main() {
           builder: (context, setState) {
             setHostState = setState;
             return _reader(
-              paragraphs: paragraphs,
+              sections: sections,
               playbackStarting: playbackStarting,
-              playbackCursor: const PlaybackCursor(
-                chapterId: 10,
-                paragraphIndex: 0,
-              ),
+              playbackCursor: playbackCursor,
               onPlayFrom: (paragraph) {
                 expect(paragraph.index, 20);
-                setHostState(() => playbackStarting = true);
+                setHostState(() {
+                  playbackStarting = true;
+                  sections = [...sections];
+                });
               },
             );
           },
@@ -218,6 +228,25 @@ void main() {
     expect(
       find.byKey(const ValueKey<String>('playing-paragraph-10-0')),
       findsNothing,
+    );
+
+    setHostState(() => playbackStarting = false);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey<String>('active-paragraph-120')),
+      findsOneWidget,
+    );
+
+    setHostState(() {
+      playbackCursor = const PlaybackCursor(
+        chapterId: 10,
+        paragraphIndex: 1,
+      );
+    });
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey<String>('playing-paragraph-10-1')),
+      findsOneWidget,
     );
   });
 
@@ -511,6 +540,7 @@ void main() {
 ReaderPage _reader({
   List<ReaderChapter>? chapters,
   ReaderChapter chapter = const ReaderChapter(id: 10, index: 0, title: '第一章'),
+  List<ReaderChapterSection>? sections,
   List<ReaderParagraph>? paragraphs,
   PlaybackCursor? initialCursor = const PlaybackCursor(
     chapterId: 10,
@@ -526,12 +556,14 @@ ReaderPage _reader({
     bookId: 1,
     bookTitle: '测试书',
     chapters: chapters ?? [chapter],
-    sections: [
-      ReaderChapterSection(
-        chapter: chapter,
-        paragraphs: paragraphs ?? _paragraphs(chapter.id, ['第一段。']),
-      ),
-    ],
+    sections:
+        sections ??
+        [
+          ReaderChapterSection(
+            chapter: chapter,
+            paragraphs: paragraphs ?? _paragraphs(chapter.id, ['第一段。']),
+          ),
+        ],
     currentChapterId: chapter.id,
     initialCursor: initialCursor,
     playbackStarting: playbackStarting,
