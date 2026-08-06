@@ -69,9 +69,7 @@ void main() {
       MaterialApp(home: _reader(paragraphs: longParagraphs)),
     );
     await tester.pumpAndSettle();
-    final firstParagraph = find.byKey(
-      const ValueKey<String>('active-paragraph-10'),
-    );
+    final firstParagraph = find.text(longParagraphs.first.text);
     final hiddenPosition = tester.getTopLeft(firstParagraph);
 
     await tester.tap(find.byKey(const Key('reader-body')));
@@ -724,7 +722,8 @@ Future<void> _showReaderToolbar(WidgetTester tester) async {
     matching: find.byType(IgnorePointer),
   );
   if (tester.widget<IgnorePointer>(pointerGate).ignoring) {
-    await tester.tap(find.byKey(const Key('reader-body')));
+    final body = find.byKey(const Key('reader-body'));
+    await tester.tapAt(tester.getTopLeft(body) + const Offset(2, 2));
     await tester.pumpAndSettle();
   }
   expect(tester.widget<AnimatedSlide>(toolbar).offset, Offset.zero);

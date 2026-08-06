@@ -740,7 +740,8 @@ Future<void> _showReaderToolbar(WidgetTester tester) async {
     matching: find.byType(IgnorePointer),
   );
   if (tester.widget<IgnorePointer>(pointerGate).ignoring) {
-    await tester.tap(find.byKey(const Key('reader-body')));
+    final body = find.byKey(const Key('reader-body'));
+    await tester.tapAt(tester.getTopLeft(body) + const Offset(2, 2));
     await tester.pumpAndSettle();
   }
   expect(tester.widget<AnimatedSlide>(toolbar).offset, Offset.zero);
