@@ -113,9 +113,11 @@ final class PlaybackCoordinator implements PlaybackController {
   int _segmentIndex = 0;
   double _speed = 1;
   int _playbackGeneration = 0;
+  int _continuationEpoch = 0;
+  int? _activeContinuationEpoch;
   Future<void> _providerTransactions = Future<void>.value();
   Future<void>? _activePrefetch;
-  int? _queuedPrefetchGeneration;
+  int? _queuedPrefetchEpoch;
   bool _disposing = false;
   bool _acceptTimeline = false;
   int? _chapterCharacters;
@@ -204,7 +206,8 @@ final class PlaybackCoordinator implements PlaybackController {
     _disposing = true;
     _acceptTimeline = false;
     _playbackGeneration++;
-    _queuedPrefetchGeneration = null;
+    _continuationEpoch++;
+    _queuedPrefetchEpoch = null;
     try {
       await _subscription.cancel();
       await _timelineSubscription?.cancel();
@@ -225,26 +228,33 @@ final class PlaybackCoordinator implements PlaybackController {
   Future<void> _startParagraph(
     PlaybackParagraph paragraph, {
     int? generation,
+    int? continuationEpoch,
   }) async {
-    generation ??= ++_playbackGeneration;
+    if (continuationEpoch == null) {
+      generation ??= ++_playbackGeneration;
+    }
     int? chapterCharacters;
     final paragraphs = _paragraphs;
     if (paragraphs is PlaybackChapterTextSource) {
       chapterCharacters = await (paragraphs as PlaybackChapterTextSource)
           .remainingCharactersInChapter(paragraph.cursor);
-      if (generation != _playbackGeneration) {
-        return;
-      }
+    }
+    if (continuationEpoch == null
+        ? generation != _playbackGeneration
+        : !_ownsContinuation(continuationEpoch)) {
+      return;
     }
     final segments = _segmenter.split(
       paragraphId: paragraph.id,
       text: paragraph.text,
       maxCharacters: _voiceProfile.maxSegmentCharacters,
     );
+    final takeoverEpoch = continuationEpoch ?? ++_continuationEpoch;
     if (!await _takeOverParagraph(
       segments,
       chapterCharacters,
       generation,
+      takeoverEpoch,
     )) {
       return;
     }
@@ -252,40 +262,58 @@ final class PlaybackCoordinator implements PlaybackController {
     if (!_cursorChanges.isClosed) {
       _cursorChanges.add(paragraph.cursor);
     }
-    _schedulePrefetch(generation);
+    _schedulePrefetch(takeoverEpoch);
   }
 
   Future<bool> _takeOverParagraph(
     List<SpeechSegment> segments,
     int? chapterCharacters,
-    int generation,
+    int? generation,
+    int continuationEpoch,
   ) {
     return _runProviderTransaction(() async {
-      if (generation != _playbackGeneration) {
+      if (continuationEpoch != _continuationEpoch ||
+          (generation == null
+              ? !_ownsContinuation(continuationEpoch)
+              : generation != _playbackGeneration)) {
         return false;
       }
       _chapterCharacters = chapterCharacters;
       _segments = segments;
       _segmentIndex = 0;
-      return _prepareAndPlayCurrentSegmentLocked(generation);
+      _activeContinuationEpoch = continuationEpoch;
+      return _prepareAndPlaySegmentLocked(
+        continuationEpoch,
+        segments.first,
+      );
     });
   }
 
-  Future<bool> _prepareAndPlayCurrentSegment(int generation) {
-    return _runProviderTransaction(
-      () => _prepareAndPlayCurrentSegmentLocked(generation),
-    );
+  Future<bool> _prepareAndPlayContinuation(
+    int continuationEpoch,
+    int segmentIndex,
+    SpeechSegment segment,
+  ) {
+    return _runProviderTransaction(() async {
+      if (!_ownsContinuation(continuationEpoch)) {
+        return false;
+      }
+      _segmentIndex = segmentIndex;
+      return _prepareAndPlaySegmentLocked(continuationEpoch, segment);
+    });
   }
 
-  Future<bool> _prepareAndPlayCurrentSegmentLocked(int generation) async {
-    if (generation != _playbackGeneration) {
+  Future<bool> _prepareAndPlaySegmentLocked(
+    int continuationEpoch,
+    SpeechSegment segment,
+  ) async {
+    if (!_ownsContinuation(continuationEpoch)) {
       return false;
     }
     _acceptTimeline = false;
     _timelineChanges.add(_enrichTimeline(PlaybackTimeline.zero));
-    final segment = _segments[_segmentIndex];
     await _provider.prepare(segment, _voiceProfile);
-    if (generation != _playbackGeneration) {
+    if (!_ownsContinuation(continuationEpoch)) {
       return false;
     }
     _acceptTimeline = true;
@@ -293,16 +321,21 @@ final class PlaybackCoordinator implements PlaybackController {
     final provider = _provider;
     if (provider is AdjustableSpeechProvider) {
       await (provider as AdjustableSpeechProvider).setPlaybackSpeed(_speed);
-      if (generation != _playbackGeneration) {
+      if (!_ownsContinuation(continuationEpoch)) {
         return false;
       }
     }
     await _provider.play();
-    final current = generation == _playbackGeneration;
+    final current = _ownsContinuation(continuationEpoch);
     if (current) {
       _publishActivity(PlaybackActivity.playing);
     }
     return current;
+  }
+
+  bool _ownsContinuation(int continuationEpoch) {
+    return continuationEpoch == _continuationEpoch &&
+        continuationEpoch == _activeContinuationEpoch;
   }
 
   Future<T> _runProviderTransaction<T>(Future<T> Function() operation) {
@@ -315,6 +348,11 @@ final class PlaybackCoordinator implements PlaybackController {
   }
 
   Future<void> _handleSpeechEvent(SpeechEvent event) async {
+    final continuationEpoch = _activeContinuationEpoch;
+    if (continuationEpoch == null ||
+        !_ownsContinuation(continuationEpoch)) {
+      return;
+    }
     if (event is SpeechFailed) {
       if (_segments.isEmpty || event.segmentId != _segments[_segmentIndex].id) {
         return;
@@ -330,13 +368,17 @@ final class PlaybackCoordinator implements PlaybackController {
         event.segmentId != _segments[_segmentIndex].id) {
       return;
     }
-    final generation = _playbackGeneration;
     if (_segmentIndex + 1 < _segments.length) {
-      _segmentIndex++;
-      if (!await _prepareAndPlayCurrentSegment(generation)) {
+      final nextSegmentIndex = _segmentIndex + 1;
+      final nextSegment = _segments[nextSegmentIndex];
+      if (!await _prepareAndPlayContinuation(
+        continuationEpoch,
+        nextSegmentIndex,
+        nextSegment,
+      )) {
         return;
       }
-      _schedulePrefetch(generation);
+      _schedulePrefetch(continuationEpoch);
       return;
     }
 
@@ -345,12 +387,12 @@ final class PlaybackCoordinator implements PlaybackController {
       return;
     }
     final next = await _paragraphs.nextAfter(current);
-    if (generation != _playbackGeneration) {
+    if (!_ownsContinuation(continuationEpoch)) {
       return;
     }
     if (next == null) {
       await _progress.confirm(current);
-      if (generation != _playbackGeneration) {
+      if (!_ownsContinuation(continuationEpoch)) {
         return;
       }
       _acceptTimeline = false;
@@ -359,37 +401,37 @@ final class PlaybackCoordinator implements PlaybackController {
       return;
     }
     await _progress.confirm(next.cursor);
-    if (generation != _playbackGeneration) {
+    if (!_ownsContinuation(continuationEpoch)) {
       return;
     }
-    await _startParagraph(next);
+    await _startParagraph(next, continuationEpoch: continuationEpoch);
   }
 
-  void _schedulePrefetch(int generation) {
+  void _schedulePrefetch(int continuationEpoch) {
     final provider = _provider;
     if (provider is! PrefetchingSpeechProvider || _disposing) {
       return;
     }
-    _queuedPrefetchGeneration = generation;
+    _queuedPrefetchEpoch = continuationEpoch;
     if (_activePrefetch == null) {
       _startQueuedPrefetch(provider as PrefetchingSpeechProvider);
     }
   }
 
   void _startQueuedPrefetch(PrefetchingSpeechProvider provider) {
-    final generation = _queuedPrefetchGeneration;
-    if (generation == null || _disposing) {
+    final continuationEpoch = _queuedPrefetchEpoch;
+    if (continuationEpoch == null || _disposing) {
       return;
     }
-    _queuedPrefetchGeneration = null;
-    final operation = _prefetchNext(provider, generation);
+    _queuedPrefetchEpoch = null;
+    final operation = _prefetchNext(provider, continuationEpoch);
     _activePrefetch = operation;
     unawaited(
       operation.whenComplete(() {
         if (identical(_activePrefetch, operation)) {
           _activePrefetch = null;
         }
-        if (!_disposing && _queuedPrefetchGeneration != null) {
+        if (!_disposing && _queuedPrefetchEpoch != null) {
           _startQueuedPrefetch(provider);
         }
       }),
@@ -398,9 +440,12 @@ final class PlaybackCoordinator implements PlaybackController {
 
   Future<void> _prefetchNext(
     PrefetchingSpeechProvider provider,
-    int generation,
+    int continuationEpoch,
   ) async {
     try {
+      if (!_ownsContinuation(continuationEpoch)) {
+        return;
+      }
       SpeechSegment? segment;
       if (_segmentIndex + 1 < _segments.length) {
         segment = _segments[_segmentIndex + 1];
@@ -410,7 +455,7 @@ final class PlaybackCoordinator implements PlaybackController {
           return;
         }
         final next = await _paragraphs.nextAfter(current);
-        if (next == null || generation != _playbackGeneration) {
+        if (next == null || !_ownsContinuation(continuationEpoch)) {
           return;
         }
         final segments = _segmenter.split(
@@ -422,7 +467,7 @@ final class PlaybackCoordinator implements PlaybackController {
           segment = segments.first;
         }
       }
-      if (segment != null && generation == _playbackGeneration) {
+      if (segment != null && _ownsContinuation(continuationEpoch)) {
         await provider.prefetch(segment, _voiceProfile);
       }
     } catch (_) {
