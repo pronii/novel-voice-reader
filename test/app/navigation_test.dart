@@ -45,6 +45,7 @@ void main() {
     await _pumpUntilFound(tester, find.text('倍速测试书'));
     await tester.tap(find.text('倍速测试书'));
     await _pumpUntilFound(tester, find.byTooltip('播放器'));
+    await _showReaderToolbar(tester);
     tester
         .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.graphic_eq))
         .onPressed!
@@ -80,6 +81,7 @@ void main() {
     await _pumpUntilFound(tester, find.text('测试书'));
     await tester.tap(find.text('测试书'));
     await _pumpUntilFound(tester, find.text('第一章'));
+    await _showReaderToolbar(tester);
 
     expect(find.text('第一章'), findsWidgets);
     expect(find.byTooltip('返回书架'), findsOneWidget);
@@ -190,6 +192,7 @@ void main() {
     }
     expect(progress?.chapterId, chapters[5].id);
 
+    await _showReaderToolbar(tester);
     await tester.tap(find.byTooltip('返回书架'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('连续阅读测试书'));
@@ -214,6 +217,7 @@ void main() {
     await _pumpUntilFound(tester, find.text('目录跳转测试书'));
     await tester.tap(find.text('目录跳转测试书'));
     await _pumpUntilFound(tester, find.byTooltip('章节目录'));
+    await _showReaderToolbar(tester);
     await tester.tap(find.byTooltip('章节目录'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '7');
@@ -284,6 +288,7 @@ void main() {
     await tester.tap(find.text('空书'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
+    await _showReaderToolbar(tester);
 
     expect(find.byTooltip('返回书架'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
@@ -338,6 +343,7 @@ void main() {
       const Offset(0, -300),
     );
     await tester.pump();
+    await _showReaderToolbar(tester);
     await tester.tap(find.byTooltip('章节目录'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -347,6 +353,7 @@ void main() {
       find.byKey(ValueKey<String>('active-paragraph-$secondParagraphId')),
     );
 
+    await _showReaderToolbar(tester);
     await tester.tap(find.byTooltip('返回书架'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('切章测试书'));
@@ -724,6 +731,20 @@ Future<void> _selectVoiceProvider(
   await tester.pumpAndSettle();
   await tester.tap(find.text(label).last);
   await tester.pumpAndSettle();
+}
+
+Future<void> _showReaderToolbar(WidgetTester tester) async {
+  final toolbar = find.byKey(const Key('reader-toolbar'));
+  final pointerGate = find.descendant(
+    of: toolbar,
+    matching: find.byType(IgnorePointer),
+  );
+  if (tester.widget<IgnorePointer>(pointerGate).ignoring) {
+    await tester.tap(find.byKey(const Key('reader-body')));
+    await tester.pumpAndSettle();
+  }
+  expect(tester.widget<AnimatedSlide>(toolbar).offset, Offset.zero);
+  expect(tester.widget<IgnorePointer>(pointerGate).ignoring, isFalse);
 }
 
 final class _FailOnceMap extends MapBase<String, String> {

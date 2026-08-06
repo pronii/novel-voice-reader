@@ -80,6 +80,10 @@ final class _ReaderPageState extends State<ReaderPage> {
   int? _requestedPlaybackChapterId;
   int _scrollGeneration = 0;
   double _fontSize = 19;
+  bool _toolbarVisible = false;
+  int? _bodyPointerId;
+  Offset? _bodyPointerDownPosition;
+  bool _bodyPointerTapEligible = false;
 
   List<ReaderContentItem> get _items {
     final items = <ReaderContentItem>[
@@ -154,54 +158,130 @@ final class _ReaderPageState extends State<ReaderPage> {
   Widget build(BuildContext context) {
     final items = _items;
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          tooltip: '返回书架',
-          onPressed: widget.onBackToLibrary,
-          icon: const Icon(Icons.arrow_back),
-        ),
-        title: Text(
-          widget.bookTitle,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        actions: [
-          IconButton(
-            tooltip: '章节目录',
-            onPressed: widget.chapters.isEmpty ? null : _showChapterList,
-            icon: const Icon(Icons.format_list_numbered),
-          ),
-          IconButton(
-            tooltip: '阅读设置',
-            onPressed: _showReadingSettings,
-            icon: const Icon(Icons.text_fields),
-          ),
-          IconButton(
-            tooltip: '播放器',
-            onPressed: widget.onOpenPlayer,
-            icon: const Icon(Icons.graphic_eq),
-          ),
-          IconButton(
-            tooltip: '播放',
-            onPressed: widget.playbackStarting ? null : _playActive,
-            icon: const Icon(Icons.play_arrow),
-          ),
-        ],
-      ),
-      body: items.isEmpty
-          ? const Center(child: Text('图书没有可阅读内容'))
-          : NotificationListener<ScrollNotification>(
-              onNotification: _onScrollNotification,
-              child: ScrollablePositionedList.builder(
-                initialScrollIndex: _initialScrollIndex,
-                itemScrollController: _itemScrollController,
-                itemPositionsListener: _itemPositions,
-                itemCount: items.length,
-                itemBuilder: (context, index) =>
-                    _buildItem(context, items[index]),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Listener(
+              key: const Key('reader-body'),
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: _onBodyPointerDown,
+              onPointerMove: _onBodyPointerMove,
+              onPointerUp: _onBodyPointerUp,
+              onPointerCancel: _onBodyPointerCancel,
+              child: items.isEmpty
+                  ? const Center(child: Text('图书没有可阅读内容'))
+                  : NotificationListener<ScrollNotification>(
+                      onNotification: _onScrollNotification,
+                      child: ScrollablePositionedList.builder(
+                        initialScrollIndex: _initialScrollIndex,
+                        itemScrollController: _itemScrollController,
+                        itemPositionsListener: _itemPositions,
+                        itemCount: items.length,
+                        itemBuilder: (context, index) =>
+                            _buildItem(context, items[index]),
+                      ),
+                    ),
+            ),
+            AnimatedSlide(
+              key: const Key('reader-toolbar'),
+              offset: _toolbarVisible ? Offset.zero : const Offset(0, -1),
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              child: IgnorePointer(
+                ignoring: !_toolbarVisible,
+                child: ExcludeSemantics(
+                  excluding: !_toolbarVisible,
+                  child: SizedBox(
+                    height: kToolbarHeight,
+                    child: AppBar(
+                      primary: false,
+                      leading: IconButton(
+                        tooltip: '返回书架',
+                        onPressed: widget.onBackToLibrary,
+                        icon: const Icon(Icons.arrow_back),
+                      ),
+                      title: Text(
+                        widget.bookTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      actions: [
+                        IconButton(
+                          tooltip: '章节目录',
+                          onPressed: widget.chapters.isEmpty
+                              ? null
+                              : _showChapterList,
+                          icon: const Icon(Icons.format_list_numbered),
+                        ),
+                        IconButton(
+                          tooltip: '阅读设置',
+                          onPressed: _showReadingSettings,
+                          icon: const Icon(Icons.text_fields),
+                        ),
+                        IconButton(
+                          tooltip: '播放器',
+                          onPressed: widget.onOpenPlayer,
+                          icon: const Icon(Icons.graphic_eq),
+                        ),
+                        IconButton(
+                          tooltip: '播放',
+                          onPressed: widget.playbackStarting
+                              ? null
+                              : _playActive,
+                          icon: const Icon(Icons.play_arrow),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
+          ],
+        ),
+      ),
     );
+  }
+
+  void _onBodyPointerDown(PointerDownEvent event) {
+    if (_bodyPointerId != null) {
+      return;
+    }
+    _bodyPointerId = event.pointer;
+    _bodyPointerDownPosition = event.position;
+    _bodyPointerTapEligible = true;
+  }
+
+  void _onBodyPointerMove(PointerMoveEvent event) {
+    if (event.pointer != _bodyPointerId || !_bodyPointerTapEligible) {
+      return;
+    }
+    final origin = _bodyPointerDownPosition;
+    if (origin != null && (event.position - origin).distance > 8) {
+      _bodyPointerTapEligible = false;
+    }
+  }
+
+  void _onBodyPointerUp(PointerUpEvent event) {
+    if (event.pointer != _bodyPointerId) {
+      return;
+    }
+    final shouldToggle = _bodyPointerTapEligible;
+    _clearBodyPointer();
+    if (shouldToggle) {
+      setState(() => _toolbarVisible = !_toolbarVisible);
+    }
+  }
+
+  void _onBodyPointerCancel(PointerCancelEvent event) {
+    if (event.pointer == _bodyPointerId) {
+      _clearBodyPointer();
+    }
+  }
+
+  void _clearBodyPointer() {
+    _bodyPointerId = null;
+    _bodyPointerDownPosition = null;
+    _bodyPointerTapEligible = false;
   }
 
   Widget _buildItem(BuildContext context, ReaderContentItem item) {

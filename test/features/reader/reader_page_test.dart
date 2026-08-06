@@ -377,6 +377,7 @@ void main() {
       ),
     );
 
+    await _showReaderToolbar(tester);
     await tester.tap(find.byTooltip('章节目录'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('第二章'));
@@ -411,6 +412,7 @@ void main() {
       ),
     );
 
+    await _showReaderToolbar(tester);
     await tester.tap(find.byTooltip('章节目录'));
     await tester.pumpAndSettle();
 
@@ -441,6 +443,7 @@ void main() {
       ),
     );
 
+    await _showReaderToolbar(tester);
     await tester.tap(find.byTooltip('章节目录'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '目标');
@@ -510,6 +513,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
     final visibleParagraphId = reported?.id;
+    await _showReaderToolbar(tester);
     await tester.tap(find.byTooltip('播放'));
 
     expect(visibleParagraphId, isNotNull);
@@ -586,6 +590,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await _showReaderToolbar(tester);
     await tester.tap(find.byTooltip('阅读设置'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(Slider), const Offset(200, 0));
@@ -710,4 +715,18 @@ void _useNarrowViewport(WidgetTester tester) {
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+Future<void> _showReaderToolbar(WidgetTester tester) async {
+  final toolbar = find.byKey(const Key('reader-toolbar'));
+  final pointerGate = find.descendant(
+    of: toolbar,
+    matching: find.byType(IgnorePointer),
+  );
+  if (tester.widget<IgnorePointer>(pointerGate).ignoring) {
+    await tester.tap(find.byKey(const Key('reader-body')));
+    await tester.pumpAndSettle();
+  }
+  expect(tester.widget<AnimatedSlide>(toolbar).offset, Offset.zero);
+  expect(tester.widget<IgnorePointer>(pointerGate).ignoring, isFalse);
 }
