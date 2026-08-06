@@ -76,6 +76,7 @@ final class _ReaderPageState extends State<ReaderPage> {
   bool _loadingPrevious = false;
   bool _loadingNext = false;
   bool _playbackFollow = true;
+  PlaybackCursor? _pendingPlaybackTarget;
   int? _requestedPlaybackChapterId;
   int _scrollGeneration = 0;
   double _fontSize = 19;
@@ -552,6 +553,10 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   void _play(ReaderParagraph paragraph) {
+    _pendingPlaybackTarget = PlaybackCursor(
+      chapterId: paragraph.chapterId,
+      paragraphIndex: paragraph.index,
+    );
     _playbackFollow = true;
     setState(() => _activeParagraphId = paragraph.id);
     _reportReadingPosition(paragraph);
@@ -560,6 +565,17 @@ final class _ReaderPageState extends State<ReaderPage> {
 
   Future<void> _followPlayingParagraph() async {
     final cursor = widget.playbackCursor;
+    final pendingTarget = _pendingPlaybackTarget;
+    if (pendingTarget != null) {
+      if (cursor == pendingTarget) {
+        _pendingPlaybackTarget = null;
+      } else {
+        if (!widget.playbackStarting) {
+          _pendingPlaybackTarget = null;
+        }
+        return;
+      }
+    }
     if (!_playbackFollow || cursor == null || !widget.playbackActive) {
       return;
     }
