@@ -211,7 +211,10 @@ void main() {
     await tester.tap(find.text('从这里朗读'));
     await tester.pumpAndSettle();
 
-    expect(target, findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('active-paragraph-120')),
+      findsOneWidget,
+    );
     expect(
       find.byKey(const ValueKey<String>('playing-paragraph-10-0')),
       findsNothing,
