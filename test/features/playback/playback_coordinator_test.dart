@@ -77,7 +77,7 @@ void main() {
     await coordinator.dispose();
   });
 
-  test('only the newest concurrent play request can start audio', () async {
+  test('serializes provider takeover and only plays the newest request', () async {
     final provider = ControllablePrepareSpeechProvider();
     final coordinator = PlaybackCoordinator(
       provider: provider,
@@ -93,13 +93,22 @@ void main() {
     final second = coordinator.playFrom(
       const PlaybackCursor(chapterId: 1, paragraphIndex: 1),
     );
+    await pumpEventQueue();
+
+    expect(provider.prepared.map((segment) => segment.text), ['第一段']);
+    expect(provider.maxActivePrepares, 1);
+
+    provider.completePrepare(0);
     await provider.waitForPrepares(2);
+    expect(provider.played, isEmpty);
+
     provider.completePrepare(1);
     await second;
-    provider.completePrepare(0);
     await first;
 
-    expect(provider.playCalls, 1);
+    expect(provider.maxActivePrepares, 1);
+    expect(provider.played.map((segment) => segment.text), ['第二段']);
+    expect(provider.currentSegment?.text, '第二段');
     expect(
       coordinator.cursor,
       const PlaybackCursor(chapterId: 1, paragraphIndex: 1),
@@ -348,6 +357,98 @@ void main() {
     );
     await coordinator.dispose();
   });
+
+  test('keeps active playback when a newer paragraph lookup fails', () async {
+    final provider = FakeSpeechProvider();
+    final paragraphs = FailingTakeoverParagraphSource(
+      activeText: List.filled(151, '旧').join(),
+      failLookup: true,
+    );
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: paragraphs,
+      voiceProfile: VoiceProfile.tencent(),
+    );
+    final timelines = <PlaybackTimeline>[];
+    final subscription = coordinator.timelineChanges.listen(timelines.add);
+    const activeCursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+
+    await coordinator.playFrom(activeCursor);
+    provider.publishTimeline(
+      const PlaybackTimeline(
+        position: Duration(seconds: 1),
+        duration: Duration(seconds: 10),
+      ),
+    );
+
+    await expectLater(
+      coordinator.playFrom(
+        const PlaybackCursor(chapterId: 2, paragraphIndex: 0),
+      ),
+      throwsStateError,
+    );
+    provider.publishTimeline(
+      const PlaybackTimeline(
+        position: Duration(seconds: 2),
+        duration: Duration(seconds: 10),
+      ),
+    );
+    provider.completeCurrent();
+    await pumpEventQueue();
+
+    expect(coordinator.cursor, activeCursor);
+    expect(timelines.last.position, const Duration(seconds: 2));
+    expect(
+      provider.prepared.map((segment) => segment.text.runes.length),
+      [150, 1],
+    );
+    await subscription.cancel();
+    await coordinator.dispose();
+  });
+
+  test('keeps active playback when a newer chapter count fails', () async {
+    final provider = FakeSpeechProvider();
+    final paragraphs = FailingTakeoverParagraphSource(
+      activeText: List.filled(151, '旧').join(),
+      failChapterCount: true,
+    );
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: paragraphs,
+      voiceProfile: VoiceProfile.tencent(),
+    );
+    final timelines = <PlaybackTimeline>[];
+    final subscription = coordinator.timelineChanges.listen(timelines.add);
+    const activeCursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+
+    await coordinator.playFrom(activeCursor);
+
+    await expectLater(
+      coordinator.playFrom(
+        const PlaybackCursor(chapterId: 2, paragraphIndex: 0),
+      ),
+      throwsStateError,
+    );
+    provider.publishTimeline(
+      const PlaybackTimeline(
+        position: Duration(seconds: 2),
+        duration: Duration(seconds: 10),
+      ),
+    );
+    provider.completeCurrent();
+    await pumpEventQueue();
+
+    expect(coordinator.cursor, activeCursor);
+    expect(timelines.last.position, const Duration(seconds: 2));
+    expect(
+      provider.prepared.map((segment) => segment.text.runes.length),
+      [150, 1],
+    );
+    await subscription.cancel();
+    await coordinator.dispose();
+  });
 }
 
 final class FakeParagraphSource implements PlaybackParagraphSource {
@@ -567,10 +668,50 @@ final class ControllableLookupChapterParagraphSource
   }
 }
 
+final class FailingTakeoverParagraphSource
+    implements PlaybackParagraphSource, PlaybackChapterTextSource {
+  FailingTakeoverParagraphSource({
+    required this.activeText,
+    this.failLookup = false,
+    this.failChapterCount = false,
+  });
+
+  final String activeText;
+  final bool failLookup;
+  final bool failChapterCount;
+
+  @override
+  Future<PlaybackParagraph?> at(PlaybackCursor cursor) async {
+    if (cursor.chapterId == 2 && failLookup) {
+      throw StateError('paragraph lookup failed');
+    }
+    return PlaybackParagraph(
+      id: cursor.chapterId,
+      cursor: cursor,
+      text: cursor.chapterId == 1 ? activeText : '新段落',
+    );
+  }
+
+  @override
+  Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor) async => null;
+
+  @override
+  Future<int> remainingCharactersInChapter(PlaybackCursor cursor) async {
+    if (cursor.chapterId == 2 && failChapterCount) {
+      throw StateError('chapter count failed');
+    }
+    return cursor.chapterId == 1 ? activeText.runes.length : 3;
+  }
+}
+
 final class ControllablePrepareSpeechProvider implements SpeechProvider {
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
   final List<Completer<void>> _prepares = [];
-  int playCalls = 0;
+  final List<SpeechSegment> prepared = [];
+  final List<SpeechSegment> played = [];
+  SpeechSegment? currentSegment;
+  int activePrepares = 0;
+  int maxActivePrepares = 0;
 
   @override
   Stream<SpeechEvent> get events => _events.stream;
@@ -579,11 +720,27 @@ final class ControllablePrepareSpeechProvider implements SpeechProvider {
   Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {
     final prepare = Completer<void>();
     _prepares.add(prepare);
-    await prepare.future;
+    prepared.add(segment);
+    activePrepares++;
+    if (activePrepares > maxActivePrepares) {
+      maxActivePrepares = activePrepares;
+    }
+    try {
+      await prepare.future;
+      currentSegment = segment;
+    } finally {
+      activePrepares--;
+    }
   }
 
   @override
-  Future<void> play() async => playCalls++;
+  Future<void> play() async {
+    final segment = currentSegment;
+    if (segment == null) {
+      throw StateError('No speech segment has been prepared.');
+    }
+    played.add(segment);
+  }
 
   @override
   Future<void> pause() async {}
