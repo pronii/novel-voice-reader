@@ -34,7 +34,8 @@ final class DriftPlaybackProgressRepository
   }
 }
 
-final class DriftPlaybackParagraphSource implements PlaybackParagraphSource {
+final class DriftPlaybackParagraphSource
+    implements PlaybackParagraphSource, PlaybackChapterTextSource {
   const DriftPlaybackParagraphSource(this._database);
 
   final AppDatabase _database;
@@ -87,5 +88,21 @@ final class DriftPlaybackParagraphSource implements PlaybackParagraphSource {
       return null;
     }
     return at(PlaybackCursor(chapterId: nextChapter.id, paragraphIndex: 0));
+  }
+
+  @override
+  Future<int> remainingCharactersInChapter(PlaybackCursor cursor) async {
+    final records = await (_database.select(_database.paragraphs)..where(
+          (paragraph) =>
+              paragraph.chapterId.equals(cursor.chapterId) &
+              paragraph.paragraphIndex.isBiggerOrEqualValue(
+                cursor.paragraphIndex,
+              ),
+        ))
+        .get();
+    return records.fold<int>(
+      0,
+      (total, record) => total + record.content.runes.length,
+    );
   }
 }

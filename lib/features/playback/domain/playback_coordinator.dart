@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
@@ -39,6 +40,10 @@ abstract interface class PlaybackParagraphSource {
   Future<PlaybackParagraph?> at(PlaybackCursor cursor);
 
   Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor);
+}
+
+abstract interface class PlaybackChapterTextSource {
+  Future<int> remainingCharactersInChapter(PlaybackCursor cursor);
 }
 
 abstract interface class PlaybackProgressRepository {
@@ -82,7 +87,7 @@ final class PlaybackCoordinator implements PlaybackController {
       _timelineSubscription = (provider as TimedSpeechProvider).playbackTimeline
           .listen((timeline) {
             if (_acceptTimeline && !_timelineChanges.isClosed) {
-              _timelineChanges.add(timeline);
+              _timelineChanges.add(_enrichTimeline(timeline));
             }
           });
     }
@@ -112,6 +117,7 @@ final class PlaybackCoordinator implements PlaybackController {
   int? _queuedPrefetchGeneration;
   bool _disposing = false;
   bool _acceptTimeline = false;
+  int? _chapterCharacters;
 
   @override
   PlaybackCursor? get cursor => _cursor;
@@ -213,6 +219,16 @@ final class PlaybackCoordinator implements PlaybackController {
 
   Future<void> _startParagraph(PlaybackParagraph paragraph) async {
     final generation = ++_playbackGeneration;
+    int? chapterCharacters;
+    final paragraphs = _paragraphs;
+    if (paragraphs is PlaybackChapterTextSource) {
+      chapterCharacters = await (paragraphs as PlaybackChapterTextSource)
+          .remainingCharactersInChapter(paragraph.cursor);
+      if (generation != _playbackGeneration) {
+        return;
+      }
+    }
+    _chapterCharacters = chapterCharacters;
     _segments = _segmenter.split(
       paragraphId: paragraph.id,
       text: paragraph.text,
@@ -231,14 +247,14 @@ final class PlaybackCoordinator implements PlaybackController {
 
   Future<bool> _prepareAndPlayCurrentSegment(int generation) async {
     _acceptTimeline = false;
-    _timelineChanges.add(PlaybackTimeline.zero);
+    _timelineChanges.add(_enrichTimeline(PlaybackTimeline.zero));
     final segment = _segments[_segmentIndex];
     await _provider.prepare(segment, _voiceProfile);
     if (generation != _playbackGeneration) {
       return false;
     }
     _acceptTimeline = true;
-    _timelineChanges.add(PlaybackTimeline.zero);
+    _timelineChanges.add(_enrichTimeline(PlaybackTimeline.zero));
     final provider = _provider;
     if (provider is AdjustableSpeechProvider) {
       await (provider as AdjustableSpeechProvider).setPlaybackSpeed(_speed);
@@ -374,5 +390,41 @@ final class PlaybackCoordinator implements PlaybackController {
     if (!_activityChanges.isClosed) {
       _activityChanges.add(activity);
     }
+  }
+
+  PlaybackTimeline _enrichTimeline(PlaybackTimeline timeline) {
+    final chapterCharacters = _chapterCharacters;
+    if (chapterCharacters == null || _segments.isEmpty) {
+      return timeline;
+    }
+    const fallbackMicrosPerCharacter = 240000;
+    final completedCharacters = _segments
+        .take(_segmentIndex)
+        .fold<int>(0, (total, segment) => total + segment.text.runes.length);
+    final currentCharacters = _segments[_segmentIndex].text.runes.length;
+    final laterCharacters = max(
+      0,
+      chapterCharacters - completedCharacters - currentCharacters,
+    );
+    final duration = timeline.duration;
+    final position = timeline.position;
+    final microsPerCharacter = duration == null || currentCharacters == 0
+        ? fallbackMicrosPerCharacter
+        : duration.inMicroseconds ~/ currentCharacters;
+    final currentRemaining = duration == null
+        ? Duration(microseconds: currentCharacters * microsPerCharacter)
+        : Duration(
+            microseconds: max(
+              0,
+              duration.inMicroseconds - position.inMicroseconds,
+            ),
+          );
+    final chapterRemaining = currentRemaining +
+        Duration(microseconds: laterCharacters * microsPerCharacter);
+    return PlaybackTimeline(
+      position: position,
+      duration: duration,
+      chapterRemaining: chapterRemaining,
+    );
   }
 }

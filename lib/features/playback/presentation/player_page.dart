@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
@@ -191,14 +192,16 @@ final class _PlayerPageState extends State<PlayerPage> {
 
   String get _remainingLabel {
     final duration = _timeline.duration;
-    if (duration == null || duration <= Duration.zero) return '剩余 --:--';
-    final remaining = duration - _timeline.position;
+    final chapterRemaining = _timeline.chapterRemaining;
+    if (chapterRemaining == null &&
+        (duration == null || duration <= Duration.zero)) {
+      return '本章剩余 --:--';
+    }
+    final remaining = chapterRemaining ?? duration! - _timeline.position;
     final adjusted = Duration(
-      microseconds:
-          (remaining.inMicroseconds.clamp(0, duration.inMicroseconds) / _speed)
-              .round(),
+      microseconds: (max(0, remaining.inMicroseconds) / _speed).round(),
     );
-    return '剩余 ${_formatDuration(adjusted)}';
+    return '本章剩余 ${_formatDuration(adjusted)}';
   }
 
   static String _formatDuration(Duration duration) {
