@@ -113,6 +113,7 @@ final class PlaybackCoordinator implements PlaybackController {
   int _segmentIndex = 0;
   double _speed = 1;
   int _playbackGeneration = 0;
+  Future<void> _providerTransactions = Future<void>.value();
   Future<void>? _activePrefetch;
   int? _queuedPrefetchGeneration;
   bool _disposing = false;
@@ -131,8 +132,6 @@ final class PlaybackCoordinator implements PlaybackController {
   @override
   Future<void> playFrom(PlaybackCursor cursor) async {
     final generation = ++_playbackGeneration;
-    _acceptTimeline = false;
-    _segments = const [];
     final paragraph = await _paragraphs.at(cursor);
     if (generation != _playbackGeneration) {
       return;
@@ -210,6 +209,7 @@ final class PlaybackCoordinator implements PlaybackController {
       await _subscription.cancel();
       await _timelineSubscription?.cancel();
       await _activePrefetch;
+      await _providerTransactions;
       final provider = _provider;
       if (provider is DisposableSpeechProvider) {
         await (provider as DisposableSpeechProvider).dispose();
@@ -237,14 +237,16 @@ final class PlaybackCoordinator implements PlaybackController {
         return;
       }
     }
-    _chapterCharacters = chapterCharacters;
-    _segments = _segmenter.split(
+    final segments = _segmenter.split(
       paragraphId: paragraph.id,
       text: paragraph.text,
       maxCharacters: _voiceProfile.maxSegmentCharacters,
     );
-    _segmentIndex = 0;
-    if (!await _prepareAndPlayCurrentSegment(generation)) {
+    if (!await _takeOverParagraph(
+      segments,
+      chapterCharacters,
+      generation,
+    )) {
       return;
     }
     _cursor = paragraph.cursor;
@@ -254,7 +256,32 @@ final class PlaybackCoordinator implements PlaybackController {
     _schedulePrefetch(generation);
   }
 
-  Future<bool> _prepareAndPlayCurrentSegment(int generation) async {
+  Future<bool> _takeOverParagraph(
+    List<SpeechSegment> segments,
+    int? chapterCharacters,
+    int generation,
+  ) {
+    return _runProviderTransaction(() async {
+      if (generation != _playbackGeneration) {
+        return false;
+      }
+      _chapterCharacters = chapterCharacters;
+      _segments = segments;
+      _segmentIndex = 0;
+      return _prepareAndPlayCurrentSegmentLocked(generation);
+    });
+  }
+
+  Future<bool> _prepareAndPlayCurrentSegment(int generation) {
+    return _runProviderTransaction(
+      () => _prepareAndPlayCurrentSegmentLocked(generation),
+    );
+  }
+
+  Future<bool> _prepareAndPlayCurrentSegmentLocked(int generation) async {
+    if (generation != _playbackGeneration) {
+      return false;
+    }
     _acceptTimeline = false;
     _timelineChanges.add(_enrichTimeline(PlaybackTimeline.zero));
     final segment = _segments[_segmentIndex];
@@ -277,6 +304,15 @@ final class PlaybackCoordinator implements PlaybackController {
       _publishActivity(PlaybackActivity.playing);
     }
     return current;
+  }
+
+  Future<T> _runProviderTransaction<T>(Future<T> Function() operation) {
+    final result = _providerTransactions.then((_) => operation());
+    _providerTransactions = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return result;
   }
 
   Future<void> _handleSpeechEvent(SpeechEvent event) async {
