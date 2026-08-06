@@ -116,6 +116,52 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('a continuation cannot borrow a newer request generation', () async {
+    final provider = ControllablePrepareSpeechProvider();
+    final paragraphs = ControllableTakeoverChapterSource(
+      activeText: List.filled(151, '旧').join(),
+    );
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: paragraphs,
+      voiceProfile: VoiceProfile.tencent(),
+    );
+    const activeCursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
+    const takeoverCursor = PlaybackCursor(chapterId: 2, paragraphIndex: 0);
+
+    final activeStart = coordinator.playFrom(activeCursor);
+    await provider.waitForPrepares(1);
+    provider.completePrepare(0);
+    await activeStart;
+
+    final takeover = coordinator.playFrom(takeoverCursor);
+    await paragraphs.waitForTakeoverCount();
+    provider.completeCurrent();
+    await provider.waitForPrepares(2);
+
+    paragraphs.completeTakeoverCount();
+    await pumpEventQueue();
+    provider.completePrepare(1);
+    await provider.waitForPrepares(3);
+    provider.completePrepare(2);
+    await takeover;
+    await pumpEventQueue();
+
+    expect(provider.maxActivePrepares, 1);
+    expect(
+      provider.prepared.where((segment) => segment.text == '新段落'),
+      hasLength(1),
+    );
+    expect(
+      provider.played.map((segment) => segment.text),
+      [List.filled(150, '旧').join(), '新段落'],
+    );
+    expect(provider.currentSegment?.text, '新段落');
+    expect(coordinator.cursor, takeoverCursor);
+    await coordinator.dispose();
+  });
+
   test('serializes prefetches across rapid playback changes', () async {
     final provider = FakeSpeechProvider()..prefetchBlock = Completer<void>();
     final coordinator = PlaybackCoordinator(
@@ -708,6 +754,42 @@ final class FailingTakeoverParagraphSource
   }
 }
 
+final class ControllableTakeoverChapterSource
+    implements PlaybackParagraphSource, PlaybackChapterTextSource {
+  ControllableTakeoverChapterSource({required this.activeText});
+
+  final String activeText;
+  final Completer<void> _takeoverCountRequested = Completer<void>();
+  final Completer<int> _takeoverCount = Completer<int>();
+
+  @override
+  Future<PlaybackParagraph?> at(PlaybackCursor cursor) async {
+    return PlaybackParagraph(
+      id: cursor.chapterId,
+      cursor: cursor,
+      text: cursor.chapterId == 1 ? activeText : '新段落',
+    );
+  }
+
+  @override
+  Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor) async => null;
+
+  @override
+  Future<int> remainingCharactersInChapter(PlaybackCursor cursor) {
+    if (cursor.chapterId == 1) {
+      return Future<int>.value(activeText.runes.length);
+    }
+    if (!_takeoverCountRequested.isCompleted) {
+      _takeoverCountRequested.complete();
+    }
+    return _takeoverCount.future;
+  }
+
+  Future<void> waitForTakeoverCount() => _takeoverCountRequested.future;
+
+  void completeTakeoverCount() => _takeoverCount.complete(3);
+}
+
 final class ControllablePrepareSpeechProvider implements SpeechProvider {
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
   final List<Completer<void>> _prepares = [];
@@ -762,4 +844,12 @@ final class ControllablePrepareSpeechProvider implements SpeechProvider {
   }
 
   void completePrepare(int index) => _prepares[index].complete();
+
+  void completeCurrent() {
+    final segment = currentSegment;
+    if (segment == null) {
+      throw StateError('No speech segment has been prepared.');
+    }
+    _events.add(SpeechCompleted(segmentId: segment.id));
+  }
 }
