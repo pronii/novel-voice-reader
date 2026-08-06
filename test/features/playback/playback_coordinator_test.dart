@@ -394,11 +394,13 @@ void main() {
         duration: Duration(seconds: 10),
       ),
     );
-    provider.completeCurrent();
-    await pumpEventQueue();
 
     expect(coordinator.cursor, activeCursor);
     expect(timelines.last.position, const Duration(seconds: 2));
+
+    provider.completeCurrent();
+    await pumpEventQueue();
+
     expect(
       provider.prepared.map((segment) => segment.text.runes.length),
       [150, 1],
@@ -437,11 +439,13 @@ void main() {
         duration: Duration(seconds: 10),
       ),
     );
-    provider.completeCurrent();
-    await pumpEventQueue();
 
     expect(coordinator.cursor, activeCursor);
     expect(timelines.last.position, const Duration(seconds: 2));
+
+    provider.completeCurrent();
+    await pumpEventQueue();
+
     expect(
       provider.prepared.map((segment) => segment.text.runes.length),
       [150, 1],

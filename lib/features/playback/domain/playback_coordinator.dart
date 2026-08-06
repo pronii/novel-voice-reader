@@ -209,7 +209,6 @@ final class PlaybackCoordinator implements PlaybackController {
       await _subscription.cancel();
       await _timelineSubscription?.cancel();
       await _activePrefetch;
-      await _providerTransactions;
       final provider = _provider;
       if (provider is DisposableSpeechProvider) {
         await (provider as DisposableSpeechProvider).dispose();
