@@ -8,6 +8,28 @@ import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:novel_voice_reader/features/speech/presentation/voice_settings_page.dart';
 
 void main() {
+  testWidgets('selects a TTS provider from a dropdown on a narrow phone', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      const MaterialApp(home: VoiceSettingsPage()),
+    );
+
+    expect(find.byType(SingleChildScrollView), findsNothing);
+    await tester.tap(find.byKey(const Key('tts-provider-dropdown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MiMo').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('MiMo API Key'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('saves an Azure region, voice, and subscription key', (
     tester,
   ) async {
