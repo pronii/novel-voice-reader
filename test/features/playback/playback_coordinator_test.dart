@@ -318,6 +318,36 @@ void main() {
     await subscription.cancel();
     await coordinator.dispose();
   });
+
+  test('ignores an older play request whose paragraph lookup finishes last', () async {
+    final provider = FakeSpeechProvider();
+    final paragraphs = ControllableLookupChapterParagraphSource();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: paragraphs,
+      voiceProfile: VoiceProfile.system(),
+    );
+
+    final first = coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    await paragraphs.waitForLookups(1);
+    final second = coordinator.playFrom(
+      const PlaybackCursor(chapterId: 2, paragraphIndex: 0),
+    );
+    await paragraphs.waitForLookups(2);
+    paragraphs.completeLookup(1);
+    await second;
+    paragraphs.completeLookup(0);
+    await first;
+
+    expect(
+      coordinator.cursor,
+      const PlaybackCursor(chapterId: 2, paragraphIndex: 0),
+    );
+    await coordinator.dispose();
+  });
 }
 
 final class FakeParagraphSource implements PlaybackParagraphSource {
@@ -497,6 +527,43 @@ final class ControllableChapterParagraphSource
 
   void completeCharacterRequest(int index, int characters) {
     _characterRequests[index].complete(characters);
+  }
+}
+
+final class ControllableLookupChapterParagraphSource
+    implements PlaybackParagraphSource, PlaybackChapterTextSource {
+  final List<PlaybackCursor> _cursors = [];
+  final List<Completer<PlaybackParagraph?>> _lookups = [];
+
+  @override
+  Future<PlaybackParagraph?> at(PlaybackCursor cursor) {
+    _cursors.add(cursor);
+    final lookup = Completer<PlaybackParagraph?>();
+    _lookups.add(lookup);
+    return lookup.future;
+  }
+
+  @override
+  Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor) async => null;
+
+  @override
+  Future<int> remainingCharactersInChapter(PlaybackCursor cursor) async => 10;
+
+  Future<void> waitForLookups(int count) async {
+    while (_lookups.length < count) {
+      await Future<void>.delayed(Duration.zero);
+    }
+  }
+
+  void completeLookup(int index) {
+    final cursor = _cursors[index];
+    _lookups[index].complete(
+      PlaybackParagraph(
+        id: cursor.chapterId,
+        cursor: cursor,
+        text: List.filled(10, '文').join(),
+      ),
+    );
   }
 }
 
