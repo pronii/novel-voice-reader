@@ -310,7 +310,7 @@ final class PlaybackCoordinator implements PlaybackController {
     final result = _providerTransactions.then((_) => operation());
     _providerTransactions = result.then<void>(
       (_) {},
-      onError: (Object _, StackTrace __) {},
+      onError: (Object _, StackTrace _) {},
     );
     return result;
   }
