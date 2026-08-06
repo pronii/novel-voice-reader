@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
@@ -245,6 +246,78 @@ void main() {
     expect(provider.prepared.last.text.runes.length, 1);
     await coordinator.dispose();
   });
+
+  test('estimates chapter remaining time from the timed current segment', () async {
+    final provider = FakeSpeechProvider();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: ChapterAwareParagraphSource([
+        List.filled(10, '当').join(),
+        List.filled(5, '后').join(),
+      ]),
+      voiceProfile: VoiceProfile.system(),
+    );
+    final timelines = <PlaybackTimeline>[];
+    final subscription = coordinator.timelineChanges.listen(timelines.add);
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    provider.publishTimeline(
+      const PlaybackTimeline(
+        position: Duration.zero,
+        duration: Duration(seconds: 20),
+      ),
+    );
+
+    expect(timelines.last.chapterRemaining, const Duration(seconds: 30));
+    await subscription.cancel();
+    await coordinator.dispose();
+  });
+
+  test('ignores delayed chapter counts from an older play request', () async {
+    final provider = FakeSpeechProvider();
+    final paragraphs = ControllableChapterParagraphSource();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: paragraphs,
+      voiceProfile: VoiceProfile.system(),
+    );
+    final timelines = <PlaybackTimeline>[];
+    final subscription = coordinator.timelineChanges.listen(timelines.add);
+
+    final first = coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    await paragraphs.waitForCharacterRequests(1);
+    final second = coordinator.playFrom(
+      const PlaybackCursor(chapterId: 2, paragraphIndex: 0),
+    );
+    await paragraphs.waitForCharacterRequests(2);
+    paragraphs.completeCharacterRequest(1, 10);
+    await second;
+    provider.publishTimeline(
+      const PlaybackTimeline(
+        position: Duration.zero,
+        duration: Duration(seconds: 20),
+      ),
+    );
+    paragraphs.completeCharacterRequest(0, 100);
+    await first;
+    provider.publishTimeline(
+      const PlaybackTimeline(
+        position: Duration.zero,
+        duration: Duration(seconds: 20),
+      ),
+    );
+
+    expect(coordinator.cursor, const PlaybackCursor(chapterId: 2, paragraphIndex: 0));
+    expect(timelines.last.chapterRemaining, const Duration(seconds: 20));
+    await subscription.cancel();
+    await coordinator.dispose();
+  });
 }
 
 final class FakeParagraphSource implements PlaybackParagraphSource {
@@ -288,8 +361,10 @@ final class FakeSpeechProvider
     implements
         SpeechProvider,
         AdjustableSpeechProvider,
-        PrefetchingSpeechProvider {
+        PrefetchingSpeechProvider,
+        TimedSpeechProvider {
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
+  final _timeline = StreamController<PlaybackTimeline>.broadcast(sync: true);
   final List<SpeechSegment> prepared = [];
   final List<SpeechSegment> prefetched = [];
   int pauseCalls = 0;
@@ -301,6 +376,9 @@ final class FakeSpeechProvider
 
   @override
   Stream<SpeechEvent> get events => _events.stream;
+
+  @override
+  Stream<PlaybackTimeline> get playbackTimeline => _timeline.stream;
 
   @override
   Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {
@@ -352,6 +430,73 @@ final class FakeSpeechProvider
 
   void completeCurrent() {
     _events.add(SpeechCompleted(segmentId: prepared.last.id));
+  }
+
+  void publishTimeline(PlaybackTimeline timeline) => _timeline.add(timeline);
+}
+
+final class ChapterAwareParagraphSource
+    implements PlaybackParagraphSource, PlaybackChapterTextSource {
+  ChapterAwareParagraphSource(this.values);
+
+  final List<String> values;
+
+  @override
+  Future<PlaybackParagraph?> at(PlaybackCursor cursor) async {
+    if (cursor.paragraphIndex < 0 || cursor.paragraphIndex >= values.length) {
+      return null;
+    }
+    return PlaybackParagraph(
+      id: cursor.paragraphIndex + 1,
+      cursor: cursor,
+      text: values[cursor.paragraphIndex],
+    );
+  }
+
+  @override
+  Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor) => at(
+    PlaybackCursor(
+      chapterId: cursor.chapterId,
+      paragraphIndex: cursor.paragraphIndex + 1,
+    ),
+  );
+
+  @override
+  Future<int> remainingCharactersInChapter(PlaybackCursor cursor) async =>
+      values
+          .skip(cursor.paragraphIndex)
+          .fold(0, (total, value) => total + value.runes.length);
+}
+
+final class ControllableChapterParagraphSource
+    implements PlaybackParagraphSource, PlaybackChapterTextSource {
+  final List<Completer<int>> _characterRequests = [];
+
+  @override
+  Future<PlaybackParagraph?> at(PlaybackCursor cursor) async => PlaybackParagraph(
+    id: cursor.chapterId,
+    cursor: cursor,
+    text: List.filled(10, '文').join(),
+  );
+
+  @override
+  Future<PlaybackParagraph?> nextAfter(PlaybackCursor cursor) async => null;
+
+  @override
+  Future<int> remainingCharactersInChapter(PlaybackCursor cursor) {
+    final request = Completer<int>();
+    _characterRequests.add(request);
+    return request.future;
+  }
+
+  Future<void> waitForCharacterRequests(int count) async {
+    while (_characterRequests.length < count) {
+      await Future<void>.delayed(Duration.zero);
+    }
+  }
+
+  void completeCharacterRequest(int index, int characters) {
+    _characterRequests[index].complete(characters);
   }
 }
 

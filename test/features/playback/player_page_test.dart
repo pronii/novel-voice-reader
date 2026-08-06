@@ -40,11 +40,17 @@ void main() {
         home: PlayerPage(
           bookTitle: '测试书',
           chapterTitle: '第一章',
+          initialTimeline: const PlaybackTimeline(
+            position: Duration(seconds: 10),
+            duration: Duration(seconds: 20),
+            chapterRemaining: Duration(minutes: 3),
+          ),
           onSpeedChanged: (_) async => throw StateError('speed failed'),
         ),
       ),
     );
 
+    expect(find.text('本章剩余 03:00'), findsOneWidget);
     await tester.tap(find.text('1.5x'));
     await tester.pump();
 
@@ -54,6 +60,7 @@ void main() {
           .selected,
       {1},
     );
+    expect(find.text('本章剩余 03:00'), findsOneWidget);
   });
 
   testWidgets('serializes rapid playback speed selections', (tester) async {
@@ -141,8 +148,9 @@ void main() {
           bookTitle: '测试书',
           chapterTitle: '第一章',
           initialTimeline: const PlaybackTimeline(
-            position: Duration(minutes: 1),
-            duration: Duration(minutes: 5),
+            position: Duration(seconds: 10),
+            duration: Duration(seconds: 20),
+            chapterRemaining: Duration(minutes: 3),
           ),
           timelineChanges: timelineChanges.stream,
         ),
@@ -153,10 +161,15 @@ void main() {
       tester
           .widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator))
           .value,
-      0.2,
+      0.5,
     );
-    expect(find.text('01:00 / 05:00'), findsOneWidget);
-    expect(find.text('剩余 04:00'), findsOneWidget);
+    expect(find.text('00:10 / 00:20'), findsOneWidget);
+    expect(find.text('本章剩余 03:00'), findsOneWidget);
+
+    await tester.tap(find.text('1.5x'));
+    await tester.pump();
+
+    expect(find.text('本章剩余 02:00'), findsOneWidget);
 
     timelineChanges.add(
       const PlaybackTimeline(
@@ -173,7 +186,7 @@ void main() {
       0.5,
     );
     expect(find.text('02:30 / 05:00'), findsOneWidget);
-    expect(find.text('剩余 02:30'), findsOneWidget);
+    expect(find.text('本章剩余 01:40'), findsOneWidget);
   });
 }
 
