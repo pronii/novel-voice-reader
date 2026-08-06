@@ -15,6 +15,118 @@ final longParagraphs = List.generate(
 );
 
 void main() {
+  testWidgets('hides the reader toolbar when the page first opens', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: _reader(paragraphs: longParagraphs)),
+    );
+
+    final toolbar = tester.widget<AnimatedSlide>(
+      find.byKey(const Key('reader-toolbar')),
+    );
+    final pointerGate = tester.widget<IgnorePointer>(
+      find.descendant(
+        of: find.byKey(const Key('reader-toolbar')),
+        matching: find.byType(IgnorePointer),
+      ),
+    );
+
+    expect(toolbar.offset, const Offset(0, -1));
+    expect(pointerGate.ignoring, isTrue);
+  });
+
+  testWidgets('stationary body taps reveal and hide the reader toolbar', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: _reader(paragraphs: longParagraphs)),
+    );
+
+    await tester.tap(find.byKey(const Key('reader-body')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<AnimatedSlide>(find.byKey(const Key('reader-toolbar')))
+          .offset,
+      Offset.zero,
+    );
+
+    await tester.tap(find.byKey(const Key('reader-body')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<AnimatedSlide>(find.byKey(const Key('reader-toolbar')))
+          .offset,
+      const Offset(0, -1),
+    );
+  });
+
+  testWidgets('showing the toolbar does not move reader paragraphs', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: _reader(paragraphs: longParagraphs)),
+    );
+    await tester.pumpAndSettle();
+    final firstParagraph = find.byKey(
+      const ValueKey<String>('active-paragraph-10'),
+    );
+    final hiddenPosition = tester.getTopLeft(firstParagraph);
+
+    await tester.tap(find.byKey(const Key('reader-body')));
+    await tester.pumpAndSettle();
+
+    expect(tester.getTopLeft(firstParagraph), hiddenPosition);
+  });
+
+  testWidgets('a vertical reader drag does not reveal the toolbar', (
+    tester,
+  ) async {
+    _useNarrowViewport(tester);
+    await tester.pumpWidget(
+      MaterialApp(home: _reader(paragraphs: longParagraphs)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byKey(const Key('reader-body')),
+      const Offset(0, -200),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<AnimatedSlide>(find.byKey(const Key('reader-toolbar')))
+          .offset,
+      const Offset(0, -1),
+    );
+  });
+
+  testWidgets('paragraph selection survives reader body tap detection', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: _reader(paragraphs: _paragraphs(10, ['第一段。', '第二段。'])),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey<String>('paragraph-101')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('active-paragraph-101')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<AnimatedSlide>(find.byKey(const Key('reader-toolbar')))
+          .offset,
+      Offset.zero,
+    );
+  });
+
   testWidgets('disables playback commands while playback is starting', (
     tester,
   ) async {
