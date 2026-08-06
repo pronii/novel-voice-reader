@@ -374,15 +374,7 @@ void main() {
     await tester.pumpWidget(NovelVoiceReaderApp(database: database));
     await _pumpUntilFound(tester, find.byTooltip('语音设置'));
     await tester.tap(find.byTooltip('语音设置'));
-    await _pumpUntilFound(tester, find.byType(SingleChildScrollView));
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-500, 0),
-    );
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.text('腾讯云'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await _selectVoiceProvider(tester, '腾讯云');
     await tester.enterText(
       find.widgetWithText(TextField, '每月免费额度（字符）'),
       '1000000',
@@ -713,20 +705,24 @@ Future<int> _createChapteredBook(
 Future<void> _openTencentSettings(WidgetTester tester) async {
   await _pumpUntilFound(tester, find.byTooltip('语音设置'));
   await tester.tap(find.byTooltip('语音设置'));
-  await _pumpUntilFound(tester, find.byType(SingleChildScrollView));
-  await tester.drag(find.byType(SingleChildScrollView), const Offset(-500, 0));
-  await tester.pump(const Duration(milliseconds: 300));
-  await tester.tap(find.text('腾讯云'));
-  await tester.pump(const Duration(milliseconds: 300));
+  await _selectVoiceProvider(tester, '腾讯云');
 }
 
 Future<void> _openMiMoSettings(WidgetTester tester) async {
   await _pumpUntilFound(tester, find.byTooltip('语音设置'));
   await tester.tap(find.byTooltip('语音设置'));
-  await _pumpUntilFound(tester, find.byType(SingleChildScrollView));
-  await tester.drag(find.byType(SingleChildScrollView), const Offset(-700, 0));
-  await tester.pump(const Duration(milliseconds: 300));
-  await tester.tap(find.text('MiMo'));
+  await _selectVoiceProvider(tester, 'MiMo');
+}
+
+Future<void> _selectVoiceProvider(
+  WidgetTester tester,
+  String label,
+) async {
+  final dropdown = find.byKey(const Key('tts-provider-dropdown'));
+  await _pumpUntilFound(tester, dropdown);
+  await tester.tap(dropdown);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label).last);
   await tester.pump(const Duration(milliseconds: 300));
 }
 

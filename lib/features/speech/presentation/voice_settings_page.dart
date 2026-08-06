@@ -145,47 +145,52 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SegmentedButton<SpeechProviderType>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(
-                  value: SpeechProviderType.system,
-                  icon: Icon(Icons.phone_android),
-                  label: Text('系统'),
+          DropdownButtonFormField<SpeechProviderType>(
+            key: const Key('tts-provider-dropdown'),
+            initialValue: _provider,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: '语音服务'),
+            items: const [
+              DropdownMenuItem(
+                value: SpeechProviderType.system,
+                child: _ProviderOption(
+                  icon: Icons.phone_android,
+                  label: '系统',
                 ),
-                ButtonSegment(
-                  value: SpeechProviderType.cloud,
-                  icon: Icon(Icons.cloud_outlined),
-                  label: Text('兼容'),
+              ),
+              DropdownMenuItem(
+                value: SpeechProviderType.cloud,
+                child: _ProviderOption(
+                  icon: Icons.cloud_outlined,
+                  label: '兼容',
                 ),
-                ButtonSegment(
-                  value: SpeechProviderType.azure,
-                  icon: Icon(Icons.cloud_queue),
-                  label: Text('Azure'),
+              ),
+              DropdownMenuItem(
+                value: SpeechProviderType.azure,
+                child: _ProviderOption(icon: Icons.cloud_queue, label: 'Azure'),
+              ),
+              DropdownMenuItem(
+                value: SpeechProviderType.zhipu,
+                child: _ProviderOption(
+                  icon: Icons.record_voice_over_outlined,
+                  label: '智谱',
                 ),
-                ButtonSegment(
-                  value: SpeechProviderType.zhipu,
-                  icon: Icon(Icons.record_voice_over_outlined),
-                  label: Text('智谱'),
+              ),
+              DropdownMenuItem(
+                value: SpeechProviderType.tencent,
+                child: _ProviderOption(icon: Icons.graphic_eq, label: '腾讯云'),
+              ),
+              DropdownMenuItem(
+                value: SpeechProviderType.mimo,
+                child: _ProviderOption(
+                  icon: Icons.auto_awesome_outlined,
+                  label: 'MiMo',
                 ),
-                ButtonSegment(
-                  value: SpeechProviderType.tencent,
-                  icon: Icon(Icons.graphic_eq),
-                  label: Text('腾讯云'),
-                ),
-                ButtonSegment(
-                  value: SpeechProviderType.mimo,
-                  icon: Icon(Icons.auto_awesome_outlined),
-                  label: Text('MiMo'),
-                ),
-              ],
-              selected: {_provider},
-              onSelectionChanged: (values) {
-                _selectProvider(values.single);
-              },
-            ),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) _selectProvider(value);
+            },
           ),
           const SizedBox(height: 24),
           Text('语速 ${_speed.toStringAsFixed(1)}x'),
@@ -663,5 +668,23 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+final class _ProviderOption extends StatelessWidget {
+  const _ProviderOption({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 20),
+        const SizedBox(width: 12),
+        Text(label),
+      ],
+    );
   }
 }

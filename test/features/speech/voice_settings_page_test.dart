@@ -46,8 +46,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Azure'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, 'Azure');
     await tester.enterText(
       find.widgetWithText(TextField, 'Subscription Key'),
       'azure-secret',
@@ -78,8 +77,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Azure'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, 'Azure');
     await tester.enterText(
       find.widgetWithText(TextField, 'Azure Region'),
       'invalid region',
@@ -111,13 +109,7 @@ void main() {
       ),
     );
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-260, 0),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('智谱'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '智谱');
     await tester.tap(find.text('彤彤 (tongtong)'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('小陈 (xiaochen)').last);
@@ -148,8 +140,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('智谱'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '智谱');
     await tester.enterText(
       find.widgetWithText(TextField, 'API Key'),
       '  zhipu-secret  ',
@@ -165,8 +156,7 @@ void main() {
   ) async {
     await tester.pumpWidget(const MaterialApp(home: VoiceSettingsPage()));
 
-    await tester.tap(find.text('智谱'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '智谱');
 
     expect(
       tester
@@ -192,8 +182,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('智谱'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '智谱');
     await tester.enterText(
       find.widgetWithText(TextField, 'API Key'),
       'entered-key',
@@ -216,8 +205,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('智谱'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '智谱');
     await tester.enterText(find.widgetWithText(TextField, 'API Key'), '   ');
     await tester.tap(find.text('测试连接'));
     await tester.pump();
@@ -244,8 +232,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('智谱'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '智谱');
     await tester.enterText(
       find.widgetWithText(TextField, 'API Key'),
       'entered-key',
@@ -287,8 +274,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('智谱'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '智谱');
     await tester.enterText(
       find.widgetWithText(TextField, 'API Key'),
       'invalid-key',
@@ -312,8 +298,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('智谱'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '智谱');
     await tester.enterText(
       find.widgetWithText(TextField, 'API Key'),
       'timeout-secret',
@@ -350,8 +335,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('智谱'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '智谱');
     await tester.enterText(
       find.widgetWithText(TextField, 'API Key'),
       'invalid-key',
@@ -379,13 +363,7 @@ void main() {
       ),
     );
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-500, 0),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('腾讯云'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '腾讯云');
     await tester.enterText(
       find.widgetWithText(TextField, 'SecretId'),
       '  entered-id  ',
@@ -423,13 +401,7 @@ void main() {
       ),
     );
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-500, 0),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('腾讯云'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '腾讯云');
     await tester.enterText(
       find.widgetWithText(TextField, 'SecretId'),
       'entered-id',
@@ -471,13 +443,7 @@ void main() {
       ),
     );
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-500, 0),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('腾讯云'));
-    await tester.pumpAndSettle();
+    await _selectVoiceProvider(tester, '腾讯云');
 
     expect(find.text('本机估算'), findsOneWidget);
     expect(find.text('本月已用：25 字符'), findsOneWidget);
@@ -512,13 +478,7 @@ void main() {
       ),
     );
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-500, 0),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('腾讯云'));
-    await tester.pumpAndSettle();
+    await _selectVoiceProvider(tester, '腾讯云');
     expect(find.text('月度额度：100 字符'), findsOneWidget);
 
     await tester.enterText(find.widgetWithText(TextField, '每月免费额度（字符）'), '200');
@@ -535,13 +495,7 @@ void main() {
   ) async {
     await tester.pumpWidget(const MaterialApp(home: VoiceSettingsPage()));
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-500, 0),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('腾讯云'));
-    await tester.pumpAndSettle();
+    await _selectVoiceProvider(tester, '腾讯云');
 
     expect(find.textContaining('专用腾讯云子账号'), findsOneWidget);
     expect(find.textContaining('最小 TTS 权限'), findsOneWidget);
@@ -557,13 +511,7 @@ void main() {
       ),
     );
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-500, 0),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('腾讯云'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '腾讯云');
     await tester.enterText(
       find.widgetWithText(TextField, 'SecretId'),
       'entered-id',
@@ -596,13 +544,7 @@ void main() {
       ),
     );
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-500, 0),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('腾讯云'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, '腾讯云');
     await tester.tap(find.text('1001（推荐）'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('自定义 VoiceType').last);
@@ -637,13 +579,7 @@ void main() {
       ),
     );
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-700, 0),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('MiMo'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, 'MiMo');
     await tester.tap(find.text('冰糖（中文女声）'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Dean（英文男声）').last);
@@ -680,13 +616,7 @@ void main() {
       ),
     );
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-700, 0),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('MiMo'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, 'MiMo');
     await tester.enterText(
       find.widgetWithText(TextField, 'MiMo API Key'),
       'entered-key',
@@ -710,13 +640,7 @@ void main() {
       ),
     );
 
-    await tester.drag(
-      find.byType(SingleChildScrollView),
-      const Offset(-700, 0),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('MiMo'));
-    await tester.pump();
+    await _selectVoiceProvider(tester, 'MiMo');
     await tester.tap(find.text('测试连接'));
     await tester.pump();
 
@@ -781,4 +705,13 @@ void main() {
     expect(tested?.credentials.normalizedApiKey, isNull);
     expect(find.text('连接成功，API Key 可用'), findsOneWidget);
   });
+}
+Future<void> _selectVoiceProvider(
+  WidgetTester tester,
+  String label,
+) async {
+  await tester.tap(find.byKey(const Key('tts-provider-dropdown')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label).last);
+  await tester.pumpAndSettle();
 }
