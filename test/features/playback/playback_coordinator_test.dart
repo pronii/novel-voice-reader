@@ -465,7 +465,7 @@ final class ChapterAwareParagraphSource
   Future<int> remainingCharactersInChapter(PlaybackCursor cursor) async =>
       values
           .skip(cursor.paragraphIndex)
-          .fold(0, (total, value) => total + value.runes.length);
+          .fold<int>(0, (total, value) => total + value.runes.length);
 }
 
 final class ControllableChapterParagraphSource
