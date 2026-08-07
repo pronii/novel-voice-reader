@@ -182,55 +182,57 @@ final class _ReaderPageState extends State<ReaderPage> {
                       ),
                     ),
             ),
-            AnimatedSlide(
-              key: const Key('reader-toolbar'),
-              offset: _toolbarVisible ? Offset.zero : const Offset(0, -1),
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              child: IgnorePointer(
-                ignoring: !_toolbarVisible,
-                child: ExcludeSemantics(
-                  excluding: !_toolbarVisible,
-                  child: SizedBox(
-                    height: kToolbarHeight,
-                    child: AppBar(
-                      primary: false,
-                      leading: IconButton(
-                        tooltip: '返回书架',
-                        onPressed: widget.onBackToLibrary,
-                        icon: const Icon(Icons.arrow_back),
+            ClipRect(
+              child: AnimatedSlide(
+                key: const Key('reader-toolbar'),
+                offset: _toolbarVisible ? Offset.zero : const Offset(0, -1),
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                child: IgnorePointer(
+                  ignoring: !_toolbarVisible,
+                  child: ExcludeSemantics(
+                    excluding: !_toolbarVisible,
+                    child: SizedBox(
+                      height: kToolbarHeight,
+                      child: AppBar(
+                        primary: false,
+                        leading: IconButton(
+                          tooltip: '返回书架',
+                          onPressed: widget.onBackToLibrary,
+                          icon: const Icon(Icons.arrow_back),
+                        ),
+                        title: Text(
+                          widget.bookTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        actions: [
+                          IconButton(
+                            tooltip: '章节目录',
+                            onPressed: widget.chapters.isEmpty
+                                ? null
+                                : _showChapterList,
+                            icon: const Icon(Icons.format_list_numbered),
+                          ),
+                          IconButton(
+                            tooltip: '阅读设置',
+                            onPressed: _showReadingSettings,
+                            icon: const Icon(Icons.text_fields),
+                          ),
+                          IconButton(
+                            tooltip: '播放器',
+                            onPressed: widget.onOpenPlayer,
+                            icon: const Icon(Icons.graphic_eq),
+                          ),
+                          IconButton(
+                            tooltip: '播放',
+                            onPressed: widget.playbackStarting
+                                ? null
+                                : _playActive,
+                            icon: const Icon(Icons.play_arrow),
+                          ),
+                        ],
                       ),
-                      title: Text(
-                        widget.bookTitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      actions: [
-                        IconButton(
-                          tooltip: '章节目录',
-                          onPressed: widget.chapters.isEmpty
-                              ? null
-                              : _showChapterList,
-                          icon: const Icon(Icons.format_list_numbered),
-                        ),
-                        IconButton(
-                          tooltip: '阅读设置',
-                          onPressed: _showReadingSettings,
-                          icon: const Icon(Icons.text_fields),
-                        ),
-                        IconButton(
-                          tooltip: '播放器',
-                          onPressed: widget.onOpenPlayer,
-                          icon: const Icon(Icons.graphic_eq),
-                        ),
-                        IconButton(
-                          tooltip: '播放',
-                          onPressed: widget.playbackStarting
-                              ? null
-                              : _playActive,
-                          icon: const Icon(Icons.play_arrow),
-                        ),
-                      ],
                     ),
                   ),
                 ),

@@ -36,6 +36,24 @@ void main() {
     expect(pointerGate.ignoring, isTrue);
   });
 
+  testWidgets('clips the hidden reader toolbar below an iOS safe area', (
+    tester,
+  ) async {
+    tester.view.padding = const FakeViewPadding(top: 177);
+    addTearDown(tester.view.resetPadding);
+    await tester.pumpWidget(
+      MaterialApp(home: _reader(paragraphs: longParagraphs)),
+    );
+
+    final toolbar = find.byKey(const Key('reader-toolbar'));
+    final toolbarClip = find.ancestor(
+      of: toolbar,
+      matching: find.byType(ClipRect),
+    );
+    expect(toolbarClip, findsOneWidget);
+    expect(tester.getTopLeft(toolbarClip).dy, 59);
+  });
+
   testWidgets('stationary body taps reveal and hide the reader toolbar', (
     tester,
   ) async {
