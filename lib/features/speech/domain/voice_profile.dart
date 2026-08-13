@@ -178,7 +178,11 @@ final class VoiceProfile {
   }
 
   int get maxSegmentCharacters =>
-      providerType == SpeechProviderType.tencent ? 150 : 1000;
+      switch (providerType) {
+        SpeechProviderType.tencent => 150,
+        SpeechProviderType.mimo => 360,
+        _ => 1000,
+      };
 
   static void _validateSpeed(double speed) {
     if (speed <= 0) {
