@@ -80,12 +80,11 @@ final class PlaybackCoordinator implements PlaybackController {
     this._onFailure,
   ) {
     _subscription = _provider.events.listen((event) {
-      _speechEventTransactions = _speechEventTransactions.then(
+      _speechEventTransactions = _speechEventTransactions.then<void>(
         (_) => _handleSpeechEvent(event),
+        onError: (Object _, StackTrace _) => _handleSpeechEvent(event),
       );
-      unawaited(
-        _speechEventTransactions.catchError((Object _, StackTrace _) {}),
-      );
+      unawaited(_speechEventTransactions);
     });
     final provider = _provider;
     if (provider is TimedSpeechProvider) {

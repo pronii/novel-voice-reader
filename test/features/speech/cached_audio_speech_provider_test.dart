@@ -339,6 +339,38 @@ void main() {
     await directory.delete(recursive: true);
   });
 
+  test('maps completed file paths to their queued speech segments', () async {
+    final directory = await Directory.systemTemp.createTemp('cached-path-events-');
+    final engine = QueuedFakeAudioPlaybackEngine();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: FakeCloudSpeechSynthesizer(),
+      ),
+      engine: engine,
+    );
+    final events = <SpeechEvent>[];
+    final subscription = provider.events.listen(events.add);
+    const current = SpeechSegment(id: '70:0', paragraphId: 70, text: '甲', partIndex: 0);
+    const next = SpeechSegment(id: '71:0', paragraphId: 71, text: '乙', partIndex: 0);
+    final profile = _cloudProfile();
+
+    await provider.prepare(current, profile);
+    await (provider as PrefetchingSpeechProvider).prefetch(next, profile);
+    engine.completePath(engine.filePath!);
+    engine.completePath(engine.queuedPaths.single);
+    await pumpEventQueue();
+
+    expect(
+      events.whereType<SpeechCompleted>().map((event) => event.segmentId),
+      ['70:0', '71:0'],
+    );
+
+    await subscription.cancel();
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
+
   test('a stale prepare cannot replace the newest audio source', () async {
     final directory = await Directory.systemTemp.createTemp(
       'cached-latest-prepare-',
@@ -478,6 +510,8 @@ class FakeAudioPlaybackEngine
       _completed.add(path);
     }
   }
+
+  void completePath(String path) => _completed.add(path);
 
   void publishTimeline(PlaybackTimeline timeline) => _timeline.add(timeline);
 }

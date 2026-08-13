@@ -145,7 +145,7 @@ final class CachedAudioSpeechProvider
         PrefetchingSpeechProvider,
         TimedSpeechProvider {
   CachedAudioSpeechProvider({required this.cache, required this.engine}) {
-    _completionSubscription = engine.completed.listen((_) => _onCompleted());
+    _completionSubscription = engine.completed.listen(_onCompleted);
   }
 
   final AudioCacheRepository cache;
