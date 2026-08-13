@@ -116,6 +116,33 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('prefetches about three minutes across paragraph boundaries', () async {
+    final provider = FakeSpeechProvider();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource([
+        '当前段',
+        List.filled(360, '甲').join(),
+        List.filled(360, '乙').join(),
+        List.filled(360, '丙').join(),
+      ]),
+      voiceProfile: VoiceProfile.mimo(),
+    );
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    await pumpEventQueue();
+
+    expect(provider.prefetched.map((segment) => segment.text.runes.length), [
+      360,
+      360,
+      360,
+    ]);
+    await coordinator.dispose();
+  });
+
   test('a continuation cannot borrow a newer request generation', () async {
     final provider = ControllablePrepareSpeechProvider();
     final paragraphs = ControllableTakeoverChapterSource(
