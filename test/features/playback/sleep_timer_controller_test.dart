@@ -51,6 +51,10 @@ void main() {
     expect(controller.remaining, const Duration(minutes: 14));
     expect(controller.isActive, isTrue);
     expect(expired, 0);
+
+    // Stop the still-running fire timer and ticker so no timer outlives the
+    // test's fake-async zone.
+    controller.cancel();
   });
 
   testWidgets('cancelling prevents the timer from firing', (tester) async {

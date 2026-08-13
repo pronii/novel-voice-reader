@@ -192,6 +192,9 @@ void main() {
     expect(progress?.chapterId, chapters[5].id);
 
     await _showReaderToolbar(tester);
+    // Tapping the paragraph above also toggled the toolbar; make sure its
+    // slide-in animation has finished before we tap a button inside it.
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('返回书架'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('连续阅读测试书'));
@@ -602,9 +605,6 @@ Future<void> _selectVoiceProvider(
 }
 
 Future<void> _showReaderToolbar(WidgetTester tester) async {
-  // A body tap (e.g. selecting a paragraph) may have just toggled the toolbar,
-  // so settle its slide animation before inspecting or tapping it.
-  await tester.pumpAndSettle();
   final toolbar = find.byKey(const Key('reader-toolbar'));
   final pointerGate = find.descendant(
     of: toolbar,
