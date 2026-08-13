@@ -168,7 +168,8 @@ final class CachedAudioSpeechProvider
         final playbackEngine = engine;
         final promoted = playbackEngine is QueuedAudioPlaybackEngine &&
             _queuedSegmentId == segment.id &&
-            await playbackEngine.promoteQueuedFilePath(file.path);
+            await (playbackEngine as QueuedAudioPlaybackEngine)
+                .promoteQueuedFilePath(file.path);
         if (!promoted) {
           await engine.setFilePath(file.path);
         }
@@ -196,8 +197,9 @@ final class CachedAudioSpeechProvider
     final file = await _obtain(segment, profile);
     final playbackEngine = engine;
     if (_segment != null && playbackEngine is QueuedAudioPlaybackEngine) {
+      final queuedEngine = playbackEngine as QueuedAudioPlaybackEngine;
       await _enqueueSourceUpdate(() async {
-        await playbackEngine.queueNextFilePath(file.path);
+        await queuedEngine.queueNextFilePath(file.path);
         _queuedSegmentId = segment.id;
       });
     }
