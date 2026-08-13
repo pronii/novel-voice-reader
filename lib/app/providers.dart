@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
+import 'package:novel_voice_reader/features/playback/application/sleep_timer_controller.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/domain/reader_content.dart';
@@ -8,6 +9,25 @@ import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 final databaseProvider = Provider<AppDatabase?>((ref) => null);
 final playbackRuntimeProvider = Provider<PlaybackRuntime?>((ref) => null);
+
+/// Sleep timer shared across the reader and player pages. Stopping playback on
+/// expiry dismisses the media notification via [NovelAudioHandler.stop].
+///
+/// Widgets should observe the returned controller with a [ListenableBuilder]
+/// to react to countdown ticks.
+final sleepTimerControllerProvider = Provider<SleepTimerController>((ref) {
+  final runtime = ref.watch(playbackRuntimeProvider);
+  final controller = SleepTimerController(
+    onExpire: () async {
+      await runtime?.handler.stop();
+    },
+    currentChapterId: () => runtime?.currentCursor?.chapterId,
+    cursorChanges: () =>
+        runtime?.cursorChanges ?? const Stream<PlaybackCursor?>.empty(),
+  );
+  ref.onDispose(controller.dispose);
+  return controller;
+});
 
 Future<VoiceProfile> loadActiveVoiceProfile(AppDatabase database) async {
   final query = database.select(database.voiceProfiles)

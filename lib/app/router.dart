@@ -23,6 +23,7 @@ import 'package:novel_voice_reader/features/playback/data/background_audio_handl
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/playback/presentation/player_page.dart';
+import 'package:novel_voice_reader/features/playback/presentation/sleep_timer_button.dart';
 import 'package:novel_voice_reader/features/reader/application/reader_chapter_window_controller.dart';
 import 'package:novel_voice_reader/features/reader/data/reading_progress_repository.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
@@ -461,6 +462,7 @@ final class _PlayerRoutePage extends ConsumerWidget {
       error: (_, _) => const Scaffold(body: Center(child: Text('播放器加载失败'))),
       data: (value) => PlayerPage(
         bookTitle: value.book.title,
+        actions: const [SleepTimerButton()],
         chapterTitle:
             value.chapters
                 .where((chapter) => chapter.id == value.savedCursor?.chapterId)

@@ -19,6 +19,7 @@ final class PlayerPage extends StatefulWidget {
     this.timelineChanges,
     this.initialSpeed = 1,
     this.onSpeedChanged,
+    this.actions = const <Widget>[],
   });
 
   final String bookTitle;
@@ -33,6 +34,9 @@ final class PlayerPage extends StatefulWidget {
   final Stream<PlaybackTimeline>? timelineChanges;
   final double initialSpeed;
   final Future<void> Function(double speed)? onSpeedChanged;
+
+  /// Extra AppBar actions (e.g. the sleep-timer button).
+  final List<Widget> actions;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
@@ -65,7 +69,7 @@ final class _PlayerPageState extends State<PlayerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('播放器')),
+      appBar: AppBar(title: const Text('播放器'), actions: widget.actions),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
