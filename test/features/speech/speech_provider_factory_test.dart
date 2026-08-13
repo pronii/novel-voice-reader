@@ -137,7 +137,7 @@ final class EmptySecureStore implements SecureKeyValueStore {
 
 final class FakeAudioPlaybackEngine implements AudioPlaybackEngine {
   @override
-  Stream<void> get completed => const Stream.empty();
+  Stream<String> get completed => const Stream.empty();
 
   @override
   Future<void> dispose() async {}

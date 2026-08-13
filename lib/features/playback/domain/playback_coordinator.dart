@@ -80,7 +80,12 @@ final class PlaybackCoordinator implements PlaybackController {
     this._onFailure,
   ) {
     _subscription = _provider.events.listen((event) {
-      unawaited(_handleSpeechEvent(event));
+      _speechEventTransactions = _speechEventTransactions.then(
+        (_) => _handleSpeechEvent(event),
+      );
+      unawaited(
+        _speechEventTransactions.catchError((Object _, StackTrace _) {}),
+      );
     });
     final provider = _provider;
     if (provider is TimedSpeechProvider) {
@@ -116,6 +121,7 @@ final class PlaybackCoordinator implements PlaybackController {
   int _continuationEpoch = 0;
   int? _activeContinuationEpoch;
   Future<void> _providerTransactions = Future<void>.value();
+  Future<void> _speechEventTransactions = Future<void>.value();
   Future<void>? _activePrefetch;
   int? _queuedPrefetchEpoch;
   bool _disposing = false;
@@ -210,6 +216,7 @@ final class PlaybackCoordinator implements PlaybackController {
     _queuedPrefetchEpoch = null;
     try {
       await _subscription.cancel();
+      await _speechEventTransactions;
       await _timelineSubscription?.cancel();
       await _activePrefetch;
       final provider = _provider;

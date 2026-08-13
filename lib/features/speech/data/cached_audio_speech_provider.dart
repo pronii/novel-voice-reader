@@ -11,7 +11,7 @@ import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart'
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 abstract interface class AudioPlaybackEngine {
-  Stream<void> get completed;
+  Stream<String> get completed;
 
   Future<void> setFilePath(String path);
 
@@ -53,11 +53,19 @@ final class JustAudioPlaybackEngine
   final List<String> _queuedPaths = [];
 
   @override
-  Stream<void> get completed => Stream<void>.multi((controller) {
+  Stream<String> get completed => Stream<String>.multi((controller) {
     var previousIndex = _player.currentIndex ?? 0;
     final indexSubscription = _player.currentIndexStream.listen((index) {
       if (index != null && index > previousIndex) {
-        controller.add(null);
+        final sequence = _player.sequence;
+        for (var completedIndex = previousIndex;
+            completedIndex < index && completedIndex < sequence.length;
+            completedIndex++) {
+          final uri = sequence[completedIndex].tag as String?;
+          if (uri != null) {
+            controller.add(uri);
+          }
+        }
       }
       if (index != null) {
         previousIndex = index;
@@ -65,7 +73,10 @@ final class JustAudioPlaybackEngine
     }, onError: controller.addError);
     final stateSubscription = _player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed && _player.currentIndex == 0) {
-        controller.add(null);
+        final path = _player.sequence.firstOrNull?.tag as String?;
+        if (path != null) {
+          controller.add(path);
+        }
       }
     }, onError: controller.addError);
     controller.onCancel = () async {
@@ -83,7 +94,7 @@ final class JustAudioPlaybackEngine
   @override
   Future<void> setFilePath(String path) async {
     _queuedPaths.clear();
-    await _player.setFilePath(path);
+    await _player.setAudioSource(AudioSource.file(path, tag: path));
   }
 
   @override
@@ -91,7 +102,7 @@ final class JustAudioPlaybackEngine
     if (_queuedPaths.contains(path)) {
       return;
     }
-    await _player.addAudioSource(AudioSource.file(path));
+    await _player.addAudioSource(AudioSource.file(path, tag: path));
     _queuedPaths.add(path);
   }
 
@@ -140,13 +151,14 @@ final class CachedAudioSpeechProvider
   final AudioCacheRepository cache;
   final AudioPlaybackEngine engine;
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
-  late final StreamSubscription<void> _completionSubscription;
+  late final StreamSubscription<String> _completionSubscription;
   final Map<String, Future<File>> _inFlight = {};
   Future<void> _sourceUpdates = Future<void>.value();
   SpeechSegment? _segment;
   bool _started = false;
   int _prepareGeneration = 0;
   final List<String> _queuedSegmentIds = [];
+  final Map<String, SpeechSegment> _segmentsByPath = {};
   bool _nativePlaybackActive = false;
 
   @override
@@ -165,6 +177,7 @@ final class CachedAudioSpeechProvider
     final generation = ++_prepareGeneration;
     try {
       final file = await _obtain(segment, profile);
+      _segmentsByPath[file.path] = segment;
       if (generation != _prepareGeneration) {
         return;
       }
@@ -211,6 +224,7 @@ final class CachedAudioSpeechProvider
   Future<void> prefetch(SpeechSegment segment, VoiceProfile profile) async {
     final generation = _prepareGeneration;
     final file = await _obtain(segment, profile);
+    _segmentsByPath[file.path] = segment;
     if (generation != _prepareGeneration) {
       return;
     }
@@ -282,8 +296,8 @@ final class CachedAudioSpeechProvider
     await _events.close();
   }
 
-  void _onCompleted() {
-    final segment = _segment;
+  void _onCompleted([String? path]) {
+    final segment = path == null ? _segment : _segmentsByPath[path];
     if (segment != null) {
       _started = false;
       _events.add(SpeechCompleted(segmentId: segment.id));

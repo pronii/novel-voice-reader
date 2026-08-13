@@ -429,7 +429,7 @@ final class ControllableCloudSpeechSynthesizer
 
 class FakeAudioPlaybackEngine
     implements AudioPlaybackEngine, TimedAudioPlaybackEngine {
-  final _completed = StreamController<void>.broadcast(sync: true);
+  final _completed = StreamController<String>.broadcast(sync: true);
   final _timeline = StreamController<PlaybackTimeline>.broadcast(sync: true);
   String? filePath;
   int playCalls = 0;
@@ -439,7 +439,7 @@ class FakeAudioPlaybackEngine
   final List<String> filePaths = [];
 
   @override
-  Stream<void> get completed => _completed.stream;
+  Stream<String> get completed => _completed.stream;
 
   @override
   Stream<PlaybackTimeline> get playbackTimeline => _timeline.stream;
@@ -472,7 +472,12 @@ class FakeAudioPlaybackEngine
     await _timeline.close();
   }
 
-  void complete() => _completed.add(null);
+  void complete() {
+    final path = filePath;
+    if (path != null) {
+      _completed.add(path);
+    }
+  }
 
   void publishTimeline(PlaybackTimeline timeline) => _timeline.add(timeline);
 }
@@ -498,7 +503,10 @@ final class QueuedFakeAudioPlaybackEngine extends FakeAudioPlaybackEngine
   void advanceToQueued({bool completed = false}) {
     _activeQueuedPath = queuedPaths.first;
     _queuedCompleted = completed;
-    complete();
+    final currentPath = filePath;
+    if (currentPath != null) {
+      _completed.add(currentPath);
+    }
   }
 
   @override
