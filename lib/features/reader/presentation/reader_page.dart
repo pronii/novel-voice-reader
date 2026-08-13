@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:novel_voice_reader/features/reader/application/auto_scroll_controller.dart';
 import 'package:novel_voice_reader/features/reader/application/reader_chapter_window_controller.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/domain/reader_content.dart';
@@ -67,6 +68,11 @@ final class ReaderPage extends StatefulWidget {
 final class _ReaderPageState extends State<ReaderPage> {
   final ItemPositionsListener _itemPositions = ItemPositionsListener.create();
   final ItemScrollController _itemScrollController = ItemScrollController();
+  final ScrollOffsetController _scrollOffsetController =
+      ScrollOffsetController();
+  late final AutoScrollController _autoScroll = AutoScrollController(
+    onAdvance: _advanceAutoScroll,
+  );
   Timer? _progressDebounce;
   ReaderParagraph? _pendingProgressParagraph;
   int? _activeParagraphId;
@@ -106,6 +112,7 @@ final class _ReaderPageState extends State<ReaderPage> {
     super.initState();
     _resetNavigationState();
     _itemPositions.itemPositions.addListener(_onItemPositionsChanged);
+    _autoScroll.addListener(_onAutoScrollChanged);
     if (widget.playbackCursor != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -142,6 +149,10 @@ final class _ReaderPageState extends State<ReaderPage> {
   @override
   void dispose() {
     _itemPositions.itemPositions.removeListener(_onItemPositionsChanged);
+    // Leaving the reader must stop the crawl so it never keeps scrolling in the
+    // background after the page is gone.
+    _autoScroll.removeListener(_onAutoScrollChanged);
+    _autoScroll.dispose();
     final pendingParagraph = _pendingProgressParagraph;
     _progressDebounce?.cancel();
     _progressDebounce = null;
@@ -175,6 +186,7 @@ final class _ReaderPageState extends State<ReaderPage> {
                       child: ScrollablePositionedList.builder(
                         initialScrollIndex: _initialScrollIndex,
                         itemScrollController: _itemScrollController,
+                        scrollOffsetController: _scrollOffsetController,
                         itemPositionsListener: _itemPositions,
                         itemCount: items.length,
                         itemBuilder: (context, index) =>
@@ -213,6 +225,17 @@ final class _ReaderPageState extends State<ReaderPage> {
                                 ? null
                                 : _showChapterList,
                             icon: const Icon(Icons.format_list_numbered),
+                          ),
+                          IconButton(
+                            tooltip: _autoScroll.isRunning
+                                ? '暂停自动滚动'
+                                : '自动滚动',
+                            onPressed: _toggleAutoScroll,
+                            icon: Icon(
+                              _autoScroll.isRunning
+                                  ? Icons.pause
+                                  : Icons.keyboard_double_arrow_down,
+                            ),
                           ),
                           IconButton(
                             tooltip: '阅读设置',
@@ -284,6 +307,36 @@ final class _ReaderPageState extends State<ReaderPage> {
     _bodyPointerId = null;
     _bodyPointerDownPosition = null;
     _bodyPointerTapEligible = false;
+  }
+
+  void _toggleAutoScroll() {
+    if (_items.isEmpty) {
+      return;
+    }
+    _autoScroll.toggle();
+  }
+
+  // Rebuild so the toolbar's auto-scroll button reflects the current status.
+  void _onAutoScrollChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  // Fired on every auto-scroll tick: nudge the list down by [offset] pixels
+  // over [duration]. Chaining these short linear animations yields a steady
+  // crawl the reader does not have to swipe for.
+  void _advanceAutoScroll(double offset, Duration duration) {
+    if (!mounted || !_itemScrollController.isAttached) {
+      return;
+    }
+    unawaited(
+      _scrollOffsetController.animateScroll(
+        offset: offset,
+        duration: duration,
+        curve: Curves.linear,
+      ),
+    );
   }
 
   Widget _buildItem(BuildContext context, ReaderContentItem item) {
@@ -431,6 +484,9 @@ final class _ReaderPageState extends State<ReaderPage> {
     if (notification is ScrollStartNotification &&
         notification.dragDetails != null) {
       _playbackFollow = false;
+      // A manual swipe should hand control back to the reader, so stop the
+      // crawl instead of fighting the drag.
+      _autoScroll.pause();
     } else if (notification is ScrollUpdateNotification) {
       final scrollDelta = notification.scrollDelta;
       if (scrollDelta != null && scrollDelta != 0) {
@@ -845,11 +901,77 @@ final class _ReaderPageState extends State<ReaderPage> {
                     setSheetState(() {});
                   },
                 ),
+                const SizedBox(height: 8),
+                _buildAutoScrollSettings(context),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildAutoScrollSettings(BuildContext context) {
+    return ListenableBuilder(
+      listenable: _autoScroll,
+      builder: (context, _) {
+        final running = _autoScroll.isRunning;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  '自动滚动',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const Spacer(),
+                Text(
+                  '速度：${_autoScroll.speedBand.label}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                const Icon(Icons.directions_walk, size: 20),
+                Expanded(
+                  child: Slider(
+                    value: _autoScroll.speed,
+                    min: AutoScrollController.minSpeed,
+                    max: AutoScrollController.maxSpeed,
+                    divisions: 28,
+                    label: _autoScroll.speedBand.label,
+                    onChanged: (value) => _autoScroll.speed = value,
+                  ),
+                ),
+                const Icon(Icons.directions_run, size: 20),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: _items.isEmpty ? null : _autoScroll.toggle,
+                    icon: Icon(running ? Icons.pause : Icons.play_arrow),
+                    label: Text(running ? '暂停' : '开始'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton.icon(
+                  onPressed: _autoScroll.status == AutoScrollStatus.idle
+                      ? null
+                      : _autoScroll.stop,
+                  icon: const Icon(Icons.stop),
+                  label: const Text('停止'),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 }
