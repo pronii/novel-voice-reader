@@ -602,6 +602,9 @@ Future<void> _selectVoiceProvider(
 }
 
 Future<void> _showReaderToolbar(WidgetTester tester) async {
+  // A body tap (e.g. selecting a paragraph) may have just toggled the toolbar,
+  // so settle its slide animation before inspecting or tapping it.
+  await tester.pumpAndSettle();
   final toolbar = find.byKey(const Key('reader-toolbar'));
   final pointerGate = find.descendant(
     of: toolbar,
