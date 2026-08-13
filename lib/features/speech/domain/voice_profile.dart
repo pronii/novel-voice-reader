@@ -1,14 +1,6 @@
-enum SpeechProviderType { system, cloud, azure, zhipu, tencent, mimo }
+enum SpeechProviderType { system, cloud, mimo }
 
 final class VoiceProfile {
-  static const defaultAzureVoice = 'zh-CN-XiaoxiaoNeural';
-  static const defaultAzureOutputFormat = 'audio-24khz-48kbitrate-mono-mp3';
-  static const zhipuBaseUrl = 'https://open.bigmodel.cn/api/paas/v4';
-  static const zhipuModel = 'glm-tts';
-  static const zhipuOutputFormat = 'wav';
-  static const tencentBaseUrl = 'https://tts.tencentcloudapi.com';
-  static const defaultTencentVoiceType = 1001;
-  static const defaultZhipuVoice = 'tongtong';
   static const mimoBaseUrl = 'https://api.xiaomimimo.com';
   static const mimoModel = 'mimo-v2.5-tts';
   static const defaultMiMoVoice = '冰糖';
@@ -21,15 +13,6 @@ final class VoiceProfile {
     'Chloe',
     'Milo',
     'Dean',
-  ];
-  static const zhipuVoices = <String>[
-    'tongtong',
-    'chuichui',
-    'xiaochen',
-    'jam',
-    'kazi',
-    'douji',
-    'luodo',
   ];
 
   factory VoiceProfile.system({
@@ -61,67 +44,6 @@ final class VoiceProfile {
       voice: voice,
       speed: speed,
       outputFormat: outputFormat,
-    );
-  }
-
-  factory VoiceProfile.azure({
-    required String region,
-    String voice = defaultAzureVoice,
-    double speed = 1,
-    String outputFormat = defaultAzureOutputFormat,
-  }) {
-    _validateSpeed(speed);
-    final normalizedRegion = region.trim().toLowerCase();
-    if (!RegExp(r'^[a-z0-9]+$').hasMatch(normalizedRegion)) {
-      throw ArgumentError.value(region, 'region', 'Must be an Azure region.');
-    }
-    final normalizedVoice = voice.trim();
-    if (normalizedVoice.isEmpty) {
-      throw ArgumentError.value(voice, 'voice', 'Must not be empty.');
-    }
-    return VoiceProfile._(
-      providerType: SpeechProviderType.azure,
-      baseUrl: 'https://$normalizedRegion.tts.speech.microsoft.com',
-      voice: normalizedVoice,
-      speed: speed,
-      outputFormat: outputFormat.trim(),
-    );
-  }
-
-  factory VoiceProfile.zhipu({
-    String voice = defaultZhipuVoice,
-    double speed = 1,
-  }) {
-    _validateSpeed(speed);
-    final normalizedVoice = voice.trim().toLowerCase();
-    if (!zhipuVoices.contains(normalizedVoice)) {
-      throw ArgumentError.value(voice, 'voice', 'Unsupported Zhipu voice.');
-    }
-    return VoiceProfile._(
-      providerType: SpeechProviderType.zhipu,
-      baseUrl: zhipuBaseUrl,
-      model: zhipuModel,
-      voice: normalizedVoice,
-      speed: speed,
-      outputFormat: zhipuOutputFormat,
-    );
-  }
-
-  factory VoiceProfile.tencent({
-    int voiceType = defaultTencentVoiceType,
-    double speed = 1,
-  }) {
-    _validateSpeed(speed);
-    if (voiceType <= 0) {
-      throw ArgumentError.value(voiceType, 'voiceType', 'Must be positive.');
-    }
-    return VoiceProfile._(
-      providerType: SpeechProviderType.tencent,
-      baseUrl: tencentBaseUrl,
-      model: '1',
-      voice: voiceType.toString(),
-      speed: speed,
-      outputFormat: 'mp3',
     );
   }
 
@@ -177,12 +99,10 @@ final class VoiceProfile {
     return value.replaceFirst(RegExp(r'/+$'), '');
   }
 
-  int get maxSegmentCharacters =>
-      switch (providerType) {
-        SpeechProviderType.tencent => 150,
-        SpeechProviderType.mimo => 360,
-        _ => 1000,
-      };
+  int get maxSegmentCharacters => switch (providerType) {
+    SpeechProviderType.mimo => 360,
+    _ => 1000,
+  };
 
   static void _validateSpeed(double speed) {
     if (speed <= 0) {

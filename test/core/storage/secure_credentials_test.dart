@@ -22,100 +22,58 @@ void main() {
     expect(await credentials.readApiKey(), isNull);
   });
 
-  test('Azure subscription key uses a separate secure value', () async {
-    final store = FakeSecureKeyValueStore();
-    final credentials = SecureCredentials(store);
-    await credentials.writeApiKey('compatible-secret');
-
-    await credentials.writeAzureSubscriptionKey('azure-secret');
-
-    expect(await credentials.readApiKey(), 'compatible-secret');
-    expect(await credentials.readAzureSubscriptionKey(), 'azure-secret');
-    expect(store.values.keys, {
-      'cloud_tts_api_key',
-      'azure_tts_subscription_key',
-    });
-
-    await credentials.deleteAzureSubscriptionKey();
-
-    expect(await credentials.readAzureSubscriptionKey(), isNull);
-    expect(await credentials.readApiKey(), 'compatible-secret');
-  });
-
-  test('Zhipu API key uses a separate secure value', () async {
-    final store = FakeSecureKeyValueStore();
-    final credentials = SecureCredentials(store);
-    await credentials.writeApiKey('compatible-secret');
-    await credentials.writeAzureSubscriptionKey('azure-secret');
-
-    await credentials.writeZhipuApiKey('zhipu-secret');
-
-    expect(await credentials.readZhipuApiKey(), 'zhipu-secret');
-    expect(await credentials.readApiKey(), 'compatible-secret');
-    expect(await credentials.readAzureSubscriptionKey(), 'azure-secret');
-    expect(store.values.keys, {
-      'cloud_tts_api_key',
-      'azure_tts_subscription_key',
-      'zhipu_tts_api_key',
-    });
-
-    await credentials.deleteZhipuApiKey();
-
-    expect(await credentials.readZhipuApiKey(), isNull);
-    expect(await credentials.readApiKey(), 'compatible-secret');
-    expect(await credentials.readAzureSubscriptionKey(), 'azure-secret');
-  });
-
-  test('normalizes cloud credentials at the secure storage boundary', () async {
+  test('normalizes the cloud API key at the secure storage boundary', () async {
     final store = FakeSecureKeyValueStore();
     final credentials = SecureCredentials(store);
 
     await credentials.writeApiKey('  compatible-secret  ');
-    await credentials.writeAzureSubscriptionKey('  azure-secret  ');
-    await credentials.writeZhipuApiKey('  zhipu-secret  ');
 
     expect(await credentials.readApiKey(), 'compatible-secret');
-    expect(await credentials.readAzureSubscriptionKey(), 'azure-secret');
-    expect(await credentials.readZhipuApiKey(), 'zhipu-secret');
-  });
-
-  test('Tencent credentials use separate secure values', () async {
-    final store = FakeSecureKeyValueStore();
-    final credentials = SecureCredentials(store);
-
-    await credentials.writeTencentSecretId('  tencent-id  ');
-    await credentials.writeTencentSecretKey('  tencent-key  ');
-
-    expect(await credentials.readTencentSecretId(), 'tencent-id');
-    expect(await credentials.readTencentSecretKey(), 'tencent-key');
-    expect(store.values.keys, {
-      'tencent_tts_secret_id',
-      'tencent_tts_secret_key',
-    });
-
-    await credentials.deleteTencentSecretId();
-
-    expect(await credentials.readTencentSecretId(), isNull);
-    expect(await credentials.readTencentSecretKey(), 'tencent-key');
-
-    await credentials.deleteTencentSecretKey();
-    expect(await credentials.readTencentSecretKey(), isNull);
   });
 
   test('MiMo API key uses a separate normalized secure value', () async {
     final store = FakeSecureKeyValueStore();
     final credentials = SecureCredentials(store);
-    await credentials.writeZhipuApiKey('zhipu-secret');
+    await credentials.writeApiKey('compatible-secret');
 
     await credentials.writeMiMoApiKey('  mimo-secret  ');
 
     expect(await credentials.readMiMoApiKey(), 'mimo-secret');
-    expect(await credentials.readZhipuApiKey(), 'zhipu-secret');
-    expect(store.values.keys, {'zhipu_tts_api_key', 'mimo_tts_api_key'});
+    expect(await credentials.readApiKey(), 'compatible-secret');
+    expect(store.values.keys, {'cloud_tts_api_key', 'mimo_tts_api_key'});
 
     await credentials.deleteMiMoApiKey();
     expect(await credentials.readMiMoApiKey(), isNull);
-    expect(await credentials.readZhipuApiKey(), 'zhipu-secret');
+    expect(await credentials.readApiKey(), 'compatible-secret');
+  });
+
+  test('runWithMiMoApiKeyUpdate restores the previous key on failure', () async {
+    final store = FakeSecureKeyValueStore();
+    final credentials = SecureCredentials(store);
+    await credentials.writeMiMoApiKey('old-secret');
+
+    await expectLater(
+      credentials.runWithMiMoApiKeyUpdate<void>(
+        apiKey: 'new-secret',
+        commit: () async => throw StateError('boom'),
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    expect(await credentials.readMiMoApiKey(), 'old-secret');
+  });
+
+  test('runWithMiMoApiKeyUpdate keeps the new key on success', () async {
+    final store = FakeSecureKeyValueStore();
+    final credentials = SecureCredentials(store);
+
+    final result = await credentials.runWithMiMoApiKeyUpdate<String>(
+      apiKey: 'new-secret',
+      commit: () async => 'done',
+    );
+
+    expect(result, 'done');
+    expect(await credentials.readMiMoApiKey(), 'new-secret');
   });
 }
 

@@ -4,7 +4,6 @@ import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
-import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 void main() {
@@ -49,9 +48,21 @@ void main() {
     final books = await database.select(database.books).get();
     expect(books.single.title, '旧版小说');
 
-    final usage = TencentTtsUsageRepository(database);
-    await usage.setMonthlyQuota(1000);
-    expect((await usage.current()).quotaCharacters, 1000);
+    // The v1->v2 migration must create the monthly-usage table; inserting a
+    // row would throw if the table were missing.
+    await database
+        .into(database.tencentTtsMonthlyUsages)
+        .insert(
+          TencentTtsMonthlyUsagesCompanion.insert(
+            period: '2026-08',
+            quotaCharacters: const Value(1000),
+            updatedAt: DateTime.now(),
+          ),
+        );
+    final usage = await database
+        .select(database.tencentTtsMonthlyUsages)
+        .getSingle();
+    expect(usage.quotaCharacters, 1000);
   });
 
   test('upgrades v2 voice profiles with a nullable narration style', () async {

@@ -79,7 +79,7 @@ void main() {
     expect(directory.listSync(), isEmpty);
   });
 
-  test('stores Azure MP3 output formats with an mp3 extension', () async {
+  test('stores cloud MP3 output formats with an mp3 extension', () async {
     final directory = await Directory.systemTemp.createTemp('voice-cache-test');
     addTearDown(() async {
       if (await directory.exists()) {
@@ -90,7 +90,13 @@ void main() {
       directory: directory,
       synthesizer: FakeCloudSpeechSynthesizer(validMp3Bytes),
     );
-    final profile = VoiceProfile.azure(region: 'eastasia');
+    final profile = VoiceProfile.cloud(
+      baseUrl: 'https://example.com',
+      model: 'tts-model',
+      voice: 'voice-a',
+      speed: 1,
+      outputFormat: 'mp3',
+    );
 
     final file = await repository.obtain(testSegment, profile);
 
@@ -98,7 +104,7 @@ void main() {
     expect(await file.readAsBytes(), validMp3Bytes);
   });
 
-  test('stores Zhipu WAV output with a wav extension', () async {
+  test('stores MiMo WAV output with a wav extension', () async {
     final directory = await Directory.systemTemp.createTemp('voice-cache-test');
     addTearDown(() async {
       if (await directory.exists()) {
@@ -110,7 +116,7 @@ void main() {
       synthesizer: FakeCloudSpeechSynthesizer(validWavBytes),
     );
 
-    final file = await repository.obtain(testSegment, VoiceProfile.zhipu());
+    final file = await repository.obtain(testSegment, VoiceProfile.mimo());
 
     expect(file.path, endsWith('.wav'));
     expect(await file.readAsBytes(), validWavBytes);

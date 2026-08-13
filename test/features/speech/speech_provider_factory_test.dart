@@ -3,112 +3,67 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
-import 'package:novel_voice_reader/features/speech/data/azure_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
+import 'package:novel_voice_reader/features/speech/data/cloud_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
-import 'package:novel_voice_reader/features/speech/data/tencent_tts_client.dart';
-import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
-import 'package:novel_voice_reader/features/speech/data/zhipu_tts_client.dart';
+import 'package:novel_voice_reader/features/speech/data/system_tts_adapter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
-  test('creates cached Azure playback for an Azure profile', () async {
-    final directory = await Directory.systemTemp.createTemp(
-      'provider-factory-',
-    );
+  Future<Directory> createTempCacheDirectory() async {
+    final directory = await Directory.systemTemp.createTemp('provider-factory-');
     addTearDown(() async {
       if (await directory.exists()) {
         await directory.delete(recursive: true);
       }
     });
-    final factory = SpeechProviderFactory(
+    return directory;
+  }
+
+  SpeechProviderFactory buildFactory(Directory directory) {
+    return SpeechProviderFactory(
       dio: Dio(),
       credentials: SecureCredentials(EmptySecureStore()),
       cacheDirectory: directory,
-      tencentUsageCounter: FakeTencentUsageCounter(),
+      systemEngineFactory: FakeSystemTtsEngine.new,
       audioEngineFactory: FakeAudioPlaybackEngine.new,
     );
+  }
 
-    final provider = factory.create(VoiceProfile.azure(region: 'eastasia'));
+  test('creates a system adapter for a system profile', () async {
+    final directory = await createTempCacheDirectory();
+    final factory = buildFactory(directory);
 
-    expect(provider, isA<CachedAudioSpeechProvider>());
-    final cached = provider as CachedAudioSpeechProvider;
-    expect(cached.cache.synthesizer, isA<AzureTtsClient>());
-    await cached.dispose();
+    final provider = factory.create(VoiceProfile.system());
+
+    expect(provider, isA<SystemTtsAdapter>());
+    await (provider as SystemTtsAdapter).dispose();
   });
 
-  test('creates cached Zhipu playback for a Zhipu profile', () async {
-    final directory = await Directory.systemTemp.createTemp(
-      'provider-factory-',
-    );
-    addTearDown(() async {
-      if (await directory.exists()) {
-        await directory.delete(recursive: true);
-      }
-    });
-    final factory = SpeechProviderFactory(
-      dio: Dio(),
-      credentials: SecureCredentials(EmptySecureStore()),
-      cacheDirectory: directory,
-      tencentUsageCounter: FakeTencentUsageCounter(),
-      audioEngineFactory: FakeAudioPlaybackEngine.new,
-    );
+  test('creates cached cloud playback for a cloud profile', () async {
+    final directory = await createTempCacheDirectory();
+    final factory = buildFactory(directory);
 
-    final provider = factory.create(VoiceProfile.zhipu());
+    final provider = factory.create(
+      VoiceProfile.cloud(
+        baseUrl: 'https://api.example.com',
+        model: 'tts-1',
+        voice: 'alloy',
+        speed: 1,
+        outputFormat: 'mp3',
+      ),
+    );
 
     expect(provider, isA<CachedAudioSpeechProvider>());
     final cached = provider as CachedAudioSpeechProvider;
-    expect(cached.cache.synthesizer, isA<ZhipuTtsClient>());
-    await cached.dispose();
-  });
-
-  test('creates cached Tencent playback for a Tencent profile', () async {
-    final directory = await Directory.systemTemp.createTemp(
-      'provider-factory-',
-    );
-    addTearDown(() async {
-      if (await directory.exists()) {
-        await directory.delete(recursive: true);
-      }
-    });
-    final usageCounter = FakeTencentUsageCounter();
-    final factory = SpeechProviderFactory(
-      dio: Dio(),
-      credentials: SecureCredentials(EmptySecureStore()),
-      cacheDirectory: directory,
-      tencentUsageCounter: usageCounter,
-      audioEngineFactory: FakeAudioPlaybackEngine.new,
-    );
-
-    final provider = factory.create(VoiceProfile.tencent());
-
-    expect(provider, isA<CachedAudioSpeechProvider>());
-    final cached = provider as CachedAudioSpeechProvider;
-    expect(cached.cache.synthesizer, isA<TencentTtsClient>());
-    expect(
-      (cached.cache.synthesizer as TencentTtsClient).usageCounter,
-      same(usageCounter),
-    );
+    expect(cached.cache.synthesizer, isA<CloudTtsClient>());
     await cached.dispose();
   });
 
   test('creates cached MiMo playback for a MiMo profile', () async {
-    final directory = await Directory.systemTemp.createTemp(
-      'provider-factory-',
-    );
-    addTearDown(() async {
-      if (await directory.exists()) {
-        await directory.delete(recursive: true);
-      }
-    });
-    final factory = SpeechProviderFactory(
-      dio: Dio(),
-      credentials: SecureCredentials(EmptySecureStore()),
-      cacheDirectory: directory,
-      tencentUsageCounter: FakeTencentUsageCounter(),
-      audioEngineFactory: FakeAudioPlaybackEngine.new,
-    );
+    final directory = await createTempCacheDirectory();
+    final factory = buildFactory(directory);
 
     final provider = factory.create(VoiceProfile.mimo());
 
@@ -117,11 +72,6 @@ void main() {
     expect(cached.cache.synthesizer, isA<MiMoTtsClient>());
     await cached.dispose();
   });
-}
-
-final class FakeTencentUsageCounter implements TencentTtsUsageCounter {
-  @override
-  Future<void> addSuccessfulCharacters(int count) async {}
 }
 
 final class EmptySecureStore implements SecureKeyValueStore {
@@ -133,6 +83,29 @@ final class EmptySecureStore implements SecureKeyValueStore {
 
   @override
   Future<void> write(String key, String value) async {}
+}
+
+final class FakeSystemTtsEngine implements SystemTtsEngine {
+  @override
+  Future<void> configure(VoiceProfile profile) async {}
+
+  @override
+  Future<void> pause() async {}
+
+  @override
+  void setCompletionHandler(void Function() handler) {}
+
+  @override
+  void setErrorHandler(void Function(Object error) handler) {}
+
+  @override
+  void setStartHandler(void Function() handler) {}
+
+  @override
+  Future<void> speak(String text) async {}
+
+  @override
+  Future<void> stop() async {}
 }
 
 final class FakeAudioPlaybackEngine implements AudioPlaybackEngine {

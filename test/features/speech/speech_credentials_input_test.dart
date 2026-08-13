@@ -2,15 +2,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_credentials_input.dart';
 
 void main() {
-  test('normalizes provider credentials without joining Tencent secrets', () {
-    const input = SpeechCredentialsInput(
-      apiKey: ' cloud-key ',
-      secretId: ' tencent-id ',
-      secretKey: ' tencent-key ',
-    );
+  test('normalizes the API key by trimming whitespace', () {
+    const input = SpeechCredentialsInput(apiKey: ' cloud-key ');
 
     expect(input.normalizedApiKey, 'cloud-key');
-    expect(input.normalizedSecretId, 'tencent-id');
-    expect(input.normalizedSecretKey, 'tencent-key');
+  });
+
+  test('treats a blank API key as null', () {
+    const input = SpeechCredentialsInput(apiKey: '   ');
+
+    expect(input.normalizedApiKey, isNull);
+  });
+
+  test('treats a missing API key as null', () {
+    const input = SpeechCredentialsInput();
+
+    expect(input.normalizedApiKey, isNull);
   });
 }

@@ -146,13 +146,13 @@ void main() {
   test('a continuation cannot borrow a newer request generation', () async {
     final provider = ControllablePrepareSpeechProvider();
     final paragraphs = ControllableTakeoverChapterSource(
-      activeText: List.filled(151, '旧').join(),
+      activeText: List.filled(361, '旧').join(),
     );
     final coordinator = PlaybackCoordinator(
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: paragraphs,
-      voiceProfile: VoiceProfile.tencent(),
+      voiceProfile: VoiceProfile.mimo(),
     );
     const activeCursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
     const takeoverCursor = PlaybackCursor(chapterId: 2, paragraphIndex: 0);
@@ -182,7 +182,7 @@ void main() {
     );
     expect(
       provider.played.map((segment) => segment.text),
-      [List.filled(150, '旧').join(), '新段落'],
+      [List.filled(360, '旧').join(), '新段落'],
     );
     expect(provider.currentSegment?.text, '新段落');
     expect(coordinator.cursor, takeoverCursor);
@@ -294,8 +294,8 @@ void main() {
     final coordinator = PlaybackCoordinator(
       provider: provider,
       progress: FakeProgressRepository(),
-      paragraphs: FakeParagraphSource([List.filled(151, '文').join()]),
-      voiceProfile: VoiceProfile.tencent(),
+      paragraphs: FakeParagraphSource([List.filled(361, '文').join()]),
+      voiceProfile: VoiceProfile.mimo(),
     );
     await coordinator.setSpeed(1.25);
 
@@ -309,19 +309,19 @@ void main() {
     await coordinator.dispose();
   });
 
-  test('splits Tencent playback into at most 150 characters', () async {
+  test('splits MiMo playback into at most 360 characters', () async {
     final provider = FakeSpeechProvider();
     final coordinator = PlaybackCoordinator(
       provider: provider,
       progress: FakeProgressRepository(),
-      paragraphs: FakeParagraphSource([List.filled(151, '文').join()]),
-      voiceProfile: VoiceProfile.tencent(),
+      paragraphs: FakeParagraphSource([List.filled(361, '文').join()]),
+      voiceProfile: VoiceProfile.mimo(),
     );
 
     await coordinator.playFrom(
       const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
     );
-    expect(provider.prepared.single.text.runes.length, 150);
+    expect(provider.prepared.single.text.runes.length, 360);
 
     provider.completeCurrent();
     await pumpEventQueue();
@@ -434,14 +434,14 @@ void main() {
   test('keeps active playback when a newer paragraph lookup fails', () async {
     final provider = FakeSpeechProvider();
     final paragraphs = FailingTakeoverParagraphSource(
-      activeText: List.filled(151, '旧').join(),
+      activeText: List.filled(361, '旧').join(),
       failLookup: true,
     );
     final coordinator = PlaybackCoordinator(
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: paragraphs,
-      voiceProfile: VoiceProfile.tencent(),
+      voiceProfile: VoiceProfile.mimo(),
     );
     final timelines = <PlaybackTimeline>[];
     final subscription = coordinator.timelineChanges.listen(timelines.add);
@@ -476,7 +476,7 @@ void main() {
 
     expect(
       provider.prepared.map((segment) => segment.text.runes.length),
-      [150, 1],
+      [360, 1],
     );
     await subscription.cancel();
     await coordinator.dispose();
@@ -485,14 +485,14 @@ void main() {
   test('keeps active playback when a newer chapter count fails', () async {
     final provider = FakeSpeechProvider();
     final paragraphs = FailingTakeoverParagraphSource(
-      activeText: List.filled(151, '旧').join(),
+      activeText: List.filled(361, '旧').join(),
       failChapterCount: true,
     );
     final coordinator = PlaybackCoordinator(
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: paragraphs,
-      voiceProfile: VoiceProfile.tencent(),
+      voiceProfile: VoiceProfile.mimo(),
     );
     final timelines = <PlaybackTimeline>[];
     final subscription = coordinator.timelineChanges.listen(timelines.add);
@@ -521,7 +521,7 @@ void main() {
 
     expect(
       provider.prepared.map((segment) => segment.text.runes.length),
-      [150, 1],
+      [360, 1],
     );
     await subscription.cancel();
     await coordinator.dispose();

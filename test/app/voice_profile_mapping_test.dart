@@ -6,22 +6,41 @@ import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
-  test('maps a stored Azure profile for active reader playback', () {
+  test('maps a stored system profile for active reader playback', () {
     const record = VoiceProfileRecord(
-      id: 4,
-      providerType: 'azure',
-      baseUrl: 'https://eastasia.tts.speech.microsoft.com',
-      voice: 'zh-CN-XiaoxiaoNeural',
+      id: 3,
+      providerType: 'system',
+      voice: 'zh-CN',
       speed: 1.2,
-      outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
+      pitch: 1.1,
     );
 
     final profile = voiceProfileFromRecord(record);
 
-    expect(profile.providerType, SpeechProviderType.azure);
+    expect(profile.providerType, SpeechProviderType.system);
+    expect(profile.voice, 'zh-CN');
+    expect(profile.speed, 1.2);
+  });
+
+  test('maps a stored cloud profile for active reader playback', () {
+    const record = VoiceProfileRecord(
+      id: 4,
+      providerType: 'cloud',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o-mini-tts',
+      voice: 'alloy',
+      speed: 0.9,
+      outputFormat: 'mp3',
+    );
+
+    final profile = voiceProfileFromRecord(record);
+
+    expect(profile.providerType, SpeechProviderType.cloud);
     expect(profile.normalizedBaseUrl, record.baseUrl);
-    expect(profile.voice, record.voice);
-    expect(profile.speed, record.speed);
+    expect(profile.model, 'gpt-4o-mini-tts');
+    expect(profile.voice, 'alloy');
+    expect(profile.speed, 0.9);
+    expect(profile.outputFormat, 'mp3');
   });
 
   test('loads the most recently saved profile for reader playback', () async {
@@ -34,66 +53,39 @@ void main() {
         .into(database.voiceProfiles)
         .insert(
           VoiceProfilesCompanion.insert(
-            providerType: 'azure',
-            baseUrl: const Value('https://eastasia.tts.speech.microsoft.com'),
-            voice: const Value('zh-CN-XiaoxiaoNeural'),
+            providerType: 'cloud',
+            baseUrl: const Value('https://api.openai.com/v1'),
+            model: const Value('gpt-4o-mini-tts'),
+            voice: const Value('alloy'),
             speed: const Value(1.1),
-            outputFormat: const Value('audio-24khz-48kbitrate-mono-mp3'),
+            outputFormat: const Value('mp3'),
           ),
         );
 
     final profile = await loadActiveVoiceProfile(database);
 
-    expect(profile.providerType, SpeechProviderType.azure);
+    expect(profile.providerType, SpeechProviderType.cloud);
     expect(profile.speed, 1.1);
   });
 
-  test('maps a stored Zhipu profile for active reader playback', () {
-    const record = VoiceProfileRecord(
-      id: 5,
-      providerType: 'zhipu',
-      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-      model: 'glm-tts',
-      voice: 'luodo',
-      speed: 0.9,
-      outputFormat: 'wav',
-    );
-
-    final profile = voiceProfileFromRecord(record);
-
-    expect(profile.providerType, SpeechProviderType.zhipu);
-    expect(profile.normalizedBaseUrl, record.baseUrl);
-    expect(profile.model, 'glm-tts');
-    expect(profile.voice, 'luodo');
-    expect(profile.speed, 0.9);
-    expect(profile.outputFormat, 'wav');
-  });
-
-  test('maps a stored Tencent profile for active reader playback', () {
+  test('falls back to system speech for an unknown provider type', () {
     const record = VoiceProfileRecord(
       id: 6,
-      providerType: 'tencent',
-      baseUrl: 'https://tts.tencentcloudapi.com',
-      model: '1',
+      providerType: 'legacy-provider',
       voice: '1001',
-      speed: 1.2,
-      outputFormat: 'mp3',
+      speed: 1,
     );
 
     final profile = voiceProfileFromRecord(record);
 
-    expect(profile.providerType, SpeechProviderType.tencent);
-    expect(profile.normalizedBaseUrl, VoiceProfile.tencentBaseUrl);
-    expect(profile.voice, '1001');
-    expect(profile.speed, 1.2);
-    expect(profile.outputFormat, 'mp3');
+    expect(profile.providerType, SpeechProviderType.system);
   });
 
-  test('falls back to system speech for a corrupt Tencent voice type', () {
+  test('falls back to system speech for a corrupt MiMo voice', () {
     const record = VoiceProfileRecord(
       id: 7,
-      providerType: 'tencent',
-      voice: 'not-a-number',
+      providerType: 'mimo',
+      voice: 'not-a-real-voice',
       speed: 1,
     );
 

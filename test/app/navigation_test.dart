@@ -11,7 +11,6 @@ import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
-import 'package:novel_voice_reader/features/speech/data/tencent_tts_usage_repository.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
@@ -367,131 +366,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1));
   });
 
-  testWidgets('persists Tencent voice and local monthly quota from settings', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(320, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    FlutterSecureStorage.setMockInitialValues({});
-    addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
-    final database = AppDatabase.forTesting(NativeDatabase.memory());
-
-    await tester.pumpWidget(NovelVoiceReaderApp(database: database));
-    await _pumpUntilFound(tester, find.byTooltip('语音设置'));
-    await tester.tap(find.byTooltip('语音设置'));
-    await _selectVoiceProvider(tester, '腾讯云');
-    await tester.enterText(
-      find.widgetWithText(TextField, '每月免费额度（字符）'),
-      '1000000',
-    );
-    await tester.drag(find.byType(ListView), const Offset(0, -500));
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.widgetWithText(FilledButton, '保存'));
-    await _pumpUntilFound(tester, find.text('语音设置已保存'));
-
-    final profiles = await database.select(database.voiceProfiles).get();
-    final usage = await TencentTtsUsageRepository(database).current();
-    expect(profiles.single.providerType, 'tencent');
-    expect(profiles.single.voice, '1001');
-    expect(usage.quotaCharacters, 1000000);
-
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 1));
-  });
-
-  testWidgets(
-    'rolls back Tencent settings when the second secret write fails',
-    (tester) async {
-      tester.view.physicalSize = const Size(320, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final secureValues = _FailOnceMap(const {
-        'tencent_tts_secret_id': 'old-id',
-        'tencent_tts_secret_key': 'old-key',
-      }, failingKey: 'tencent_tts_secret_key');
-      FlutterSecureStorage.setMockInitialValues(secureValues);
-      addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
-      final database = AppDatabase.forTesting(NativeDatabase.memory());
-
-      await tester.pumpWidget(NovelVoiceReaderApp(database: database));
-      await _openTencentSettings(tester);
-      await tester.enterText(
-        find.widgetWithText(TextField, 'SecretId'),
-        'new-id',
-      );
-      await tester.enterText(
-        find.widgetWithText(TextField, 'SecretKey'),
-        'new-key',
-      );
-      await tester.drag(find.byType(ListView), const Offset(0, -500));
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.tap(find.widgetWithText(FilledButton, '保存'));
-      await _pumpUntilFound(tester, find.text('语音设置保存失败'));
-
-      expect(await database.select(database.voiceProfiles).get(), isEmpty);
-      expect(secureValues['tencent_tts_secret_id'], 'old-id');
-      expect(secureValues['tencent_tts_secret_key'], 'old-key');
-
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 1));
-    },
-  );
-
-  testWidgets('rolls back the profile when Tencent quota persistence fails', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(320, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final secureValues = <String, String>{
-      'tencent_tts_secret_id': 'old-id',
-      'tencent_tts_secret_key': 'old-key',
-    };
-    FlutterSecureStorage.setMockInitialValues(secureValues);
-    addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
-    final database = AppDatabase.forTesting(NativeDatabase.memory());
-    await database.customStatement('''
-      CREATE TRIGGER fail_tencent_quota_insert
-      BEFORE INSERT ON tencent_tts_monthly_usages
-      BEGIN
-        SELECT RAISE(FAIL, 'quota write failed');
-      END;
-    ''');
-
-    await tester.pumpWidget(NovelVoiceReaderApp(database: database));
-    await _openTencentSettings(tester);
-    await tester.enterText(
-      find.widgetWithText(TextField, 'SecretId'),
-      'new-id',
-    );
-    await tester.enterText(
-      find.widgetWithText(TextField, 'SecretKey'),
-      'new-key',
-    );
-    await tester.enterText(
-      find.widgetWithText(TextField, '每月免费额度（字符）'),
-      '1000',
-    );
-    await tester.drag(find.byType(ListView), const Offset(0, -500));
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.widgetWithText(FilledButton, '保存'));
-    await tester.pumpAndSettle();
-
-    expect(await database.select(database.voiceProfiles).get(), isEmpty);
-    expect(secureValues['tencent_tts_secret_id'], 'old-id');
-    expect(secureValues['tencent_tts_secret_key'], 'old-key');
-
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 1));
-  });
-
   testWidgets('does not persist MiMo profile when secure key write fails', (
     tester,
   ) async {
@@ -707,12 +581,6 @@ Future<int> _createChapteredBook(
     }
   }
   return bookId;
-}
-
-Future<void> _openTencentSettings(WidgetTester tester) async {
-  await _pumpUntilFound(tester, find.byTooltip('语音设置'));
-  await tester.tap(find.byTooltip('语音设置'));
-  await _selectVoiceProvider(tester, '腾讯云');
 }
 
 Future<void> _openMiMoSettings(WidgetTester tester) async {

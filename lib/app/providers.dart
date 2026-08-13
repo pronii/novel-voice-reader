@@ -37,58 +37,9 @@ VoiceProfile voiceProfileFromRecord(VoiceProfileRecord? record) {
         speed: record.speed,
         outputFormat: record.outputFormat ?? 'mp3',
       ),
-    'azure' => _azureProfileFromRecord(record),
-    'zhipu' => _zhipuProfileFromRecord(record),
-    'tencent' => _tencentProfileFromRecord(record),
     'mimo' => _mimoProfileFromRecord(record),
     _ => VoiceProfile.system(),
   };
-}
-
-VoiceProfile _azureProfileFromRecord(VoiceProfileRecord record) {
-  final region = _azureRegion(record.baseUrl);
-  if (region == null) {
-    return VoiceProfile.system();
-  }
-  return VoiceProfile.azure(
-    region: region,
-    voice: record.voice ?? VoiceProfile.defaultAzureVoice,
-    speed: record.speed,
-    outputFormat: record.outputFormat ?? VoiceProfile.defaultAzureOutputFormat,
-  );
-}
-
-String? _azureRegion(String? baseUrl) {
-  final host = Uri.tryParse(baseUrl ?? '')?.host.toLowerCase() ?? '';
-  const suffix = '.tts.speech.microsoft.com';
-  if (!host.endsWith(suffix)) {
-    return null;
-  }
-  final region = host.substring(0, host.length - suffix.length);
-  return region.isEmpty ? null : region;
-}
-
-VoiceProfile _zhipuProfileFromRecord(VoiceProfileRecord record) {
-  try {
-    return VoiceProfile.zhipu(
-      voice: record.voice ?? VoiceProfile.defaultZhipuVoice,
-      speed: record.speed,
-    );
-  } on ArgumentError {
-    return VoiceProfile.system();
-  }
-}
-
-VoiceProfile _tencentProfileFromRecord(VoiceProfileRecord record) {
-  final voiceType = int.tryParse(record.voice ?? '');
-  if (voiceType == null) {
-    return VoiceProfile.system();
-  }
-  try {
-    return VoiceProfile.tencent(voiceType: voiceType, speed: record.speed);
-  } on ArgumentError {
-    return VoiceProfile.system();
-  }
 }
 
 VoiceProfile _mimoProfileFromRecord(VoiceProfileRecord record) {

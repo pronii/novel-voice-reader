@@ -87,20 +87,20 @@ void main() {
     expect(await store.totalCacheBytes(), 4);
   });
 
-  test('splits Tencent download candidates at 150 characters', () async {
+  test('splits MiMo download candidates at 360 characters', () async {
     final bookId = await database.createBookWithChapter(
-      title: '腾讯缓存测试',
+      title: 'MiMo缓存测试',
       chapterTitle: '第一章',
-      paragraphs: [List.filled(151, '文').join()],
+      paragraphs: [List.filled(361, '文').join()],
     );
 
     final candidates = await store.candidatesForBook(
       bookId,
-      VoiceProfile.tencent(),
+      VoiceProfile.mimo(),
     );
 
     expect(candidates, hasLength(2));
-    expect(candidates.first.segment.text.runes.length, 150);
+    expect(candidates.first.segment.text.runes.length, 360);
     expect(candidates.last.segment.text.runes.length, 1);
   });
 }
