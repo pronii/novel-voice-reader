@@ -9,7 +9,24 @@ void main() {
     await BackgroundAudioSession(delegate).initialize();
 
     expect(delegate.events, ['configure', 'activate']);
-    expect(delegate.configuration, AudioSessionConfiguration.music());
+    final configuration = delegate.configuration!;
+    expect(
+      configuration.avAudioSessionCategory,
+      AVAudioSessionCategory.playback,
+    );
+    expect(configuration.avAudioSessionMode, AVAudioSessionMode.defaultMode);
+    expect(
+      configuration.androidAudioAttributes?.contentType,
+      AndroidAudioContentType.music,
+    );
+    expect(
+      configuration.androidAudioAttributes?.usage,
+      AndroidAudioUsage.media,
+    );
+    expect(
+      configuration.androidAudioFocusGainType,
+      AndroidAudioFocusGainType.gain,
+    );
   });
 }
 
