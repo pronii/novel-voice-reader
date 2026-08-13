@@ -446,29 +446,36 @@ final class PlaybackCoordinator implements PlaybackController {
       if (!_ownsContinuation(continuationEpoch)) {
         return;
       }
-      SpeechSegment? segment;
-      if (_segmentIndex + 1 < _segments.length) {
-        segment = _segments[_segmentIndex + 1];
-      } else {
-        final current = _cursor;
-        if (current == null) {
+      const targetCharacters = 750;
+      var plannedCharacters = 0;
+      var cursor = _cursor;
+      var segments = _segments.skip(_segmentIndex + 1).toList();
+
+      while (_ownsContinuation(continuationEpoch) &&
+          plannedCharacters < targetCharacters) {
+        for (final segment in segments) {
+          if (!_ownsContinuation(continuationEpoch)) {
+            return;
+          }
+          await provider.prefetch(segment, _voiceProfile);
+          plannedCharacters += segment.text.runes.length;
+          if (plannedCharacters >= targetCharacters) {
+            return;
+          }
+        }
+        if (cursor == null) {
           return;
         }
-        final next = await _paragraphs.nextAfter(current);
+        final next = await _paragraphs.nextAfter(cursor);
         if (next == null || !_ownsContinuation(continuationEpoch)) {
           return;
         }
-        final segments = _segmenter.split(
+        cursor = next.cursor;
+        segments = _segmenter.split(
           paragraphId: next.id,
           text: next.text,
           maxCharacters: _voiceProfile.maxSegmentCharacters,
         );
-        if (segments.isNotEmpty) {
-          segment = segments.first;
-        }
-      }
-      if (segment != null && _ownsContinuation(continuationEpoch)) {
-        await provider.prefetch(segment, _voiceProfile);
       }
     } catch (_) {
       // Normal prepare remains the authoritative fallback and error path.

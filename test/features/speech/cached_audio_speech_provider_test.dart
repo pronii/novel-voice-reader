@@ -204,6 +204,33 @@ void main() {
     await directory.delete(recursive: true);
   });
 
+  test('prefetch appends multiple files to the native queue in order', () async {
+    final directory = await Directory.systemTemp.createTemp('cached-multi-queue-');
+    final engine = QueuedFakeAudioPlaybackEngine();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: FakeCloudSpeechSynthesizer(),
+      ),
+      engine: engine,
+    );
+    const current = SpeechSegment(id: '60:0', paragraphId: 60, text: '当前', partIndex: 0);
+    const first = SpeechSegment(id: '61:0', paragraphId: 61, text: '第一项', partIndex: 0);
+    const second = SpeechSegment(id: '62:0', paragraphId: 62, text: '第二项', partIndex: 0);
+    final profile = _cloudProfile();
+
+    await provider.prepare(current, profile);
+    await provider.play();
+    await (provider as PrefetchingSpeechProvider).prefetch(first, profile);
+    await provider.prefetch(second, profile);
+
+    expect(engine.queuedPaths, hasLength(2));
+    expect(engine.queuedPaths[0], isNot(engine.queuedPaths[1]));
+
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
+
   test('prepare reuses an in-flight prefetch request', () async {
     final directory = await Directory.systemTemp.createTemp(
       'cached-prefetch-in-flight-',
@@ -469,7 +496,7 @@ final class QueuedFakeAudioPlaybackEngine extends FakeAudioPlaybackEngine
   Future<void> queueNextFilePath(String path) async => queuedPaths.add(path);
 
   void advanceToQueued({bool completed = false}) {
-    _activeQueuedPath = queuedPaths.single;
+    _activeQueuedPath = queuedPaths.first;
     _queuedCompleted = completed;
     complete();
   }
