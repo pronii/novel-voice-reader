@@ -6,7 +6,10 @@ void main() {
   test('configures music playback before activating the audio session', () async {
     final delegate = RecordingAudioSessionDelegate();
 
-    await BackgroundAudioSession(delegate).initialize();
+    await BackgroundAudioSession(
+      delegate,
+      activateOnInitialize: true,
+    ).initialize();
 
     expect(delegate.events, ['configure', 'activate']);
     final configuration = delegate.configuration!;
@@ -27,6 +30,17 @@ void main() {
       configuration.androidAudioFocusGainType,
       AndroidAudioFocusGainType.gain,
     );
+  });
+
+  test('does not claim audio focus during startup on other platforms', () async {
+    final delegate = RecordingAudioSessionDelegate();
+
+    await BackgroundAudioSession(
+      delegate,
+      activateOnInitialize: false,
+    ).initialize();
+
+    expect(delegate.events, ['configure']);
   });
 }
 
