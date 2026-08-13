@@ -103,8 +103,8 @@ final class JustAudioPlaybackEngine
     if (_queuedPath != path || _player.currentIndex != 1) {
       return QueuedAudioPromotion.notPromoted;
     }
-    final completed = _player.processingState == ProcessingState.completed;
     await _player.removeAudioSourceAt(0);
+    final completed = _player.processingState == ProcessingState.completed;
     _queuedPath = null;
     return completed
         ? QueuedAudioPromotion.completed
