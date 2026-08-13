@@ -10,9 +10,9 @@ abstract interface class AudioSessionDelegate {
 
 final class BackgroundAudioSession {
   const BackgroundAudioSession(
-    this._delegate, {
-    required bool activateOnInitialize,
-  }) : _activateOnInitialize = activateOnInitialize;
+    this._delegate,
+    this._activateOnInitialize,
+  );
 
   final AudioSessionDelegate _delegate;
   final bool _activateOnInitialize;
@@ -21,7 +21,7 @@ final class BackgroundAudioSession {
     final session = await AudioSession.instance;
     return BackgroundAudioSession(
       _PluginAudioSessionDelegate(session),
-      activateOnInitialize: Platform.isIOS,
+      Platform.isIOS,
     );
   }
 

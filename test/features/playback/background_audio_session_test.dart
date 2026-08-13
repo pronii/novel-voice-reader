@@ -8,7 +8,7 @@ void main() {
 
     await BackgroundAudioSession(
       delegate,
-      activateOnInitialize: true,
+      true,
     ).initialize();
 
     expect(delegate.events, ['configure', 'activate']);
@@ -37,7 +37,7 @@ void main() {
 
     await BackgroundAudioSession(
       delegate,
-      activateOnInitialize: false,
+      false,
     ).initialize();
 
     expect(delegate.events, ['configure']);
