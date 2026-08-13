@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:audio_session/audio_session.dart';
 
 abstract interface class AudioSessionDelegate {
@@ -7,17 +9,27 @@ abstract interface class AudioSessionDelegate {
 }
 
 final class BackgroundAudioSession {
-  const BackgroundAudioSession(this._delegate);
+  const BackgroundAudioSession(
+    this._delegate, {
+    required bool activateOnInitialize,
+  }) : _activateOnInitialize = activateOnInitialize;
 
   final AudioSessionDelegate _delegate;
+  final bool _activateOnInitialize;
 
   static Future<BackgroundAudioSession> system() async {
     final session = await AudioSession.instance;
-    return BackgroundAudioSession(_PluginAudioSessionDelegate(session));
+    return BackgroundAudioSession(
+      _PluginAudioSessionDelegate(session),
+      activateOnInitialize: Platform.isIOS,
+    );
   }
 
   Future<void> initialize() async {
     await _delegate.configure(AudioSessionConfiguration.music());
+    if (!_activateOnInitialize) {
+      return;
+    }
     final activated = await _delegate.setActive(true);
     if (!activated) {
       throw StateError('Unable to activate the background audio session.');
