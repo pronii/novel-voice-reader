@@ -277,6 +277,41 @@ void main() {
     await directory.delete(recursive: true);
   });
 
+  test('attributes a queued terminal completion to the promoted segment', () async {
+    final directory = await Directory.systemTemp.createTemp('cached-terminal-');
+    final engine = QueuedFakeAudioPlaybackEngine();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: FakeCloudSpeechSynthesizer(),
+      ),
+      engine: engine,
+    );
+    final events = <SpeechEvent>[];
+    final subscription = provider.events.listen(events.add);
+    const current = SpeechSegment(id: '50:0', paragraphId: 50, text: '甲', partIndex: 0);
+    const next = SpeechSegment(id: '51:0', paragraphId: 51, text: '乙', partIndex: 0);
+    final profile = _cloudProfile();
+
+    await provider.prepare(current, profile);
+    await provider.play();
+    await (provider as PrefetchingSpeechProvider).prefetch(next, profile);
+    engine.advanceToQueued(completed: true);
+    await pumpEventQueue();
+    await provider.prepare(next, profile);
+    await provider.play();
+    await pumpEventQueue();
+
+    expect(
+      events.whereType<SpeechCompleted>().map((event) => event.segmentId),
+      ['50:0', '51:0'],
+    );
+
+    await subscription.cancel();
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
+
   test('a stale prepare cannot replace the newest audio source', () async {
     final directory = await Directory.systemTemp.createTemp(
       'cached-latest-prepare-',
@@ -428,18 +463,25 @@ final class QueuedFakeAudioPlaybackEngine extends FakeAudioPlaybackEngine
   final List<String> queuedPaths = [];
   final List<String> promotedPaths = [];
   String? _activeQueuedPath;
+  bool _queuedCompleted = false;
 
   @override
   Future<void> queueNextFilePath(String path) async => queuedPaths.add(path);
 
-  void advanceToQueued() {
+  void advanceToQueued({bool completed = false}) {
     _activeQueuedPath = queuedPaths.single;
+    _queuedCompleted = completed;
     complete();
   }
 
   @override
-  Future<bool> promoteQueuedFilePath(String path) async {
+  Future<QueuedAudioPromotion> promoteQueuedFilePath(String path) async {
     promotedPaths.add(path);
-    return path == _activeQueuedPath;
+    if (path != _activeQueuedPath) {
+      return QueuedAudioPromotion.notPromoted;
+    }
+    return _queuedCompleted
+        ? QueuedAudioPromotion.completed
+        : QueuedAudioPromotion.playing;
   }
 }
