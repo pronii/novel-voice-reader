@@ -163,6 +163,47 @@ void main() {
     await directory.delete(recursive: true);
   });
 
+  test('prefetch queues the next file for native background continuation', () async {
+    final directory = await Directory.systemTemp.createTemp('cached-queue-');
+    final engine = QueuedFakeAudioPlaybackEngine();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: FakeCloudSpeechSynthesizer(),
+      ),
+      engine: engine,
+    );
+    const current = SpeechSegment(
+      id: '20:0',
+      paragraphId: 20,
+      text: '当前段落',
+      partIndex: 0,
+    );
+    const next = SpeechSegment(
+      id: '21:0',
+      paragraphId: 21,
+      text: '下一段落',
+      partIndex: 0,
+    );
+    final profile = _cloudProfile();
+
+    await provider.prepare(current, profile);
+    await provider.play();
+    await (provider as PrefetchingSpeechProvider).prefetch(next, profile);
+
+    expect(engine.queuedPaths, hasLength(1));
+    engine.advanceToQueued();
+    await provider.prepare(next, profile);
+    await provider.play();
+
+    expect(engine.filePaths, hasLength(1));
+    expect(engine.promotedPaths, [engine.queuedPaths.single]);
+    expect(engine.playCalls, 1);
+
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
+
   test('prepare reuses an in-flight prefetch request', () async {
     final directory = await Directory.systemTemp.createTemp(
       'cached-prefetch-in-flight-',
@@ -345,4 +386,25 @@ final class AdjustableFakeAudioPlaybackEngine extends FakeAudioPlaybackEngine
 
   @override
   Future<void> setSpeed(double speed) async => speedChanges.add(speed);
+}
+
+final class QueuedFakeAudioPlaybackEngine extends FakeAudioPlaybackEngine
+    implements QueuedAudioPlaybackEngine {
+  final List<String> queuedPaths = [];
+  final List<String> promotedPaths = [];
+  String? _activeQueuedPath;
+
+  @override
+  Future<void> queueNextFilePath(String path) async => queuedPaths.add(path);
+
+  void advanceToQueued() {
+    _activeQueuedPath = queuedPaths.single;
+    complete();
+  }
+
+  @override
+  Future<bool> promoteQueuedFilePath(String path) async {
+    promotedPaths.add(path);
+    return path == _activeQueuedPath;
+  }
 }
