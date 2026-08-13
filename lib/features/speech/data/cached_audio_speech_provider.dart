@@ -35,8 +35,10 @@ abstract interface class AdjustableAudioPlaybackEngine {
 abstract interface class QueuedAudioPlaybackEngine {
   Future<void> queueNextFilePath(String path);
 
-  Future<bool> promoteQueuedFilePath(String path);
+  Future<QueuedAudioPromotion> promoteQueuedFilePath(String path);
 }
+
+enum QueuedAudioPromotion { notPromoted, playing, completed }
 
 final class JustAudioPlaybackEngine
     implements
@@ -62,7 +64,7 @@ final class JustAudioPlaybackEngine
       }
     }, onError: controller.addError);
     final stateSubscription = _player.processingStateStream.listen((state) {
-      if (state == ProcessingState.completed) {
+      if (state == ProcessingState.completed && _player.currentIndex == 0) {
         controller.add(null);
       }
     }, onError: controller.addError);
@@ -97,13 +99,16 @@ final class JustAudioPlaybackEngine
   }
 
   @override
-  Future<bool> promoteQueuedFilePath(String path) async {
+  Future<QueuedAudioPromotion> promoteQueuedFilePath(String path) async {
     if (_queuedPath != path || _player.currentIndex != 1) {
-      return false;
+      return QueuedAudioPromotion.notPromoted;
     }
+    final completed = _player.processingState == ProcessingState.completed;
     await _player.removeAudioSourceAt(0);
     _queuedPath = null;
-    return true;
+    return completed
+        ? QueuedAudioPromotion.completed
+        : QueuedAudioPromotion.playing;
   }
 
   @override
@@ -169,18 +174,22 @@ final class CachedAudioSpeechProvider
           return;
         }
         final playbackEngine = engine;
-        final promoted = playbackEngine is QueuedAudioPlaybackEngine &&
-            _queuedSegmentId == segment.id &&
-            await (playbackEngine as QueuedAudioPlaybackEngine)
-                .promoteQueuedFilePath(file.path);
-        if (!promoted) {
+        final promotion = playbackEngine is QueuedAudioPlaybackEngine &&
+                _queuedSegmentId == segment.id
+            ? await (playbackEngine as QueuedAudioPlaybackEngine)
+                .promoteQueuedFilePath(file.path)
+            : QueuedAudioPromotion.notPromoted;
+        if (promotion == QueuedAudioPromotion.notPromoted) {
           await engine.setFilePath(file.path);
         }
         if (generation == _prepareGeneration) {
           _segment = segment;
           _started = false;
-          _nativePlaybackActive = promoted;
+          _nativePlaybackActive = promotion != QueuedAudioPromotion.notPromoted;
           _queuedSegmentId = null;
+          if (promotion == QueuedAudioPromotion.completed) {
+            scheduleMicrotask(_onCompleted);
+          }
         }
       });
     } catch (error) {
