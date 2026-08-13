@@ -600,7 +600,10 @@ final class _ReaderPageState extends State<ReaderPage> {
       if (!mounted) {
         return;
       }
-      setState(() => _activeParagraphId = paragraph.id);
+      // Scrolling only records the reading position (for progress saving and
+      // chapter tracking). It must NOT mark the paragraph as active: that is
+      // what highlights a paragraph and reveals its "从这里朗读" button, and it
+      // should only happen on an explicit tap.
       _reportReadingPosition(paragraph);
     });
   }
@@ -630,9 +633,36 @@ final class _ReaderPageState extends State<ReaderPage> {
         .expand((section) => section.paragraphs)
         .where((paragraph) => paragraph.id == _activeParagraphId)
         .firstOrNull;
-    if (active != null) {
-      _play(active);
+    // If the tapped paragraph is still on screen, play it. Otherwise the reader
+    // has scrolled away (scrolling no longer changes the selection), so start
+    // from the top of what they are currently reading instead of a stale,
+    // off-screen selection.
+    final target = (active != null && _isParagraphVisible(active.id))
+        ? active
+        : (_topVisibleParagraph() ?? active);
+    if (target != null) {
+      _play(target);
     }
+  }
+
+  bool _isParagraphVisible(int paragraphId) {
+    for (final position in _visiblePositions()) {
+      final item = _items[position.index];
+      if (item is ReaderParagraphItem && item.paragraph.id == paragraphId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  ReaderParagraph? _topVisibleParagraph() {
+    for (final position in _visiblePositions()) {
+      final item = _items[position.index];
+      if (item is ReaderParagraphItem) {
+        return item.paragraph;
+      }
+    }
+    return null;
   }
 
   void _play(ReaderParagraph paragraph) {

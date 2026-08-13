@@ -504,6 +504,30 @@ void main() {
     expect(reported.last, isNot(15));
   });
 
+  testWidgets('scrolling does not select a paragraph or reveal read-from-here', (
+    tester,
+  ) async {
+    _useNarrowViewport(tester);
+    await tester.pumpWidget(
+      MaterialApp(home: _reader(paragraphs: longParagraphs)),
+    );
+    await tester.pumpAndSettle();
+
+    // The first paragraph starts selected, so its button is initially shown.
+    expect(find.text('从这里朗读'), findsOneWidget);
+
+    // Scroll the selected paragraph well out of view and let the debounce run.
+    await tester.drag(
+      find.byType(ScrollablePositionedList),
+      const Offset(0, -600),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    // Scrolling must not promote a newly visible paragraph to "selected".
+    expect(find.text('从这里朗读'), findsNothing);
+  });
+
   testWidgets('top play follows the first visible paragraph after scrolling', (
     tester,
   ) async {
