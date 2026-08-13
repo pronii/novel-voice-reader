@@ -89,6 +89,9 @@ final class JustAudioPlaybackEngine
     if (_queuedPath == path) {
       return;
     }
+    if (_queuedPath != null && _player.sequence.length > 1) {
+      await _player.removeAudioSourceAt(1);
+    }
     await _player.addAudioSource(AudioSource.file(path));
     _queuedPath = path;
   }
@@ -194,11 +197,18 @@ final class CachedAudioSpeechProvider
 
   @override
   Future<void> prefetch(SpeechSegment segment, VoiceProfile profile) async {
+    final generation = _prepareGeneration;
     final file = await _obtain(segment, profile);
+    if (generation != _prepareGeneration) {
+      return;
+    }
     final playbackEngine = engine;
     if (_segment != null && playbackEngine is QueuedAudioPlaybackEngine) {
       final queuedEngine = playbackEngine as QueuedAudioPlaybackEngine;
       await _enqueueSourceUpdate(() async {
+        if (generation != _prepareGeneration) {
+          return;
+        }
         await queuedEngine.queueNextFilePath(file.path);
         _queuedSegmentId = segment.id;
       });
