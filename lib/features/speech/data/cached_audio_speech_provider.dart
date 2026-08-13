@@ -32,20 +32,45 @@ abstract interface class AdjustableAudioPlaybackEngine {
   Future<void> setSpeed(double speed);
 }
 
+abstract interface class QueuedAudioPlaybackEngine {
+  Future<void> queueNextFilePath(String path);
+
+  Future<bool> promoteQueuedFilePath(String path);
+}
+
 final class JustAudioPlaybackEngine
     implements
         AudioPlaybackEngine,
         AdjustableAudioPlaybackEngine,
+        QueuedAudioPlaybackEngine,
         TimedAudioPlaybackEngine {
   JustAudioPlaybackEngine([AudioPlayer? player])
     : _player = player ?? AudioPlayer();
 
   final AudioPlayer _player;
+  String? _queuedPath;
 
   @override
-  Stream<void> get completed => _player.processingStateStream
-      .where((state) => state == ProcessingState.completed)
-      .map<void>((_) {});
+  Stream<void> get completed => Stream<void>.multi((controller) {
+    var previousIndex = _player.currentIndex ?? 0;
+    final indexSubscription = _player.currentIndexStream.listen((index) {
+      if (index != null && index > previousIndex) {
+        controller.add(null);
+      }
+      if (index != null) {
+        previousIndex = index;
+      }
+    }, onError: controller.addError);
+    final stateSubscription = _player.processingStateStream.listen((state) {
+      if (state == ProcessingState.completed) {
+        controller.add(null);
+      }
+    }, onError: controller.addError);
+    controller.onCancel = () async {
+      await indexSubscription.cancel();
+      await stateSubscription.cancel();
+    };
+  });
 
   @override
   Stream<PlaybackTimeline> get playbackTimeline => _player.positionStream.map(
@@ -55,7 +80,27 @@ final class JustAudioPlaybackEngine
 
   @override
   Future<void> setFilePath(String path) async {
+    _queuedPath = null;
     await _player.setFilePath(path);
+  }
+
+  @override
+  Future<void> queueNextFilePath(String path) async {
+    if (_queuedPath == path) {
+      return;
+    }
+    await _player.addAudioSource(AudioSource.file(path));
+    _queuedPath = path;
+  }
+
+  @override
+  Future<bool> promoteQueuedFilePath(String path) async {
+    if (_queuedPath != path || _player.currentIndex != 1) {
+      return false;
+    }
+    await _player.removeAudioSourceAt(0);
+    _queuedPath = null;
+    return true;
   }
 
   @override
@@ -94,6 +139,8 @@ final class CachedAudioSpeechProvider
   SpeechSegment? _segment;
   bool _started = false;
   int _prepareGeneration = 0;
+  String? _queuedSegmentId;
+  bool _nativePlaybackActive = false;
 
   @override
   Stream<SpeechEvent> get events => _events.stream;
@@ -118,10 +165,18 @@ final class CachedAudioSpeechProvider
         if (generation != _prepareGeneration) {
           return;
         }
-        await engine.setFilePath(file.path);
+        final playbackEngine = engine;
+        final promoted = playbackEngine is QueuedAudioPlaybackEngine &&
+            _queuedSegmentId == segment.id &&
+            await playbackEngine.promoteQueuedFilePath(file.path);
+        if (!promoted) {
+          await engine.setFilePath(file.path);
+        }
         if (generation == _prepareGeneration) {
           _segment = segment;
           _started = false;
+          _nativePlaybackActive = promoted;
+          _queuedSegmentId = null;
         }
       });
     } catch (error) {
@@ -138,7 +193,14 @@ final class CachedAudioSpeechProvider
 
   @override
   Future<void> prefetch(SpeechSegment segment, VoiceProfile profile) async {
-    await _obtain(segment, profile);
+    final file = await _obtain(segment, profile);
+    final playbackEngine = engine;
+    if (_segment != null && playbackEngine is QueuedAudioPlaybackEngine) {
+      await _enqueueSourceUpdate(() async {
+        await playbackEngine.queueNextFilePath(file.path);
+        _queuedSegmentId = segment.id;
+      });
+    }
   }
 
   @override
@@ -150,6 +212,10 @@ final class CachedAudioSpeechProvider
     if (!_started) {
       _started = true;
       _events.add(SpeechStarted(segmentId: segment.id));
+    }
+    if (_nativePlaybackActive) {
+      _nativePlaybackActive = false;
+      return;
     }
     unawaited(_playEngine());
   }
@@ -177,6 +243,7 @@ final class CachedAudioSpeechProvider
   @override
   Future<void> stop() async {
     _started = false;
+    _nativePlaybackActive = false;
     await engine.stop();
   }
 
