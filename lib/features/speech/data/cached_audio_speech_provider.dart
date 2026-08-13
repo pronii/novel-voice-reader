@@ -50,7 +50,7 @@ final class JustAudioPlaybackEngine
     : _player = player ?? AudioPlayer();
 
   final AudioPlayer _player;
-  String? _queuedPath;
+  final List<String> _queuedPaths = [];
 
   @override
   Stream<void> get completed => Stream<void>.multi((controller) {
@@ -82,30 +82,29 @@ final class JustAudioPlaybackEngine
 
   @override
   Future<void> setFilePath(String path) async {
-    _queuedPath = null;
+    _queuedPaths.clear();
     await _player.setFilePath(path);
   }
 
   @override
   Future<void> queueNextFilePath(String path) async {
-    if (_queuedPath == path) {
+    if (_queuedPaths.contains(path)) {
       return;
     }
-    if (_queuedPath != null && _player.sequence.length > 1) {
-      await _player.removeAudioSourceAt(1);
-    }
     await _player.addAudioSource(AudioSource.file(path));
-    _queuedPath = path;
+    _queuedPaths.add(path);
   }
 
   @override
   Future<QueuedAudioPromotion> promoteQueuedFilePath(String path) async {
-    if (_queuedPath != path || _player.currentIndex != 1) {
+    if (_queuedPaths.isEmpty ||
+        _queuedPaths.first != path ||
+        _player.currentIndex != 1) {
       return QueuedAudioPromotion.notPromoted;
     }
     await _player.removeAudioSourceAt(0);
     final completed = _player.processingState == ProcessingState.completed;
-    _queuedPath = null;
+    _queuedPaths.removeAt(0);
     return completed
         ? QueuedAudioPromotion.completed
         : QueuedAudioPromotion.playing;
@@ -147,7 +146,7 @@ final class CachedAudioSpeechProvider
   SpeechSegment? _segment;
   bool _started = false;
   int _prepareGeneration = 0;
-  String? _queuedSegmentId;
+  final List<String> _queuedSegmentIds = [];
   bool _nativePlaybackActive = false;
 
   @override
@@ -175,18 +174,22 @@ final class CachedAudioSpeechProvider
         }
         final playbackEngine = engine;
         final promotion = playbackEngine is QueuedAudioPlaybackEngine &&
-                _queuedSegmentId == segment.id
+                _queuedSegmentIds.isNotEmpty &&
+                _queuedSegmentIds.first == segment.id
             ? await (playbackEngine as QueuedAudioPlaybackEngine)
                 .promoteQueuedFilePath(file.path)
             : QueuedAudioPromotion.notPromoted;
         if (promotion == QueuedAudioPromotion.notPromoted) {
           await engine.setFilePath(file.path);
+          _queuedSegmentIds.clear();
         }
         if (generation == _prepareGeneration) {
           _segment = segment;
           _started = false;
           _nativePlaybackActive = promotion != QueuedAudioPromotion.notPromoted;
-          _queuedSegmentId = null;
+          if (promotion != QueuedAudioPromotion.notPromoted) {
+            _queuedSegmentIds.removeAt(0);
+          }
           if (promotion == QueuedAudioPromotion.completed) {
             scheduleMicrotask(_onCompleted);
           }
@@ -219,7 +222,9 @@ final class CachedAudioSpeechProvider
           return;
         }
         await queuedEngine.queueNextFilePath(file.path);
-        _queuedSegmentId = segment.id;
+        if (!_queuedSegmentIds.contains(segment.id)) {
+          _queuedSegmentIds.add(segment.id);
+        }
       });
     }
   }
