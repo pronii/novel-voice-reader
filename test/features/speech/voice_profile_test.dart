@@ -104,6 +104,6 @@ void main() {
   test('keeps the existing segment limit for non-Tencent providers', () {
     expect(VoiceProfile.system().maxSegmentCharacters, 1000);
     expect(VoiceProfile.zhipu().maxSegmentCharacters, 1000);
-    expect(VoiceProfile.mimo().maxSegmentCharacters, 1000);
+    expect(VoiceProfile.mimo().maxSegmentCharacters, 360);
   });
 }
