@@ -633,7 +633,10 @@ void main() {
     await _showReaderToolbar(tester);
     await tester.tap(find.byTooltip('阅读设置'));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(Slider), const Offset(200, 0));
+    await tester.drag(
+      find.byKey(const Key('reader-font-size-slider')),
+      const Offset(200, 0),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
 

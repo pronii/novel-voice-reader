@@ -883,7 +883,7 @@ final class _ReaderPageState extends State<ReaderPage> {
       showDragHandle: true,
       builder: (context) => StatefulBuilder(
         builder: (context, setSheetState) => SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -891,6 +891,7 @@ final class _ReaderPageState extends State<ReaderPage> {
               children: [
                 Text('字号', style: Theme.of(context).textTheme.titleMedium),
                 Slider(
+                  key: const Key('reader-font-size-slider'),
                   value: _fontSize,
                   min: 15,
                   max: 30,
