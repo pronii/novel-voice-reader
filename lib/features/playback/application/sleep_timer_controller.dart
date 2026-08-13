@@ -31,8 +31,12 @@ class SleepTimerController extends ChangeNotifier {
     required Future<void> Function() onExpire,
     required int? Function() currentChapterId,
     required Stream<PlaybackCursor?> Function() cursorChanges,
+    // Named params back private fields, so initializing formals don't apply.
+    // ignore: prefer_initializing_formals
   }) : _onExpire = onExpire,
+       // ignore: prefer_initializing_formals
        _currentChapterId = currentChapterId,
+       // ignore: prefer_initializing_formals
        _cursorChanges = cursorChanges;
 
   final Future<void> Function() _onExpire;
