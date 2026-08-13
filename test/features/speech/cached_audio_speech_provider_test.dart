@@ -242,6 +242,41 @@ void main() {
     await directory.delete(recursive: true);
   });
 
+  test('stale prefetch cannot queue audio after playback target changes', () async {
+    final directory = await Directory.systemTemp.createTemp('cached-stale-queue-');
+    final engine = QueuedFakeAudioPlaybackEngine();
+    final synthesizer = ControllableCloudSpeechSynthesizer();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(directory: directory, synthesizer: synthesizer),
+      engine: engine,
+    );
+    const current = SpeechSegment(id: '30:0', paragraphId: 30, text: '当前', partIndex: 0);
+    const staleNext = SpeechSegment(id: '31:0', paragraphId: 31, text: '旧下一段', partIndex: 0);
+    const replacement = SpeechSegment(id: '40:0', paragraphId: 40, text: '跳转目标', partIndex: 0);
+    final profile = _cloudProfile();
+
+    final initialPrepare = provider.prepare(current, profile);
+    await synthesizer.waitForRequests(1);
+    synthesizer.complete(0);
+    await initialPrepare;
+    final stalePrefetch = (provider as PrefetchingSpeechProvider).prefetch(
+      staleNext,
+      profile,
+    );
+    await synthesizer.waitForRequests(2);
+    final replacementPrepare = provider.prepare(replacement, profile);
+    await synthesizer.waitForRequests(3);
+    synthesizer.complete(2);
+    await replacementPrepare;
+    synthesizer.complete(1);
+    await stalePrefetch;
+
+    expect(engine.queuedPaths, isEmpty);
+
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
+
   test('a stale prepare cannot replace the newest audio source', () async {
     final directory = await Directory.systemTemp.createTemp(
       'cached-latest-prepare-',
