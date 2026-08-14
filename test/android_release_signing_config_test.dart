@@ -11,11 +11,11 @@ void main() {
     expect(gradle, isNot(contains('signingConfigs.getByName("debug")')));
   });
 
-  test('CI publishes a signed release with an increasing build number', () {
+  test('CI publishes an unsigned release without receiving signing secrets', () {
     final workflow = File('.github/workflows/ci.yml').readAsStringSync();
-    expect(workflow, contains('ANDROID_KEYSTORE_BASE64'));
+    expect(workflow, isNot(contains('ANDROID_KEYSTORE_BASE64')));
     expect(workflow, contains('flutter build apk --release'));
     expect(workflow, contains(r'--build-number ${{ github.run_number }}'));
-    expect(workflow, contains('name: app-release-signed'));
+    expect(workflow, contains('name: app-release-unsigned'));
   });
 }

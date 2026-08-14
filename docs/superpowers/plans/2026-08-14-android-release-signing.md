@@ -4,7 +4,7 @@
 
 **Goal:** Produce stable, update-compatible Android release APKs locally and in GitHub Actions.
 
-**Architecture:** Gradle reads an ignored properties file for release signing. GitHub Actions reconstructs that file and keystore from encrypted repository secrets, assigns a monotonically increasing build number, and uploads a signed universal APK.
+**Architecture:** Gradle reads an ignored properties file for local release signing. GitHub Actions keeps the private key out of the runner, assigns a monotonically increasing build number, and uploads an unsigned universal APK that is signed locally.
 
 **Tech Stack:** Flutter 3.44.8, Android Gradle Kotlin DSL, Java keytool, GitHub Actions
 
@@ -29,14 +29,13 @@
 **Files:** Modify `android/app/build.gradle.kts` and `.github/workflows/ci.yml`.
 
 - [ ] Load ignored `android/key.properties` and create the Gradle release signing config.
-- [ ] Decode encrypted secrets on push and build with `github.run_number`.
-- [ ] Upload `app-release-signed`, then run focused and full tests.
+- [ ] Build an unsigned release on push with `github.run_number` and no signing secrets.
+- [ ] Upload `app-release-unsigned`, then run focused and full tests.
 
 ### Task 3: Provision And Verify The Signing Identity
 
 **Files:** Create `E:\novel-voice-reader\signing\novel-voice-reader-release.jks` and `android-release-signing.properties` outside the repository.
 
 - [ ] Generate a 4096-bit RSA key with a long random password and restrict local ACLs.
-- [ ] Upload credentials to GitHub Actions encrypted secrets without printing them.
-- [ ] Push, wait for CI, download the signed APK, and compare its certificate SHA-256 fingerprint with the keystore.
-
+- [ ] Install Android build tools locally without disclosing the key.
+- [ ] Push, wait for CI, download the unsigned APK, sign it locally, and compare its certificate SHA-256 fingerprint with the keystore.
