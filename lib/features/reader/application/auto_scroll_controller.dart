@@ -53,10 +53,21 @@ class AutoScrollController extends ChangeNotifier {
   static const double maxSpeed = 150;
   static const double defaultSpeed = 45;
 
+  /// After a manual swipe ends, wait this long before resuming the crawl. The
+  /// delay lets any fling settle and gives the reader a moment to keep reading
+  /// the spot they scrolled to, matching how "auto read" behaves in mainstream
+  /// novel apps: a manual drag interrupts the crawl but never exits it.
+  static const Duration gestureResumeDelay = Duration(milliseconds: 800);
+
   final void Function(double offset, Duration duration) _onAdvance;
 
   Timer? _timer;
+  Timer? _resumeTimer;
   AutoScrollStatus _status = AutoScrollStatus.idle;
+  // While the reader is dragging, the crawl is suspended without leaving the
+  // running state, so the toolbar still shows it as active and it can pick back
+  // up on its own once the gesture is over.
+  bool _suspendedForGesture = false;
   double _speed;
 
   /// The current lifecycle state.
@@ -97,9 +108,10 @@ class AutoScrollController extends ChangeNotifier {
 
   /// Starts (or resumes) the downward crawl. No-op if already running.
   void start() {
-    if (_status == AutoScrollStatus.running) {
+    if (_status == AutoScrollStatus.running && !_suspendedForGesture) {
       return;
     }
+    _cancelGestureResume();
     _status = AutoScrollStatus.running;
     _armTimer();
     notifyListeners();
@@ -110,6 +122,7 @@ class AutoScrollController extends ChangeNotifier {
     if (_status != AutoScrollStatus.running) {
       return;
     }
+    _cancelGestureResume();
     _status = AutoScrollStatus.paused;
     _disarmTimer();
     notifyListeners();
@@ -131,9 +144,46 @@ class AutoScrollController extends ChangeNotifier {
     if (_status == AutoScrollStatus.idle) {
       return;
     }
+    _cancelGestureResume();
     _status = AutoScrollStatus.idle;
     _disarmTimer();
     notifyListeners();
+  }
+
+  /// Called when the reader begins a manual swipe. While running, the crawl is
+  /// suspended for the duration of the gesture so it does not fight the drag,
+  /// but the running state is preserved — a manual scroll interrupts, it never
+  /// exits auto scroll. Ignored while paused or idle.
+  void notifyUserInteractionStart() {
+    if (_status != AutoScrollStatus.running) {
+      return;
+    }
+    _cancelGestureResume();
+    _suspendedForGesture = true;
+    _disarmTimer();
+  }
+
+  /// Called when a manual scroll settles. Schedules the crawl to pick back up
+  /// after [gestureResumeDelay]; repeated calls (e.g. as a fling decelerates)
+  /// debounce, so resumption waits until scrolling has truly stopped.
+  void notifyUserInteractionEnd() {
+    if (!_suspendedForGesture) {
+      return;
+    }
+    _resumeTimer?.cancel();
+    _resumeTimer = Timer(gestureResumeDelay, () {
+      _resumeTimer = null;
+      if (_suspendedForGesture && _status == AutoScrollStatus.running) {
+        _suspendedForGesture = false;
+        _armTimer();
+      }
+    });
+  }
+
+  void _cancelGestureResume() {
+    _resumeTimer?.cancel();
+    _resumeTimer = null;
+    _suspendedForGesture = false;
   }
 
   void _armTimer() {
@@ -154,6 +204,7 @@ class AutoScrollController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _cancelGestureResume();
     _disarmTimer();
     super.dispose();
   }

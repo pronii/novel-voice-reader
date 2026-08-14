@@ -108,4 +108,72 @@ void main() {
 
     expect(notifications, 4);
   });
+
+  testWidgets(
+    'a manual gesture suspends the crawl but keeps it running and resumes',
+    (tester) async {
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      controller.speed = 100;
+      controller.start();
+      await tester.pump(AutoScrollController.tick * 2);
+      final beforeGesture = advances.length;
+
+      // A manual swipe interrupts the crawl without leaving the running state.
+      controller.notifyUserInteractionStart();
+      expect(controller.status, AutoScrollStatus.running);
+      expect(controller.isRunning, isTrue);
+
+      // No advances happen while the finger is down.
+      await tester.pump(AutoScrollController.tick * 5);
+      expect(advances.length, beforeGesture);
+
+      controller.notifyUserInteractionEnd();
+      // Still suspended until the resume delay elapses.
+      await tester.pump(AutoScrollController.tick);
+      expect(advances.length, beforeGesture);
+
+      // Once the delay passes the crawl picks back up on its own.
+      await tester.pump(AutoScrollController.gestureResumeDelay);
+      await tester.pump(AutoScrollController.tick * 2);
+      expect(advances.length, greaterThan(beforeGesture));
+
+      controller.stop();
+    },
+  );
+
+  testWidgets('a manual gesture while paused does not resume the crawl', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const SizedBox.shrink());
+
+    controller.start();
+    controller.pause();
+    final paused = advances.length;
+
+    controller.notifyUserInteractionStart();
+    controller.notifyUserInteractionEnd();
+
+    await tester.pump(
+      AutoScrollController.gestureResumeDelay + AutoScrollController.tick * 3,
+    );
+    expect(controller.status, AutoScrollStatus.paused);
+    expect(advances.length, paused);
+  });
+
+  testWidgets('pausing during a gesture cancels the pending resume', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const SizedBox.shrink());
+
+    controller.start();
+    controller.notifyUserInteractionStart();
+    controller.notifyUserInteractionEnd();
+    controller.pause();
+
+    await tester.pump(
+      AutoScrollController.gestureResumeDelay + AutoScrollController.tick * 3,
+    );
+    expect(controller.status, AutoScrollStatus.paused);
+  });
 }

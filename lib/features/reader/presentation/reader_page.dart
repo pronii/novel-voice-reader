@@ -261,10 +261,98 @@ final class _ReaderPageState extends State<ReaderPage> {
                 ),
               ),
             ),
+            _buildAutoScrollOverlay(context),
           ],
         ),
       ),
     );
+  }
+
+  // A compact control bar shown while the crawl is active, so the reader can
+  // tune speed or pause/exit without digging into the settings sheet — the same
+  // affordance mainstream "auto read" modes surface on screen.
+  Widget _buildAutoScrollOverlay(BuildContext context) {
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: ListenableBuilder(
+        listenable: _autoScroll,
+        builder: (context, _) {
+          if (_autoScroll.status == AutoScrollStatus.idle) {
+            return const SizedBox.shrink();
+          }
+          final theme = Theme.of(context);
+          final running = _autoScroll.isRunning;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Material(
+                  key: const Key('auto-scroll-overlay'),
+                  elevation: 6,
+                  borderRadius: BorderRadius.circular(28),
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: '减速',
+                          onPressed: _autoScroll.speed <=
+                                  AutoScrollController.minSpeed
+                              ? null
+                              : _slowDownAutoScroll,
+                          icon: const Icon(Icons.remove),
+                        ),
+                        Text(
+                          '速度 ${_autoScroll.speedBand.label}',
+                          style: theme.textTheme.labelLarge,
+                        ),
+                        IconButton(
+                          tooltip: '加速',
+                          onPressed: _autoScroll.speed >=
+                                  AutoScrollController.maxSpeed
+                              ? null
+                              : _speedUpAutoScroll,
+                          icon: const Icon(Icons.add),
+                        ),
+                        const SizedBox(
+                          height: 24,
+                          child: VerticalDivider(width: 12),
+                        ),
+                        IconButton(
+                          tooltip: running ? '暂停' : '继续',
+                          onPressed: _autoScroll.toggle,
+                          icon: Icon(running ? Icons.pause : Icons.play_arrow),
+                        ),
+                        IconButton(
+                          tooltip: '退出自动滚动',
+                          onPressed: _autoScroll.stop,
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  static const double _autoScrollSpeedStep = 15;
+
+  void _speedUpAutoScroll() {
+    _autoScroll.speed = _autoScroll.speed + _autoScrollSpeedStep;
+  }
+
+  void _slowDownAutoScroll() {
+    _autoScroll.speed = _autoScroll.speed - _autoScrollSpeedStep;
   }
 
   void _onBodyPointerDown(PointerDownEvent event) {
@@ -484,9 +572,11 @@ final class _ReaderPageState extends State<ReaderPage> {
     if (notification is ScrollStartNotification &&
         notification.dragDetails != null) {
       _playbackFollow = false;
-      // A manual swipe should hand control back to the reader, so stop the
-      // crawl instead of fighting the drag.
-      _autoScroll.pause();
+      // A manual swipe should not fight the crawl, so suspend it for the
+      // gesture — but keep it armed. It picks back up on its own once the drag
+      // settles, so a manual nudge no longer drops the reader out of auto
+      // scroll (matching how mainstream novel apps handle "auto read").
+      _autoScroll.notifyUserInteractionStart();
     } else if (notification is ScrollUpdateNotification) {
       final scrollDelta = notification.scrollDelta;
       if (scrollDelta != null && scrollDelta != 0) {
@@ -494,6 +584,8 @@ final class _ReaderPageState extends State<ReaderPage> {
         _invalidatePendingProgressReport();
       }
     } else if (notification is ScrollEndNotification) {
+      // Let the crawl resume after the swipe (and any fling) has stopped.
+      _autoScroll.notifyUserInteractionEnd();
       final scrollMoved = _scrollMoved;
       _scrollMoved = false;
       if (scrollMoved) {
