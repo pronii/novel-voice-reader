@@ -80,6 +80,39 @@ void main() {
     );
   });
 
+  testWidgets(
+    'revealing the menu bar pauses the crawl and hiding it resumes',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(home: _reader(paragraphs: longParagraphs)),
+      );
+      await tester.pumpAndSettle();
+
+      // Reveal the toolbar and start the crawl from its auto-scroll button.
+      await _showReaderToolbar(tester);
+      await tester.tap(find.byIcon(Icons.keyboard_double_arrow_down));
+      await tester.pump();
+
+      // Hiding the menu leaves a crawl the reader started themselves running.
+      // With the menu gone only the toolbar's own button shows the pause icon.
+      await tester.tap(find.byKey(const Key('reader-body')));
+      await tester.pump();
+      expect(find.byIcon(Icons.pause), findsOneWidget);
+
+      // Bringing the menu back up pauses the crawl so the text stops moving;
+      // the overlay now offers to continue.
+      await tester.tap(find.byKey(const Key('reader-body')));
+      await tester.pump();
+      expect(find.byIcon(Icons.pause), findsNothing);
+      expect(find.byTooltip('继续'), findsOneWidget);
+
+      // Hiding the menu again resumes the crawl.
+      await tester.tap(find.byKey(const Key('reader-body')));
+      await tester.pump();
+      expect(find.byIcon(Icons.pause), findsOneWidget);
+    },
+  );
+
   testWidgets('showing the toolbar does not move reader paragraphs', (
     tester,
   ) async {

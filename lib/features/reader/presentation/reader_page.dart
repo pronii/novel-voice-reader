@@ -87,6 +87,9 @@ final class _ReaderPageState extends State<ReaderPage> {
   int _scrollGeneration = 0;
   double _fontSize = 19;
   bool _toolbarVisible = false;
+  // True when revealing the menu bar auto-paused a running crawl, so hiding the
+  // menu can resume it — but only if the reader didn't stop/pause it meanwhile.
+  bool _autoScrollPausedByToolbar = false;
   int? _bodyPointerId;
   Offset? _bodyPointerDownPosition;
   bool _bodyPointerTapEligible = false;
@@ -376,7 +379,7 @@ final class _ReaderPageState extends State<ReaderPage> {
     final shouldToggle = _bodyPointerTapEligible;
     _clearBodyPointer();
     if (shouldToggle) {
-      setState(() => _toolbarVisible = !_toolbarVisible);
+      _setToolbarVisible(!_toolbarVisible);
     }
   }
 
@@ -390,6 +393,29 @@ final class _ReaderPageState extends State<ReaderPage> {
     _bodyPointerId = null;
     _bodyPointerDownPosition = null;
     _bodyPointerTapEligible = false;
+  }
+
+  // Reveals or hides the menu bar. Bringing up the menu while the crawl is
+  // running pauses it so the text stops moving under the menu; hiding the menu
+  // then resumes the crawl, giving a "tap to peek, tap to continue" feel. If
+  // the reader stopped or paused the crawl themselves while the menu was up, we
+  // leave it alone.
+  void _setToolbarVisible(bool visible) {
+    if (visible == _toolbarVisible) {
+      return;
+    }
+    setState(() => _toolbarVisible = visible);
+    if (visible) {
+      if (_autoScroll.isRunning) {
+        _autoScroll.pause();
+        _autoScrollPausedByToolbar = true;
+      }
+    } else if (_autoScrollPausedByToolbar) {
+      _autoScrollPausedByToolbar = false;
+      if (_autoScroll.isPaused) {
+        _autoScroll.start();
+      }
+    }
   }
 
   void _toggleAutoScroll() {
