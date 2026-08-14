@@ -723,7 +723,7 @@ Future<void> _selectVoiceProvider(
   await tester.tap(dropdown);
   await tester.pumpAndSettle();
   await tester.tap(find.text(label).last);
-  await tester.pump(const Duration(milliseconds: 300));
+  await tester.pumpAndSettle();
 }
 
 final class _FailOnceMap extends MapBase<String, String> {
