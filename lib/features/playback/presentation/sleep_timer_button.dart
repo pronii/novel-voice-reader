@@ -1,3 +1,5 @@
+import 'dart:ui' show FontFeature;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novel_voice_reader/app/providers.dart';
@@ -27,14 +29,10 @@ class SleepTimerButton extends ConsumerWidget {
         );
 
         if (active && remaining != null) {
-          return Badge(label: Text(_formatRemaining(remaining)), child: button);
+          return _CountdownAction(label: _formatRemaining(remaining), button: button);
         }
         if (active && timer.isEndOfChapter) {
-          return Badge(
-            label: const Text('章'),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            child: button,
-          );
+          return _CountdownAction(label: '章', button: button);
         }
         return button;
       },
@@ -113,5 +111,42 @@ class SleepTimerButton extends ConsumerWidget {
     final minutes = totalSeconds ~/ 60;
     final seconds = totalSeconds % 60;
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+}
+
+/// Shows the sleep-timer countdown as a pill placed *before* the icon so the
+/// full `mm:ss` text stays on screen. A right-aligned [Badge] overflowed the
+/// screen edge and clipped the label to its first digit.
+class _CountdownAction extends StatelessWidget {
+  const _CountdownAction({required this.label, required this.button});
+
+  final String label;
+  final Widget button;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: scheme.primary,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: scheme.onPrimary,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+        button,
+      ],
+    );
   }
 }

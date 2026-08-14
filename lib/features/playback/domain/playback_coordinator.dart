@@ -549,11 +549,16 @@ final class PlaybackCoordinator implements PlaybackController {
               duration.inMicroseconds - position.inMicroseconds,
             ),
           );
+    final chapterElapsed = Duration(
+      microseconds:
+          completedCharacters * microsPerCharacter + position.inMicroseconds,
+    );
     final chapterRemaining = currentRemaining +
         Duration(microseconds: laterCharacters * microsPerCharacter);
     return PlaybackTimeline(
       position: position,
       duration: duration,
+      chapterElapsed: chapterElapsed,
       chapterRemaining: chapterRemaining,
     );
   }

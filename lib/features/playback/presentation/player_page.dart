@@ -96,7 +96,7 @@ final class _PlayerPageState extends State<PlayerPage> {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Expanded(child: Text(_positionLabel)),
+                  Expanded(child: Text(_elapsedLabel)),
                   Text(_remainingLabel),
                 ],
               ),
@@ -180,6 +180,16 @@ final class _PlayerPageState extends State<PlayerPage> {
   }
 
   double? get _progress {
+    // Prefer chapter-level progress so the bar reflects the whole chapter,
+    // not the short current TTS segment.
+    final elapsed = _timeline.chapterElapsed;
+    final chapterRemaining = _timeline.chapterRemaining;
+    if (elapsed != null && chapterRemaining != null) {
+      final total = elapsed + chapterRemaining;
+      if (total > Duration.zero) {
+        return (elapsed.inMicroseconds / total.inMicroseconds).clamp(0, 1);
+      }
+    }
     final duration = _timeline.duration;
     if (duration == null || duration <= Duration.zero) return null;
     return (_timeline.position.inMicroseconds / duration.inMicroseconds).clamp(
@@ -188,10 +198,17 @@ final class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  String get _positionLabel {
+  String get _elapsedLabel {
+    final elapsed = _timeline.chapterElapsed;
+    if (elapsed != null) {
+      final adjusted = Duration(
+        microseconds: (max(0, elapsed.inMicroseconds) / _speed).round(),
+      );
+      return '已听 ${_formatDuration(adjusted)}';
+    }
     final duration = _timeline.duration;
-    if (duration == null || duration <= Duration.zero) return '--:-- / --:--';
-    return '${_formatDuration(_timeline.position)} / ${_formatDuration(duration)}';
+    if (duration == null || duration <= Duration.zero) return '已听 --:--';
+    return '已听 ${_formatDuration(_timeline.position)}';
   }
 
   String get _remainingLabel {

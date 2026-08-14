@@ -353,7 +353,39 @@ void main() {
       ),
     );
 
+    expect(timelines.last.chapterElapsed, Duration.zero);
     expect(timelines.last.chapterRemaining, const Duration(seconds: 30));
+    await subscription.cancel();
+    await coordinator.dispose();
+  });
+
+  test('estimates chapter elapsed time from the current segment position', () async {
+    final provider = FakeSpeechProvider();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: ChapterAwareParagraphSource([
+        List.filled(10, '当').join(),
+        List.filled(5, '后').join(),
+      ]),
+      voiceProfile: VoiceProfile.system(),
+    );
+    final timelines = <PlaybackTimeline>[];
+    final subscription = coordinator.timelineChanges.listen(timelines.add);
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    // 10-char segment over 20s => 2s/char. Halfway through the segment.
+    provider.publishTimeline(
+      const PlaybackTimeline(
+        position: Duration(seconds: 10),
+        duration: Duration(seconds: 20),
+      ),
+    );
+
+    expect(timelines.last.chapterElapsed, const Duration(seconds: 10));
+    expect(timelines.last.chapterRemaining, const Duration(seconds: 20));
     await subscription.cancel();
     await coordinator.dispose();
   });

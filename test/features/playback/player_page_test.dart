@@ -150,6 +150,7 @@ void main() {
           initialTimeline: const PlaybackTimeline(
             position: Duration(seconds: 10),
             duration: Duration(seconds: 20),
+            chapterElapsed: Duration(minutes: 1),
             chapterRemaining: Duration(minutes: 3),
           ),
           timelineChanges: timelineChanges.stream,
@@ -161,14 +162,15 @@ void main() {
       tester
           .widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator))
           .value,
-      0.5,
+      0.25,
     );
-    expect(find.text('00:10 / 00:20'), findsOneWidget);
+    expect(find.text('已听 01:00'), findsOneWidget);
     expect(find.text('本章剩余 03:00'), findsOneWidget);
 
     await tester.tap(find.text('1.5x'));
     await tester.pump();
 
+    expect(find.text('已听 00:40'), findsOneWidget);
     expect(find.text('本章剩余 02:00'), findsOneWidget);
 
     timelineChanges.add(
@@ -185,7 +187,7 @@ void main() {
           .value,
       0.5,
     );
-    expect(find.text('02:30 / 05:00'), findsOneWidget);
+    expect(find.text('已听 02:30'), findsOneWidget);
     expect(find.text('本章剩余 01:40'), findsOneWidget);
   });
 }
