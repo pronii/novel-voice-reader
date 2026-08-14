@@ -268,9 +268,9 @@ final class _ReaderPageState extends State<ReaderPage> {
     );
   }
 
-  // A compact control bar shown while the crawl is active, so the reader can
-  // tune speed or pause/exit without digging into the settings sheet — the same
-  // affordance mainstream "auto read" modes surface on screen.
+  // A compact control bar for the crawl. It is not persistent: it rides with
+  // the toolbar, appearing only while the toolbar is revealed (tap to show,
+  // tap again to hide) so it never sits on top of the text while reading.
   Widget _buildAutoScrollOverlay(BuildContext context) {
     return Positioned(
       left: 0,
@@ -279,7 +279,7 @@ final class _ReaderPageState extends State<ReaderPage> {
       child: ListenableBuilder(
         listenable: _autoScroll,
         builder: (context, _) {
-          if (_autoScroll.status == AutoScrollStatus.idle) {
+          if (!_toolbarVisible || _autoScroll.status == AutoScrollStatus.idle) {
             return const SizedBox.shrink();
           }
           final theme = Theme.of(context);
