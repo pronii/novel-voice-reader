@@ -174,7 +174,7 @@ final class SystemTtsAdapter
       throw StateError('No speech segment has been prepared.');
     }
     final text = segment.text;
-    final start = offset.clamp(0, text.length);
+    final start = offset.clamp(0, text.length).toInt();
     _speakBase = start;
     return _engine.speak(start == 0 ? text : text.substring(start));
   }
