@@ -44,4 +44,42 @@ void main() {
     );
     expect(find.text('将缓存所有未读章节'), findsOneWidget);
   });
+
+  testWidgets('normalizes an unsupported saved cache limit', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CachePage(
+          chapterCount: 12,
+          currentChapterIndex: 3,
+          initialPolicy: DownloadPolicy(
+            chaptersAhead: 2,
+            wholeBook: false,
+            wifiOnly: true,
+            maxCacheBytes: 300 * 1024 * 1024,
+          ),
+          onApply: (_) {},
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('512 MB'), findsOneWidget);
+  });
+
+  testWidgets('shows current cache usage and segment count', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CachePage(
+          chapterCount: 12,
+          currentChapterIndex: 3,
+          cachedBytes: 64 * 1024 * 1024,
+          cachedSegmentCount: 18,
+          onApply: (_) {},
+        ),
+      ),
+    );
+
+    expect(find.text('64.0 MB · 18 段'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+  });
 }

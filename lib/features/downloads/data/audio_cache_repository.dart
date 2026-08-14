@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:novel_voice_reader/features/downloads/domain/cache_key.dart';
@@ -9,7 +10,11 @@ abstract interface class CloudSpeechSynthesizer {
   Future<Uint8List> synthesize(SpeechSegment segment, VoiceProfile profile);
 }
 
-final class AudioCacheRepository {
+abstract interface class SpeechAudioCache {
+  Future<File> obtain(SpeechSegment segment, VoiceProfile profile);
+}
+
+final class AudioCacheRepository implements SpeechAudioCache {
   const AudioCacheRepository({
     required this.directory,
     required this.synthesizer,
@@ -18,6 +23,7 @@ final class AudioCacheRepository {
   final Directory directory;
   final CloudSpeechSynthesizer synthesizer;
 
+  @override
   Future<File> obtain(SpeechSegment segment, VoiceProfile profile) async {
     await directory.create(recursive: true);
     final key = CacheKey.forSegment(segment, profile);
@@ -26,7 +32,12 @@ final class AudioCacheRepository {
       '${directory.path}${Platform.pathSeparator}$key.$extension',
     );
     if (await finalFile.exists()) {
-      return finalFile;
+      try {
+        await _validateExistingAudio(finalFile, extension);
+        return finalFile;
+      } on FormatException {
+        await finalFile.delete();
+      }
     }
 
     final partial = File('${finalFile.path}.partial');
@@ -36,7 +47,7 @@ final class AudioCacheRepository {
 
     try {
       final bytes = await synthesizer.synthesize(segment, profile);
-      _validateAudio(bytes, extension);
+      _validateAudio(bytes, extension, totalLength: bytes.length);
       await partial.writeAsBytes(bytes, flush: true);
       return await partial.rename(finalFile.path);
     } catch (_) {
@@ -63,7 +74,25 @@ final class AudioCacheRepository {
     return extension;
   }
 
-  static void _validateAudio(Uint8List bytes, String extension) {
+  static Future<void> _validateExistingAudio(
+    File file,
+    String extension,
+  ) async {
+    final reader = await file.open();
+    try {
+      final length = await reader.length();
+      final header = await reader.read(min(length, 12));
+      _validateAudio(header, extension, totalLength: length);
+    } finally {
+      await reader.close();
+    }
+  }
+
+  static void _validateAudio(
+    Uint8List bytes,
+    String extension, {
+    required int totalLength,
+  }) {
     final valid = switch (extension) {
       'mp3' =>
         _startsWith(bytes, const [0x49, 0x44, 0x33]) ||
@@ -78,7 +107,7 @@ final class AudioCacheRepository {
       'flac' => _startsWith(bytes, const [0x66, 0x4c, 0x61, 0x43]),
       'aac' =>
         bytes.length >= 2 && bytes[0] == 0xff && (bytes[1] & 0xf6) == 0xf0,
-      'pcm' => bytes.isNotEmpty && bytes.length.isEven,
+      'pcm' => totalLength > 0 && totalLength.isEven,
       _ => false,
     };
     if (!valid) {

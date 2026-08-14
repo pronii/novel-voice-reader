@@ -35,6 +35,25 @@ void main() {
 
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('opens cache settings for the selected book', (tester) async {
+    int? selectedBookId;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LibraryPage(
+          books: const [
+            LibraryBookItem(id: 7, title: '测试书', progressLabel: '继续阅读'),
+          ],
+          onImport: _noopImport,
+          onOpenCacheSettings: (bookId) => selectedBookId = bookId,
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('缓存设置'));
+
+    expect(selectedBookId, 7);
+  });
 }
 
 Future<void> _noopImport() async {}

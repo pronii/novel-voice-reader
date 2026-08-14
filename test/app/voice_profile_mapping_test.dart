@@ -94,6 +94,22 @@ void main() {
     expect(profile.providerType, SpeechProviderType.system);
   });
 
+  test('falls back to system speech for a corrupt cloud profile', () {
+    const record = VoiceProfileRecord(
+      id: 9,
+      providerType: 'cloud',
+      baseUrl: 'not-a-url',
+      model: 'tts-model',
+      voice: 'voice-a',
+      speed: 1,
+      outputFormat: 'mp3',
+    );
+
+    final profile = voiceProfileFromRecord(record);
+
+    expect(profile.providerType, SpeechProviderType.system);
+  });
+
   test('maps a stored MiMo profile including narration style', () {
     const record = VoiceProfileRecord(
       id: 8,

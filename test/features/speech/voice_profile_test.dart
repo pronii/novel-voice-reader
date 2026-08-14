@@ -25,6 +25,65 @@ void main() {
       ),
       throwsArgumentError,
     );
+    expect(() => VoiceProfile.system(speed: double.nan), throwsArgumentError);
+  });
+
+  test('rejects an invalid cloud endpoint or empty model fields', () {
+    expect(
+      () => VoiceProfile.cloud(
+        baseUrl: 'not-a-url',
+        model: 'tts-model',
+        voice: 'voice-a',
+        speed: 1,
+        outputFormat: 'mp3',
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => VoiceProfile.cloud(
+        baseUrl: 'https://user:secret@example.com',
+        model: 'tts-model',
+        voice: 'voice-a',
+        speed: 1,
+        outputFormat: 'mp3',
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => VoiceProfile.cloud(
+        baseUrl: 'https://example.com',
+        model: '   ',
+        voice: 'voice-a',
+        speed: 1,
+        outputFormat: 'mp3',
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => VoiceProfile.cloud(
+        baseUrl: 'https://example.com',
+        model: 'tts-model',
+        voice: 'voice-a',
+        speed: 1,
+        outputFormat: 'zip',
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('normalizes cloud model, voice, and output format', () {
+    final profile = VoiceProfile.cloud(
+      baseUrl: ' https://example.com/ ',
+      model: ' tts-model ',
+      voice: ' voice-a ',
+      speed: 1,
+      outputFormat: ' MP3 ',
+    );
+
+    expect(profile.normalizedBaseUrl, 'https://example.com');
+    expect(profile.model, 'tts-model');
+    expect(profile.voice, 'voice-a');
+    expect(profile.outputFormat, 'mp3');
   });
 
   test('uses the fixed MiMo speech configuration and trims style', () {

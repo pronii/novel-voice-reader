@@ -72,7 +72,7 @@ abstract interface class DownloadPlanStore {
 
   Future<List<DownloadJobSnapshot>> jobsForBook(int bookId);
 
-  Future<int> totalCacheBytes();
+  Future<int> totalCacheBytes(int bookId);
 
   Future<void> putJob(DownloadJobSnapshot job);
 
@@ -150,14 +150,9 @@ final class DownloadScheduler {
     );
     final targetChapterSet = targetChapters.toSet();
     final allCandidates = await _store.candidatesForBook(bookId, profile);
-    var targetCandidates = allCandidates
+    final targetCandidates = allCandidates
         .where((candidate) => targetChapterSet.contains(candidate.chapterIndex))
         .toList();
-    if (!policy.wholeBook && policy.chaptersAhead == 0) {
-      targetCandidates = targetCandidates
-          .where((candidate) => candidate.segment.id == currentSegmentId)
-          .toList();
-    }
     targetCandidates.sort(
       (first, second) => _compareCandidates(
         first,
@@ -189,13 +184,26 @@ final class DownloadScheduler {
     }
 
     final candidatesById = {
-      for (final candidate in targetCandidates) candidate.cacheKey: candidate,
+      for (final candidate in allCandidates) candidate.cacheKey: candidate,
     };
-    var remainingBytes = policy.maxCacheBytes - await _store.totalCacheBytes();
+    final estimatedBytesByParagraph = <int, int>{};
+    for (final candidate in allCandidates) {
+      estimatedBytesByParagraph.update(
+        candidate.segment.paragraphId,
+        (bytes) => bytes + candidate.estimatedBytes,
+        ifAbsent: () => candidate.estimatedBytes,
+      );
+    }
+    var remainingBytes =
+        policy.maxCacheBytes - await _store.totalCacheBytes(bookId);
     for (final job in jobs) {
-      if (job.status == DownloadJobStatus.enqueued ||
-          job.status == DownloadJobStatus.running) {
-        remainingBytes -= candidatesById[job.taskId]?.estimatedBytes ?? 0;
+      if (!canceledTaskIds.contains(job.taskId) &&
+          (job.status == DownloadJobStatus.enqueued ||
+              job.status == DownloadJobStatus.running)) {
+        remainingBytes -=
+            candidatesById[job.taskId]?.estimatedBytes ??
+            estimatedBytesByParagraph[job.paragraphId] ??
+            0;
       }
     }
 
@@ -208,8 +216,24 @@ final class DownloadScheduler {
       final existing = jobsById[candidate.cacheKey];
       if (existing != null &&
           (existing.status == DownloadJobStatus.enqueued ||
-              existing.status == DownloadJobStatus.running ||
-              existing.status == DownloadJobStatus.complete)) {
+              existing.status == DownloadJobStatus.running)) {
+        final accepted = await _dispatcher.enqueue(
+          DownloadDispatchRequest(
+            taskId: candidate.cacheKey,
+            bookId: bookId,
+            candidate: candidate,
+            profile: profile,
+            priority: existing.priority,
+            requiresWifi: policy.wifiOnly,
+          ),
+        );
+        if (!accepted) {
+          await _store.setJobStatus(
+            candidate.cacheKey,
+            DownloadJobStatus.pending,
+          );
+          remainingBytes += candidate.estimatedBytes;
+        }
         continue;
       }
       if (existing != null &&
@@ -256,6 +280,11 @@ final class DownloadScheduler {
           DownloadJobStatus.enqueued,
         );
         enqueuedTaskIds.add(candidate.cacheKey);
+      } else {
+        await _store.setJobStatus(
+          candidate.cacheKey,
+          DownloadJobStatus.pending,
+        );
       }
     }
 

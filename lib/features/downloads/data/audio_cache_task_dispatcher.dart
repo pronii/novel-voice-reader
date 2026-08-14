@@ -17,6 +17,9 @@ abstract interface class DownloadExecutionStore {
   Future<void> recordCompleted(DownloadDispatchRequest request, File file);
 }
 
+typedef DownloadAudioObtainer =
+    Future<File> Function(DownloadDispatchRequest request);
+
 abstract interface class DownloadNetworkGate {
   Future<bool> canRun({required bool requiresWifi});
 }
@@ -62,16 +65,26 @@ final class ConnectivityDownloadNetworkGate implements DownloadNetworkGate {
 
 final class AudioCacheTaskDispatcher implements DownloadTaskDispatcher {
   factory AudioCacheTaskDispatcher({
-    required AudioCacheRepository repository,
+    AudioCacheRepository? repository,
+    DownloadAudioObtainer? obtain,
     required DownloadExecutionStore store,
     DownloadNetworkGate networkGate = const AllowAllDownloadNetworkGate(),
   }) {
-    return AudioCacheTaskDispatcher._(repository, store, networkGate);
+    if (repository == null && obtain == null) {
+      throw ArgumentError('Either repository or obtain must be provided.');
+    }
+    return AudioCacheTaskDispatcher._(
+      obtain ??
+          (request) =>
+              repository!.obtain(request.candidate.segment, request.profile),
+      store,
+      networkGate,
+    );
   }
 
-  AudioCacheTaskDispatcher._(this._repository, this._store, this._networkGate);
+  AudioCacheTaskDispatcher._(this._obtain, this._store, this._networkGate);
 
-  final AudioCacheRepository _repository;
+  final DownloadAudioObtainer _obtain;
   final DownloadExecutionStore _store;
   final DownloadNetworkGate _networkGate;
   final List<DownloadDispatchRequest> _queue = [];
@@ -85,12 +98,24 @@ final class AudioCacheTaskDispatcher implements DownloadTaskDispatcher {
 
   @override
   Future<bool> enqueue(DownloadDispatchRequest request) async {
+    if (_active?.taskId == request.taskId) {
+      return true;
+    }
+    final queuedIndex = _queue.indexWhere(
+      (queued) => queued.taskId == request.taskId,
+    );
+    if (queuedIndex >= 0) {
+      if (!await _networkGate.canRun(requiresWifi: request.requiresWifi)) {
+        _queue.removeAt(queuedIndex);
+        _completeIdleIfNeeded();
+        return false;
+      }
+      _queue[queuedIndex] = request;
+      _queue.sort((first, second) => first.priority.compareTo(second.priority));
+      return true;
+    }
     if (!await _networkGate.canRun(requiresWifi: request.requiresWifi)) {
       return false;
-    }
-    if (_active?.taskId == request.taskId ||
-        _queue.any((queued) => queued.taskId == request.taskId)) {
-      return true;
     }
     _queue.add(request);
     _queue.sort((first, second) => first.priority.compareTo(second.priority));
@@ -130,18 +155,14 @@ final class AudioCacheTaskDispatcher implements DownloadTaskDispatcher {
     try {
       while (_queue.isNotEmpty) {
         final request = _queue.removeAt(0);
-        if (!await _networkGate.canRun(
-          requiresWifi: request.requiresWifi,
-        )) {
+        if (!await _networkGate.canRun(requiresWifi: request.requiresWifi)) {
+          await _store.setJobStatus(request.taskId, DownloadJobStatus.pending);
           continue;
         }
         _active = request;
         await _store.setJobStatus(request.taskId, DownloadJobStatus.running);
         try {
-          final file = await _repository.obtain(
-            request.candidate.segment,
-            request.profile,
-          );
+          final file = await _obtain(request);
           await _store.recordCompleted(request, file);
           await _store.setJobStatus(request.taskId, DownloadJobStatus.complete);
         } catch (_) {

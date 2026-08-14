@@ -3,16 +3,20 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
+import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/data/cloud_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
 import 'package:novel_voice_reader/features/speech/data/system_tts_adapter.dart';
+import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
   Future<Directory> createTempCacheDirectory() async {
-    final directory = await Directory.systemTemp.createTemp('provider-factory-');
+    final directory = await Directory.systemTemp.createTemp(
+      'provider-factory-',
+    );
     addTearDown(() async {
       if (await directory.exists()) {
         await directory.delete(recursive: true);
@@ -57,7 +61,10 @@ void main() {
 
     expect(provider, isA<CachedAudioSpeechProvider>());
     final cached = provider as CachedAudioSpeechProvider;
-    expect(cached.cache.synthesizer, isA<CloudTtsClient>());
+    expect(
+      (cached.cache as AudioCacheRepository).synthesizer,
+      isA<CloudTtsClient>(),
+    );
     await cached.dispose();
   });
 
@@ -69,9 +76,47 @@ void main() {
 
     expect(provider, isA<CachedAudioSpeechProvider>());
     final cached = provider as CachedAudioSpeechProvider;
-    expect(cached.cache.synthesizer, isA<MiMoTtsClient>());
+    expect(
+      (cached.cache as AudioCacheRepository).synthesizer,
+      isA<MiMoTtsClient>(),
+    );
     await cached.dispose();
   });
+
+  test(
+    'uses a shared cache without requiring another network client',
+    () async {
+      final directory = await createTempCacheDirectory();
+      final sharedCache = FakeSpeechAudioCache();
+      final factory = SpeechProviderFactory(
+        cacheDirectory: directory,
+        audioCache: sharedCache,
+        audioEngineFactory: FakeAudioPlaybackEngine.new,
+      );
+
+      final provider =
+          factory.create(
+                VoiceProfile.cloud(
+                  baseUrl: 'https://api.example.com',
+                  model: 'tts-1',
+                  voice: 'alloy',
+                  speed: 1,
+                  outputFormat: 'mp3',
+                ),
+              )
+              as CachedAudioSpeechProvider;
+
+      expect(provider.cache, same(sharedCache));
+      await provider.dispose();
+    },
+  );
+}
+
+final class FakeSpeechAudioCache implements SpeechAudioCache {
+  @override
+  Future<File> obtain(SpeechSegment segment, VoiceProfile profile) {
+    throw UnimplementedError();
+  }
 }
 
 final class EmptySecureStore implements SecureKeyValueStore {

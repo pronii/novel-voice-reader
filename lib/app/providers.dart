@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
+import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/playback/application/sleep_timer_controller.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
@@ -9,6 +10,7 @@ import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 final databaseProvider = Provider<AppDatabase?>((ref) => null);
 final playbackRuntimeProvider = Provider<PlaybackRuntime?>((ref) => null);
+final audioCacheRuntimeProvider = Provider<AudioCacheRuntime?>((ref) => null);
 
 /// Sleep timer shared across the reader and player pages. Stopping playback on
 /// expiry dismisses the media notification via [NovelAudioHandler.stop].
@@ -40,35 +42,31 @@ VoiceProfile voiceProfileFromRecord(VoiceProfileRecord? record) {
   if (record == null) {
     return VoiceProfile.system();
   }
-  return switch (record.providerType) {
-    'system' => VoiceProfile.system(
-      voice: record.voice,
-      speed: record.speed,
-      pitch: record.pitch ?? 1,
-    ),
-    'cloud'
-        when record.baseUrl != null &&
-            record.model != null &&
-            record.voice != null =>
-      VoiceProfile.cloud(
-        baseUrl: record.baseUrl!,
-        model: record.model!,
-        voice: record.voice!,
-        speed: record.speed,
-        outputFormat: record.outputFormat ?? 'mp3',
-      ),
-    'mimo' => _mimoProfileFromRecord(record),
-    _ => VoiceProfile.system(),
-  };
-}
-
-VoiceProfile _mimoProfileFromRecord(VoiceProfileRecord record) {
   try {
-    return VoiceProfile.mimo(
-      voice: record.voice ?? VoiceProfile.defaultMiMoVoice,
-      style: record.style,
-      speed: record.speed,
-    );
+    return switch (record.providerType) {
+      'system' => VoiceProfile.system(
+        voice: record.voice,
+        speed: record.speed,
+        pitch: record.pitch ?? 1,
+      ),
+      'cloud'
+          when record.baseUrl != null &&
+              record.model != null &&
+              record.voice != null =>
+        VoiceProfile.cloud(
+          baseUrl: record.baseUrl!,
+          model: record.model!,
+          voice: record.voice!,
+          speed: record.speed,
+          outputFormat: record.outputFormat ?? 'mp3',
+        ),
+      'mimo' => VoiceProfile.mimo(
+        voice: record.voice ?? VoiceProfile.defaultMiMoVoice,
+        style: record.style,
+        speed: record.speed,
+      ),
+      _ => VoiceProfile.system(),
+    };
   } on ArgumentError {
     return VoiceProfile.system();
   }

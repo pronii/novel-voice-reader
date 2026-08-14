@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -197,7 +198,7 @@ void main() {
     expect(await dispatcher.enqueue(request), isTrue);
     await dispatcher.idle;
 
-    expect(executionStore.statuses, isEmpty);
+    expect(executionStore.statuses, [DownloadJobStatus.pending]);
     expect(directory.listSync(), isEmpty);
   });
 
@@ -213,6 +214,49 @@ void main() {
     expect(await mobileGate.canRun(requiresWifi: false), isTrue);
     expect(await wifiGate.canRun(requiresWifi: true), isTrue);
   });
+
+  test('removes queued work when an updated Wi-Fi policy is denied', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'download-dispatch-test',
+    );
+    addTearDown(() async {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    });
+    final firstStarted = Completer<void>();
+    final releaseFirst = Completer<void>();
+    final executionStore = FakeDownloadExecutionStore();
+    final dispatcher = AudioCacheTaskDispatcher(
+      obtain: (request) async {
+        if (request.taskId == 'first') {
+          firstStarted.complete();
+          await releaseFirst.future;
+        }
+        final file = File(
+          '${directory.path}${Platform.pathSeparator}${request.taskId}.mp3',
+        );
+        await file.writeAsBytes(validMp3Bytes);
+        return file;
+      },
+      store: executionStore,
+      networkGate: SequenceNetworkGate([true, true, true, false]),
+    );
+    final first = request(taskId: 'first');
+    final second = request(taskId: 'second');
+
+    expect(await dispatcher.enqueue(first), isTrue);
+    await firstStarted.future;
+    expect(await dispatcher.enqueue(second), isTrue);
+    expect(
+      await dispatcher.enqueue(request(taskId: 'second', requiresWifi: true)),
+      isFalse,
+    );
+    releaseFirst.complete();
+    await dispatcher.idle;
+
+    expect(executionStore.completedTaskIds, ['first']);
+  });
 }
 
 final profile = VoiceProfile.cloud(
@@ -222,6 +266,46 @@ final profile = VoiceProfile.cloud(
   speed: 1,
   outputFormat: 'mp3',
 );
+
+DownloadDispatchRequest request({
+  required String taskId,
+  bool requiresWifi = false,
+}) {
+  return DownloadDispatchRequest(
+    taskId: taskId,
+    bookId: 7,
+    candidate: DownloadCandidate(
+      cacheKey: taskId,
+      chapterId: 2,
+      chapterIndex: 0,
+      paragraphIndex: 0,
+      segment: SpeechSegment(
+        id: '$taskId:0',
+        paragraphId: taskId.hashCode,
+        text: '正文',
+        partIndex: 0,
+      ),
+      estimatedBytes: 100,
+      cached: false,
+    ),
+    profile: profile,
+    priority: 0,
+    requiresWifi: requiresWifi,
+  );
+}
+
+final validMp3Bytes = Uint8List.fromList([
+  0x49,
+  0x44,
+  0x33,
+  0x04,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+]);
 
 final class ValidSynthesizer implements CloudSpeechSynthesizer {
   @override
@@ -257,6 +341,7 @@ final class FailingSynthesizer implements CloudSpeechSynthesizer {
 final class FakeDownloadExecutionStore implements DownloadExecutionStore {
   final List<DownloadJobStatus> statuses = [];
   final List<String> failedTaskIds = [];
+  final List<String> completedTaskIds = [];
   File? completedFile;
 
   @override
@@ -270,6 +355,7 @@ final class FakeDownloadExecutionStore implements DownloadExecutionStore {
     File file,
   ) async {
     completedFile = file;
+    completedTaskIds.add(request.taskId);
   }
 
   @override

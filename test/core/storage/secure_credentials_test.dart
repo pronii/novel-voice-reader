@@ -47,21 +47,24 @@ void main() {
     expect(await credentials.readApiKey(), 'compatible-secret');
   });
 
-  test('runWithMiMoApiKeyUpdate restores the previous key on failure', () async {
-    final store = FakeSecureKeyValueStore();
-    final credentials = SecureCredentials(store);
-    await credentials.writeMiMoApiKey('old-secret');
+  test(
+    'runWithMiMoApiKeyUpdate restores the previous key on failure',
+    () async {
+      final store = FakeSecureKeyValueStore();
+      final credentials = SecureCredentials(store);
+      await credentials.writeMiMoApiKey('old-secret');
 
-    await expectLater(
-      credentials.runWithMiMoApiKeyUpdate<void>(
-        apiKey: 'new-secret',
-        commit: () async => throw StateError('boom'),
-      ),
-      throwsA(isA<StateError>()),
-    );
+      await expectLater(
+        credentials.runWithMiMoApiKeyUpdate<void>(
+          apiKey: 'new-secret',
+          commit: () async => throw StateError('boom'),
+        ),
+        throwsA(isA<StateError>()),
+      );
 
-    expect(await credentials.readMiMoApiKey(), 'old-secret');
-  });
+      expect(await credentials.readMiMoApiKey(), 'old-secret');
+    },
+  );
 
   test('runWithMiMoApiKeyUpdate keeps the new key on success', () async {
     final store = FakeSecureKeyValueStore();
@@ -74,6 +77,22 @@ void main() {
 
     expect(result, 'done');
     expect(await credentials.readMiMoApiKey(), 'new-secret');
+  });
+
+  test('runWithApiKeyUpdate restores the cloud key on failure', () async {
+    final store = FakeSecureKeyValueStore();
+    final credentials = SecureCredentials(store);
+    await credentials.writeApiKey('old-secret');
+
+    await expectLater(
+      credentials.runWithApiKeyUpdate<void>(
+        apiKey: 'new-secret',
+        commit: () async => throw StateError('boom'),
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    expect(await credentials.readApiKey(), 'old-secret');
   });
 }
 

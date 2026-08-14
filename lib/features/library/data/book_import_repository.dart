@@ -1,9 +1,12 @@
 import 'package:drift/drift.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/features/library/domain/book_parser.dart';
 
 final class BookImportRepository {
+  static const maxFileBytes = 100 * 1024 * 1024;
+
   const BookImportRepository({
     required this.database,
     required this.txtParser,
@@ -15,11 +18,18 @@ final class BookImportRepository {
   final BookParser epubParser;
 
   Future<int> importFile(PlatformFile file) async {
-    final bytes = file.bytes ?? await file.xFile.readAsBytes();
+    _validateFileSize(file.size);
+    final inlineBytes = file.bytes;
+    if (inlineBytes != null) {
+      return importBytes(inlineBytes, fileName: file.name);
+    }
+    _validateFileSize(await file.xFile.length());
+    final bytes = await file.xFile.readAsBytes();
     return importBytes(bytes, fileName: file.name);
   }
 
   Future<int> importBytes(Uint8List bytes, {required String fileName}) async {
+    _validateFileSize(bytes.length);
     final extension = fileName.split('.').last.toLowerCase();
     final parser = switch (extension) {
       'txt' => txtParser,
@@ -65,5 +75,11 @@ final class BookImportRepository {
       }
       return bookId;
     });
+  }
+
+  static void _validateFileSize(int bytes) {
+    if (bytes > maxFileBytes) {
+      throw const AppFailure('图书文件超过 100 MB，请先压缩或拆分');
+    }
   }
 }

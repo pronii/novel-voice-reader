@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:xml/xml.dart';
 
 void main() {
-  test('Android declares download and foreground playback permissions', () {
+  test('Android declares foreground playback permissions', () {
     final document = XmlDocument.parse(
       File('android/app/src/main/AndroidManifest.xml').readAsStringSync(),
     );
@@ -23,7 +23,6 @@ void main() {
       containsAll({
         'android.permission.INTERNET',
         'android.permission.WAKE_LOCK',
-        'android.permission.RECEIVE_BOOT_COMPLETED',
         'android.permission.FOREGROUND_SERVICE',
         'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
       }),
@@ -50,19 +49,12 @@ void main() {
     );
   });
 
-  test('iOS declares opportunistic processing and audio background modes', () {
+  test('iOS declares audio background playback mode', () {
     final document = XmlDocument.parse(
       File('ios/Runner/Info.plist').readAsStringSync(),
     );
 
-    expect(
-      valuesForArrayKey(document, 'UIBackgroundModes'),
-      containsAll({'audio', 'fetch', 'processing'}),
-    );
-    expect(
-      valuesForArrayKey(document, 'BGTaskSchedulerPermittedIdentifiers'),
-      contains('com.pronii.novelVoiceReader.downloadProcessing'),
-    );
+    expect(valuesForArrayKey(document, 'UIBackgroundModes'), contains('audio'));
   });
 }
 

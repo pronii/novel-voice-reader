@@ -46,7 +46,7 @@ void main() {
     },
   );
 
-  test('zero chapters ahead queues only the current speech segment', () async {
+  test('zero chapters ahead queues the full current chapter', () async {
     final store = FakeDownloadPlanStore(
       candidates: [
         candidate(chapter: 4, paragraph: 40),
@@ -68,6 +68,8 @@ void main() {
 
     expect(dispatcher.requests.map((request) => request.taskId), [
       'cache-41-1',
+      'cache-40-0',
+      'cache-41-0',
     ]);
   });
 
@@ -130,6 +132,35 @@ void main() {
     expect(result.cacheLimitReached, isTrue);
   });
 
+  test(
+    'reserves capacity for old-profile work outside the new window',
+    () async {
+      final store = FakeDownloadPlanStore(
+        candidates: [
+          candidate(chapter: 1, paragraph: 10, estimatedBytes: 80),
+          candidate(chapter: 4, paragraph: 40, estimatedBytes: 40),
+        ],
+        jobs: [
+          job('legacy-10-0', chapter: 1, status: DownloadJobStatus.running),
+        ],
+      );
+      final dispatcher = FakeDownloadTaskDispatcher();
+      final scheduler = DownloadScheduler(store: store, dispatcher: dispatcher);
+
+      final result = await scheduler.reconcile(
+        bookId: 7,
+        chapterCount: 8,
+        currentChapterIndex: 4,
+        currentSegmentId: '40:0',
+        policy: policy(chaptersAhead: 0, maxCacheBytes: 100),
+        profile: profile,
+      );
+
+      expect(dispatcher.requests, isEmpty);
+      expect(result.cacheLimitReached, isTrue);
+    },
+  );
+
   test('retries a pending job during the next reconciliation', () async {
     final store = FakeDownloadPlanStore(
       candidates: [candidate(chapter: 4, paragraph: 40)],
@@ -158,6 +189,81 @@ void main() {
     expect(second.enqueuedTaskIds, ['cache-40-0']);
     expect(dispatcher.requests, hasLength(2));
     expect(store.statuses['cache-40-0'], DownloadJobStatus.enqueued);
+  });
+
+  test('does not overwrite active jobs during reconciliation', () async {
+    final store = FakeDownloadPlanStore(
+      candidates: [
+        candidate(chapter: 4, paragraph: 40),
+        candidate(chapter: 4, paragraph: 41),
+      ],
+      jobs: [
+        job('cache-40-0', chapter: 4, status: DownloadJobStatus.enqueued),
+        job('cache-41-0', chapter: 4, status: DownloadJobStatus.running),
+      ],
+    );
+    final dispatcher = FakeDownloadTaskDispatcher();
+    final scheduler = DownloadScheduler(store: store, dispatcher: dispatcher);
+
+    final result = await scheduler.reconcile(
+      bookId: 7,
+      chapterCount: 8,
+      currentChapterIndex: 4,
+      currentSegmentId: '40:0',
+      policy: policy(chaptersAhead: 0),
+      profile: profile,
+    );
+
+    expect(dispatcher.requests.map((request) => request.taskId), [
+      'cache-40-0',
+      'cache-41-0',
+    ]);
+    expect(store.statuses, isEmpty);
+    expect(result.enqueuedTaskIds, isEmpty);
+  });
+
+  test(
+    'returns a persisted active job to pending when restore is rejected',
+    () async {
+      final store = FakeDownloadPlanStore(
+        candidates: [candidate(chapter: 4, paragraph: 40)],
+        jobs: [
+          job('cache-40-0', chapter: 4, status: DownloadJobStatus.enqueued),
+        ],
+      );
+      final dispatcher = FakeDownloadTaskDispatcher(results: [false]);
+      final scheduler = DownloadScheduler(store: store, dispatcher: dispatcher);
+
+      await scheduler.reconcile(
+        bookId: 7,
+        chapterCount: 8,
+        currentChapterIndex: 4,
+        currentSegmentId: '40:0',
+        policy: policy(chaptersAhead: 0),
+        profile: profile,
+      );
+
+      expect(store.statuses['cache-40-0'], DownloadJobStatus.pending);
+    },
+  );
+
+  test('keeps a rejected dispatch pending', () async {
+    final store = FakeDownloadPlanStore(
+      candidates: [candidate(chapter: 4, paragraph: 40)],
+    );
+    final dispatcher = FakeDownloadTaskDispatcher(results: [false]);
+    final scheduler = DownloadScheduler(store: store, dispatcher: dispatcher);
+
+    await scheduler.reconcile(
+      bookId: 7,
+      chapterCount: 8,
+      currentChapterIndex: 4,
+      currentSegmentId: '40:0',
+      policy: policy(chaptersAhead: 0),
+      profile: profile,
+    );
+
+    expect(store.statuses['cache-40-0'], DownloadJobStatus.pending);
   });
 }
 
@@ -277,7 +383,7 @@ final class FakeDownloadPlanStore implements DownloadPlanStore {
   }
 
   @override
-  Future<int> totalCacheBytes() async => cacheBytes;
+  Future<int> totalCacheBytes(int bookId) async => cacheBytes;
 }
 
 final class FakeDownloadTaskDispatcher implements DownloadTaskDispatcher {

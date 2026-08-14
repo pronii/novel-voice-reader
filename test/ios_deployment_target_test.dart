@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('all iOS deployment targets support background_downloader', () {
+  test('all iOS deployment targets match the supported minimum', () {
     final project = File(
       'ios/Runner.xcodeproj/project.pbxproj',
     ).readAsStringSync();
@@ -15,7 +15,7 @@ void main() {
     expect(
       deploymentTargets.every((version) => version >= 14.0),
       isTrue,
-      reason: 'background_downloader requires iOS 14.0 or newer',
+      reason: '声阅 currently supports iOS 14.0 or newer',
     );
   });
 }

@@ -14,6 +14,7 @@ import 'package:novel_voice_reader/core/network/speech_http_client.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/downloads/domain/download_policy.dart';
+import 'package:novel_voice_reader/features/downloads/data/audio_cache_path.dart';
 import 'package:novel_voice_reader/features/downloads/presentation/cache_page.dart';
 import 'package:novel_voice_reader/features/library/data/book_import_repository.dart';
 import 'package:novel_voice_reader/features/library/data/epub_book_parser.dart';
@@ -58,8 +59,10 @@ GoRouter createAppRouter() {
         builder: (context, state) => const _VoiceSettingsRoutePage(),
       ),
       GoRoute(
-        path: '/settings/cache',
-        builder: (context, state) => const _CacheSettingsRoutePage(),
+        path: '/settings/cache/:bookId',
+        builder: (context, state) => _CacheSettingsRoutePage(
+          bookId: int.parse(state.pathParameters['bookId']!),
+        ),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(
@@ -86,7 +89,6 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
         books: const [],
         onImport: _importBook,
         onOpenVoiceSettings: () => context.push('/settings/voice'),
-        onOpenCacheSettings: () => context.push('/settings/cache'),
       );
     }
     final books = ref.watch(libraryBooksProvider);
@@ -111,7 +113,8 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
         onImport: _importBook,
         onOpenBook: (bookId) => context.push('/reader/$bookId'),
         onOpenVoiceSettings: () => context.push('/settings/voice'),
-        onOpenCacheSettings: () => context.push('/settings/cache'),
+        onOpenCacheSettings: (bookId) =>
+            context.push('/settings/cache/$bookId'),
       ),
     );
   }
@@ -126,11 +129,14 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: const ['txt', 'epub'],
-        withData: true,
+        withData: false,
       );
       final file = result?.files.singleOrNull;
       if (file == null) {
         return;
+      }
+      if (file.size > BookImportRepository.maxFileBytes) {
+        throw const AppFailure('图书文件超过 100 MB，请先压缩或拆分');
       }
       await BookImportRepository(
         database: database,
@@ -153,6 +159,7 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
 
 String _importErrorMessage(Object error) {
   return switch (error) {
+    AppFailure(:final message) => message,
     UnsupportedError() => '仅支持 TXT 和非 DRM EPUB 图书',
     FormatException() => '图书文件损坏、加密或不包含可阅读正文',
     _ => '导入失败，请确认文件仍可访问',
@@ -331,17 +338,30 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
       _pendingPlaybackRuntime = runtime;
       _pendingPlaybackReplacement = replacementToken;
       final profile = await loadActiveVoiceProfile(database);
-      final supportDirectory = await getApplicationSupportDirectory();
-      final credentials = SecureCredentials(
-        FlutterSecureKeyValueStore(const FlutterSecureStorage()),
-      );
-      final provider = SpeechProviderFactory(
-        dio: createSpeechDio(),
-        credentials: credentials,
-        cacheDirectory: Directory(
-          '${supportDirectory.path}${Platform.pathSeparator}speech_audio',
-        ),
-      ).create(profile);
+      final audioCacheRuntime = ref.read(audioCacheRuntimeProvider);
+      final Directory cacheDirectory;
+      if (audioCacheRuntime == null) {
+        final supportDirectory = await getApplicationSupportDirectory();
+        cacheDirectory = audioCacheDirectoryForBook(
+          supportDirectory,
+          widget.bookId,
+        );
+      } else {
+        cacheDirectory = audioCacheRuntime.cacheDirectoryForBook(widget.bookId);
+      }
+      final providerFactory = audioCacheRuntime == null
+          ? SpeechProviderFactory(
+              dio: createSpeechDio(),
+              credentials: SecureCredentials(
+                FlutterSecureKeyValueStore(const FlutterSecureStorage()),
+              ),
+              cacheDirectory: cacheDirectory,
+            )
+          : SpeechProviderFactory(
+              cacheDirectory: cacheDirectory,
+              audioCache: audioCacheRuntime.forBook(widget.bookId),
+            );
+      final provider = providerFactory.create(profile);
       final coordinator = PlaybackCoordinator(
         provider: provider,
         progress: DriftPlaybackProgressRepository(
@@ -374,6 +394,32 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
       await (database.update(database.books)
             ..where((book) => book.id.equals(widget.bookId)))
           .write(BooksCompanion(lastReadAt: Value(DateTime.now())));
+      if (audioCacheRuntime != null &&
+          profile.providerType != SpeechProviderType.system) {
+        final policyRecord =
+            await (database.select(database.downloadPolicies)
+                  ..where((policy) => policy.bookId.equals(widget.bookId)))
+                .getSingleOrNull();
+        if (policyRecord != null) {
+          unawaited(
+            audioCacheRuntime
+                .reconcile(
+                  bookId: widget.bookId,
+                  chapterCount: data.chapters.length,
+                  currentChapterIndex: chapter.index,
+                  currentParagraphId: paragraph.id,
+                  policy: DownloadPolicy(
+                    chaptersAhead: policyRecord.chaptersAhead,
+                    wholeBook: policyRecord.wholeBook,
+                    wifiOnly: policyRecord.wifiOnly,
+                    maxCacheBytes: policyRecord.maxCacheBytes,
+                  ),
+                  profile: profile,
+                )
+                .then<void>((_) {}, onError: (Object _, StackTrace _) {}),
+          );
+        }
+      }
     } catch (error) {
       if (error is! AppFailure) {
         _showSpeechFailure(const AppFailure('朗读启动失败'));
@@ -493,10 +539,12 @@ final class _PlayerRoutePage extends ConsumerWidget {
 final class _VoiceSettingsInitialData {
   const _VoiceSettingsInitialData({
     required this.profile,
+    required this.hasSavedCloudApiKey,
     required this.hasSavedMiMoApiKey,
   });
 
   final VoiceProfile profile;
+  final bool hasSavedCloudApiKey;
   final bool hasSavedMiMoApiKey;
 }
 
@@ -513,7 +561,13 @@ final _voiceSettingsInitialDataProvider =
       final profile = database == null
           ? VoiceProfile.system()
           : await loadActiveVoiceProfile(database);
+      String? cloudApiKey;
       String? mimoApiKey;
+      try {
+        cloudApiKey = await credentials.readApiKey();
+      } catch (_) {
+        cloudApiKey = null;
+      }
       try {
         mimoApiKey = await credentials.readMiMoApiKey();
       } catch (_) {
@@ -521,6 +575,7 @@ final _voiceSettingsInitialDataProvider =
       }
       return _VoiceSettingsInitialData(
         profile: profile,
+        hasSavedCloudApiKey: cloudApiKey?.trim().isNotEmpty ?? false,
         hasSavedMiMoApiKey: mimoApiKey?.trim().isNotEmpty ?? false,
       );
     });
@@ -539,6 +594,7 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
       error: (_, _) => const Scaffold(body: Center(child: Text('语音设置加载失败'))),
       data: (initial) => VoiceSettingsPage(
         initialProfile: initial.profile,
+        hasSavedCloudApiKey: initial.hasSavedCloudApiKey,
         hasSavedMiMoApiKey: initial.hasSavedMiMoApiKey,
         onTestConnection: (submission) async {
           final profile = submission.profile;
@@ -548,10 +604,15 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
                   submission.credentials.normalizedApiKey ??
                   await credentials.readMiMoApiKey() ??
                   '';
-              await MiMoTtsClient(
-                dio: createSpeechDio(),
-                credentials: credentials,
-              ).testConnection(apiKey: apiKey, profile: profile);
+              final dio = createSpeechDio();
+              try {
+                await MiMoTtsClient(
+                  dio: dio,
+                  credentials: credentials,
+                ).testConnection(apiKey: apiKey, profile: profile);
+              } finally {
+                dio.close(force: true);
+              }
             case SpeechProviderType.system || SpeechProviderType.cloud:
               throw const AppFailure('当前语音服务不支持连接测试');
           }
@@ -561,6 +622,7 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
           Future<void> persistProfile() async {
             if (database == null) return;
             await database.transaction(() async {
+              await database.delete(database.voiceProfiles).go();
               await database
                   .into(database.voiceProfiles)
                   .insert(
@@ -585,17 +647,14 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
             );
             return;
           }
-
-          await persistProfile();
-          final apiKey = submission.credentials.normalizedApiKey;
-          if (apiKey != null) {
-            switch (profile.providerType) {
-              case SpeechProviderType.cloud:
-                await credentials.writeApiKey(apiKey);
-              case SpeechProviderType.system || SpeechProviderType.mimo:
-                break;
-            }
+          if (profile.providerType == SpeechProviderType.cloud) {
+            await credentials.runWithApiKeyUpdate(
+              apiKey: submission.credentials.normalizedApiKey,
+              commit: persistProfile,
+            );
+            return;
           }
+          await persistProfile();
         },
       ),
     );
@@ -603,7 +662,9 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
 }
 
 final class _CacheSettingsRoutePage extends ConsumerWidget {
-  const _CacheSettingsRoutePage();
+  const _CacheSettingsRoutePage({required this.bookId});
+
+  final int bookId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -616,7 +677,7 @@ final class _CacheSettingsRoutePage extends ConsumerWidget {
       );
     }
     return FutureBuilder<_CachePageData>(
-      future: _loadCachePageData(database),
+      future: _loadCachePageData(database, bookId),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return const Scaffold(body: Center(child: Text('缓存设置加载失败')));
@@ -631,24 +692,40 @@ final class _CacheSettingsRoutePage extends ConsumerWidget {
           chapterCount: data.chapterCount,
           currentChapterIndex: data.currentChapterIndex,
           initialPolicy: data.policy,
-          onApply: (policy) {
-            final bookId = data.bookId;
-            if (bookId == null) {
-              return;
+          bookTitle: data.bookTitle,
+          cachedBytes: data.cachedBytes,
+          cachedSegmentCount: data.cachedSegmentCount,
+          onApply: (policy) async {
+            final profile = await loadActiveVoiceProfile(database);
+            if (profile.providerType == SpeechProviderType.system) {
+              throw const AppFailure('请先选择兼容或 MiMo 语音服务');
             }
-            unawaited(
-              database
-                  .into(database.downloadPolicies)
-                  .insertOnConflictUpdate(
-                    DownloadPoliciesCompanion.insert(
-                      bookId: Value(bookId),
-                      chaptersAhead: Value(policy.chaptersAhead),
-                      wholeBook: Value(policy.wholeBook),
-                      wifiOnly: Value(policy.wifiOnly),
-                      maxCacheBytes: policy.maxCacheBytes,
-                    ),
+            final runtime = ref.read(audioCacheRuntimeProvider);
+            if (runtime == null) {
+              throw const AppFailure('缓存服务暂时不可用');
+            }
+            await database
+                .into(database.downloadPolicies)
+                .insertOnConflictUpdate(
+                  DownloadPoliciesCompanion.insert(
+                    bookId: Value(bookId),
+                    chaptersAhead: Value(policy.chaptersAhead),
+                    wholeBook: Value(policy.wholeBook),
+                    wifiOnly: Value(policy.wifiOnly),
+                    maxCacheBytes: policy.maxCacheBytes,
                   ),
+                );
+            final result = await runtime.reconcile(
+              bookId: bookId,
+              chapterCount: data.chapterCount,
+              currentChapterIndex: data.currentChapterIndex,
+              currentParagraphId: data.currentParagraphId ?? -1,
+              policy: policy,
+              profile: profile,
             );
+            if (result.cacheLimitReached) {
+              throw const AppFailure('设置已保存，但缓存容量不足，部分内容将在释放空间后继续');
+            }
           },
         );
       },
@@ -656,17 +733,22 @@ final class _CacheSettingsRoutePage extends ConsumerWidget {
   }
 }
 
-Future<_CachePageData> _loadCachePageData(AppDatabase database) async {
-  final booksQuery = database.select(database.books)
-    ..orderBy([(book) => OrderingTerm.desc(book.importedAt)])
-    ..limit(1);
-  final book = await booksQuery.getSingleOrNull();
+Future<_CachePageData> _loadCachePageData(
+  AppDatabase database,
+  int bookId,
+) async {
+  final book = await (database.select(
+    database.books,
+  )..where((book) => book.id.equals(bookId))).getSingleOrNull();
   if (book == null) {
     return const _CachePageData(
-      bookId: null,
+      bookTitle: null,
       chapterCount: 0,
       currentChapterIndex: 0,
+      currentParagraphId: null,
       policy: null,
+      cachedBytes: 0,
+      cachedSegmentCount: 0,
     );
   }
   final chapters = await database.chaptersForBook(book.id);
@@ -678,13 +760,39 @@ Future<_CachePageData> _loadCachePageData(AppDatabase database) async {
                 .map((chapter) => chapter.chapterIndex)
                 .firstOrNull ??
             0;
+  final currentChapter = chapters
+      .where((chapter) => chapter.chapterIndex == currentChapterIndex)
+      .firstOrNull;
+  final currentParagraph = currentChapter == null
+      ? null
+      : await (database.select(database.paragraphs)
+              ..where(
+                (paragraph) =>
+                    paragraph.chapterId.equals(currentChapter.id) &
+                    paragraph.paragraphIndex.equals(
+                      progress?.chapterId == currentChapter.id
+                          ? progress?.paragraphIndex ?? 0
+                          : 0,
+                    ),
+              )
+              ..limit(1))
+            .getSingleOrNull();
   final record = await (database.select(
     database.downloadPolicies,
   )..where((policy) => policy.bookId.equals(book.id))).getSingleOrNull();
+  final cachedRecords =
+      await (database.select(database.audioCacheEntries)..where(
+            (entry) =>
+                entry.bookId.equals(book.id) & entry.status.equals('complete'),
+          ))
+          .get();
   return _CachePageData(
-    bookId: book.id,
+    bookTitle: book.title,
     chapterCount: chapters.length,
     currentChapterIndex: currentChapterIndex,
+    currentParagraphId: currentParagraph?.id,
+    cachedBytes: cachedRecords.fold(0, (sum, record) => sum + record.byteSize),
+    cachedSegmentCount: cachedRecords.length,
     policy: record == null
         ? null
         : DownloadPolicy(
@@ -698,14 +806,20 @@ Future<_CachePageData> _loadCachePageData(AppDatabase database) async {
 
 final class _CachePageData {
   const _CachePageData({
-    required this.bookId,
+    required this.bookTitle,
     required this.chapterCount,
     required this.currentChapterIndex,
+    required this.currentParagraphId,
     required this.policy,
+    required this.cachedBytes,
+    required this.cachedSegmentCount,
   });
 
-  final int? bookId;
+  final String? bookTitle;
   final int chapterCount;
   final int currentChapterIndex;
+  final int? currentParagraphId;
   final DownloadPolicy? policy;
+  final int cachedBytes;
+  final int cachedSegmentCount;
 }

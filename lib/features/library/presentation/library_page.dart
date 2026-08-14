@@ -28,7 +28,7 @@ final class LibraryPage extends StatelessWidget {
   final Future<void> Function() onImport;
   final ValueChanged<int>? onOpenBook;
   final VoidCallback? onOpenVoiceSettings;
-  final VoidCallback? onOpenCacheSettings;
+  final ValueChanged<int>? onOpenCacheSettings;
   final bool loading;
   final String? errorMessage;
 
@@ -44,11 +44,6 @@ final class LibraryPage extends StatelessWidget {
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: '缓存设置',
-            onPressed: onOpenCacheSettings,
-            icon: const Icon(Icons.offline_pin_outlined),
-          ),
           IconButton(
             tooltip: '语音设置',
             onPressed: onOpenVoiceSettings,
@@ -97,7 +92,18 @@ final class LibraryPage extends StatelessWidget {
           ),
           title: Text(book.title, maxLines: 2, overflow: TextOverflow.ellipsis),
           subtitle: Text(book.progressLabel),
-          trailing: const Icon(Icons.chevron_right),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (onOpenCacheSettings != null)
+                IconButton(
+                  tooltip: '缓存设置',
+                  onPressed: () => onOpenCacheSettings!(book.id),
+                  icon: const Icon(Icons.offline_pin_outlined),
+                ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
           onTap: onOpenBook == null ? null : () => onOpenBook!(book.id),
         );
       },

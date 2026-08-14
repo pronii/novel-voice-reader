@@ -58,9 +58,11 @@ final class JustAudioPlaybackEngine
     final indexSubscription = _player.currentIndexStream.listen((index) {
       if (index != null && index > previousIndex) {
         final sequence = _player.sequence;
-        for (var completedIndex = previousIndex;
-            completedIndex < index && completedIndex < sequence.length;
-            completedIndex++) {
+        for (
+          var completedIndex = previousIndex;
+          completedIndex < index && completedIndex < sequence.length;
+          completedIndex++
+        ) {
           final uri = sequence[completedIndex].tag as String?;
           if (uri != null) {
             controller.add(uri);
@@ -148,7 +150,7 @@ final class CachedAudioSpeechProvider
     _completionSubscription = engine.completed.listen(_onCompleted);
   }
 
-  final AudioCacheRepository cache;
+  final SpeechAudioCache cache;
   final AudioPlaybackEngine engine;
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
   late final StreamSubscription<String> _completionSubscription;
@@ -177,7 +179,7 @@ final class CachedAudioSpeechProvider
     final generation = ++_prepareGeneration;
     try {
       final file = await _obtain(segment, profile);
-      _segmentsByPath[file.path] = segment;
+      _rememberSegment(file.path, segment);
       if (generation != _prepareGeneration) {
         return;
       }
@@ -186,11 +188,12 @@ final class CachedAudioSpeechProvider
           return;
         }
         final playbackEngine = engine;
-        final promotion = playbackEngine is QueuedAudioPlaybackEngine &&
+        final promotion =
+            playbackEngine is QueuedAudioPlaybackEngine &&
                 _queuedSegmentIds.isNotEmpty &&
                 _queuedSegmentIds.first == segment.id
             ? await (playbackEngine as QueuedAudioPlaybackEngine)
-                .promoteQueuedFilePath(file.path)
+                  .promoteQueuedFilePath(file.path)
             : QueuedAudioPromotion.notPromoted;
         if (promotion == QueuedAudioPromotion.notPromoted) {
           await engine.setFilePath(file.path);
@@ -224,7 +227,6 @@ final class CachedAudioSpeechProvider
   Future<void> prefetch(SpeechSegment segment, VoiceProfile profile) async {
     final generation = _prepareGeneration;
     final file = await _obtain(segment, profile);
-    _segmentsByPath[file.path] = segment;
     if (generation != _prepareGeneration) {
       return;
     }
@@ -242,6 +244,7 @@ final class CachedAudioSpeechProvider
         if (_queuedSegmentIds.isNotEmpty) {
           return;
         }
+        _rememberSegment(file.path, segment);
         await queuedEngine.queueNextFilePath(file.path);
         _queuedSegmentIds.add(segment.id);
       });
@@ -289,6 +292,8 @@ final class CachedAudioSpeechProvider
   Future<void> stop() async {
     _started = false;
     _nativePlaybackActive = false;
+    _queuedSegmentIds.clear();
+    _segmentsByPath.clear();
     await engine.stop();
   }
 
@@ -302,10 +307,17 @@ final class CachedAudioSpeechProvider
   }
 
   void _onCompleted([String? path]) {
-    final segment = path == null ? _segment : _segmentsByPath[path];
+    final segment = path == null ? _segment : _segmentsByPath.remove(path);
     if (segment != null) {
       _started = false;
       _events.add(SpeechCompleted(segmentId: segment.id));
+    }
+  }
+
+  void _rememberSegment(String path, SpeechSegment segment) {
+    _segmentsByPath[path] = segment;
+    while (_segmentsByPath.length > 4) {
+      _segmentsByPath.remove(_segmentsByPath.keys.first);
     }
   }
 

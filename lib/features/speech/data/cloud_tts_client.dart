@@ -36,8 +36,12 @@ final class CloudTtsClient implements CloudSpeechSynthesizer {
 
     for (var attempt = 1; attempt <= _maxAttempts; attempt++) {
       try {
+        final baseUrl = profile.normalizedBaseUrl;
+        final endpoint = baseUrl.endsWith('/v1')
+            ? '$baseUrl/audio/speech'
+            : '$baseUrl/v1/audio/speech';
         final response = await dio.post<List<int>>(
-          '${profile.normalizedBaseUrl}/v1/audio/speech',
+          endpoint,
           data: {
             'model': profile.model,
             'voice': profile.voice,

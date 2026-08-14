@@ -12,17 +12,19 @@ import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 final class SpeechProviderFactory {
   SpeechProviderFactory({
-    required this.dio,
-    required this.credentials,
+    this.dio,
+    this.credentials,
     required this.cacheDirectory,
+    this.audioCache,
     SystemTtsEngine Function()? systemEngineFactory,
     AudioPlaybackEngine Function()? audioEngineFactory,
   }) : systemEngineFactory = systemEngineFactory ?? FlutterSystemTtsEngine.new,
        audioEngineFactory = audioEngineFactory ?? JustAudioPlaybackEngine.new;
 
-  final Dio dio;
-  final SecureCredentials credentials;
+  final Dio? dio;
+  final SecureCredentials? credentials;
   final Directory cacheDirectory;
+  final SpeechAudioCache? audioCache;
   final SystemTtsEngine Function() systemEngineFactory;
   final AudioPlaybackEngine Function() audioEngineFactory;
 
@@ -30,20 +32,35 @@ final class SpeechProviderFactory {
     return switch (profile.providerType) {
       SpeechProviderType.system => SystemTtsAdapter(systemEngineFactory()),
       SpeechProviderType.cloud => _cached(
-        CloudTtsClient(dio: dio, credentials: credentials),
+        () => CloudTtsClient(
+          dio: _requiredDio,
+          credentials: _requiredCredentials,
+        ),
       ),
       SpeechProviderType.mimo => _cached(
-        MiMoTtsClient(dio: dio, credentials: credentials),
+        () =>
+            MiMoTtsClient(dio: _requiredDio, credentials: _requiredCredentials),
       ),
     };
   }
 
-  CachedAudioSpeechProvider _cached(CloudSpeechSynthesizer synthesizer) {
+  Dio get _requiredDio =>
+      dio ?? (throw StateError('A Dio client is required for cloud speech.'));
+
+  SecureCredentials get _requiredCredentials =>
+      credentials ??
+      (throw StateError('Secure credentials are required for cloud speech.'));
+
+  CachedAudioSpeechProvider _cached(
+    CloudSpeechSynthesizer Function() createSynthesizer,
+  ) {
     return CachedAudioSpeechProvider(
-      cache: AudioCacheRepository(
-        directory: cacheDirectory,
-        synthesizer: synthesizer,
-      ),
+      cache:
+          audioCache ??
+          AudioCacheRepository(
+            directory: cacheDirectory,
+            synthesizer: createSynthesizer(),
+          ),
       engine: audioEngineFactory(),
     );
   }

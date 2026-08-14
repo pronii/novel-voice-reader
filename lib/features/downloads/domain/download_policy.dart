@@ -1,4 +1,6 @@
 final class DownloadPolicy {
+  static const defaultMaxCacheBytes = 512 * 1024 * 1024;
+
   factory DownloadPolicy({
     required int chaptersAhead,
     required bool wholeBook,

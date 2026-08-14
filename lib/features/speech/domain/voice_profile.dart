@@ -1,6 +1,15 @@
 enum SpeechProviderType { system, cloud, mimo }
 
 final class VoiceProfile {
+  static const _cloudOutputFormats = <String>{
+    'mp3',
+    'opus',
+    'aac',
+    'flac',
+    'wav',
+    'pcm',
+    'ogg',
+  };
   static const mimoBaseUrl = 'https://api.xiaomimimo.com';
   static const mimoModel = 'mimo-v2.5-tts';
   static const defaultMiMoVoice = '冰糖';
@@ -21,6 +30,7 @@ final class VoiceProfile {
     double pitch = 1,
   }) {
     _validateSpeed(speed);
+    _validatePitch(pitch);
     return VoiceProfile._(
       providerType: SpeechProviderType.system,
       voice: voice,
@@ -37,13 +47,41 @@ final class VoiceProfile {
     required String outputFormat,
   }) {
     _validateSpeed(speed);
+    final normalizedBaseUrl = baseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
+    final uri = Uri.tryParse(normalizedBaseUrl);
+    if (uri == null ||
+        !uri.hasScheme ||
+        (uri.scheme != 'https' && uri.scheme != 'http') ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment) {
+      throw ArgumentError.value(baseUrl, 'baseUrl', 'Invalid HTTP(S) URL.');
+    }
+    final normalizedModel = model.trim();
+    final normalizedVoice = voice.trim();
+    final normalizedFormat = outputFormat.trim().toLowerCase();
+    if (normalizedModel.isEmpty) {
+      throw ArgumentError.value(model, 'model', 'Must not be empty.');
+    }
+    if (normalizedVoice.isEmpty) {
+      throw ArgumentError.value(voice, 'voice', 'Must not be empty.');
+    }
+    if (!_cloudOutputFormats.contains(normalizedFormat) &&
+        !normalizedFormat.endsWith('-mp3')) {
+      throw ArgumentError.value(
+        outputFormat,
+        'outputFormat',
+        'Unsupported audio format.',
+      );
+    }
     return VoiceProfile._(
       providerType: SpeechProviderType.cloud,
-      baseUrl: baseUrl,
-      model: model,
-      voice: voice,
+      baseUrl: normalizedBaseUrl,
+      model: normalizedModel,
+      voice: normalizedVoice,
       speed: speed,
-      outputFormat: outputFormat,
+      outputFormat: normalizedFormat,
     );
   }
 
@@ -96,7 +134,7 @@ final class VoiceProfile {
     if (value == null) {
       return '';
     }
-    return value.replaceFirst(RegExp(r'/+$'), '');
+    return value;
   }
 
   int get maxSegmentCharacters => switch (providerType) {
@@ -105,8 +143,14 @@ final class VoiceProfile {
   };
 
   static void _validateSpeed(double speed) {
-    if (speed <= 0) {
+    if (!speed.isFinite || speed <= 0) {
       throw ArgumentError.value(speed, 'speed', 'Must be positive.');
+    }
+  }
+
+  static void _validatePitch(double pitch) {
+    if (!pitch.isFinite || pitch <= 0) {
+      throw ArgumentError.value(pitch, 'pitch', 'Must be positive.');
     }
   }
 }

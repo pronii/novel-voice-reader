@@ -15,9 +15,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(
-      const MaterialApp(home: VoiceSettingsPage()),
-    );
+    await tester.pumpWidget(const MaterialApp(home: VoiceSettingsPage()));
 
     expect(find.byType(SingleChildScrollView), findsNothing);
     await tester.tap(find.byKey(const Key('tts-provider-dropdown')));
@@ -262,6 +260,52 @@ void main() {
     expect(find.text('请输入 MiMo API Key'), findsOneWidget);
   });
 
+  testWidgets('requires a cloud key before saving a compatible profile', (
+    tester,
+  ) async {
+    var saves = 0;
+    await tester.pumpWidget(
+      MaterialApp(home: VoiceSettingsPage(onSave: (_) async => saves++)),
+    );
+
+    await _selectVoiceProvider(tester, '兼容');
+    await tester.ensureVisible(find.text('保存'));
+    await tester.tap(find.text('保存'));
+    await tester.pump();
+
+    expect(saves, 0);
+    expect(find.text('请输入云端语音 API Key'), findsOneWidget);
+  });
+
+  testWidgets('keeps an existing cloud key when the input is blank', (
+    tester,
+  ) async {
+    VoiceSettingsSubmission? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          initialProfile: VoiceProfile.cloud(
+            baseUrl: 'https://example.com',
+            model: 'tts-model',
+            voice: 'voice-a',
+            speed: 1,
+            outputFormat: 'mp3',
+          ),
+          hasSavedCloudApiKey: true,
+          onSave: (submission) async => saved = submission,
+        ),
+      ),
+    );
+
+    await tester.ensureVisible(find.text('保存'));
+    await tester.tap(find.text('保存'));
+    await tester.pump();
+
+    expect(saved?.profile.providerType, SpeechProviderType.cloud);
+    expect(saved?.credentials.normalizedApiKey, isNull);
+    expect(find.text('已保存，留空则保持不变'), findsOneWidget);
+  });
+
   testWidgets('restores the saved MiMo profile without exposing its API key', (
     tester,
   ) async {
@@ -321,10 +365,7 @@ void main() {
   });
 }
 
-Future<void> _selectVoiceProvider(
-  WidgetTester tester,
-  String label,
-) async {
+Future<void> _selectVoiceProvider(WidgetTester tester, String label) async {
   await tester.tap(find.byKey(const Key('tts-provider-dropdown')));
   await tester.pumpAndSettle();
   await tester.tap(find.text(label).last);

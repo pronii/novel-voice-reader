@@ -17,12 +17,14 @@ final class VoiceSettingsPage extends StatefulWidget {
   const VoiceSettingsPage({
     super.key,
     this.initialProfile,
+    this.hasSavedCloudApiKey = false,
     this.hasSavedMiMoApiKey = false,
     this.onTestConnection,
     this.onSave,
   });
 
   final VoiceProfile? initialProfile;
+  final bool hasSavedCloudApiKey;
   final bool hasSavedMiMoApiKey;
   final Future<void> Function(VoiceSettingsSubmission submission)?
   onTestConnection;
@@ -172,7 +174,10 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
         obscureText: true,
         enableSuggestions: false,
         autocorrect: false,
-        decoration: const InputDecoration(labelText: 'API Key'),
+        decoration: InputDecoration(
+          labelText: 'API Key',
+          helperText: widget.hasSavedCloudApiKey ? '已保存，留空则保持不变' : null,
+        ),
       ),
     ];
   }
@@ -240,6 +245,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     if (_saving || _testingConnection) return;
     final submission = _validatedSubmission();
     if (submission == null) return;
+    if (!_hasUsableCredential(submission)) return;
     setState(() => _saving = true);
     try {
       await widget.onSave?.call(submission);
@@ -255,12 +261,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     if (_saving || _testingConnection) return;
     final submission = _validatedSubmission();
     if (submission == null) return;
-    if (_provider == SpeechProviderType.mimo &&
-        submission.credentials.normalizedApiKey == null &&
-        !widget.hasSavedMiMoApiKey) {
-      _showMessage('请输入 MiMo API Key');
-      return;
-    }
+    if (!_hasUsableCredential(submission)) return;
     setState(() => _testingConnection = true);
     try {
       await widget.onTestConnection?.call(submission);
@@ -314,6 +315,23 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     };
   }
 
+  bool _hasUsableCredential(VoiceSettingsSubmission submission) {
+    if (submission.credentials.normalizedApiKey != null) return true;
+    final saved = switch (_provider) {
+      SpeechProviderType.system => true,
+      SpeechProviderType.cloud => widget.hasSavedCloudApiKey,
+      SpeechProviderType.mimo => widget.hasSavedMiMoApiKey,
+    };
+    if (!saved) {
+      _showMessage(
+        _provider == SpeechProviderType.mimo
+            ? '请输入 MiMo API Key'
+            : '请输入云端语音 API Key',
+      );
+    }
+    return saved;
+  }
+
   void _showMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -331,11 +349,7 @@ final class _ProviderOption extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      children: [
-        Icon(icon, size: 20),
-        const SizedBox(width: 12),
-        Text(label),
-      ],
+      children: [Icon(icon, size: 20), const SizedBox(width: 12), Text(label)],
     );
   }
 }

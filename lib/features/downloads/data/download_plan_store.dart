@@ -36,35 +36,48 @@ final class DriftDownloadPlanStore
             .get();
     final cachedKeys = <String>{};
     for (final row in cachedRows) {
-      if (await File(row.filePath).exists()) {
+      final file = File(row.filePath);
+      if (await file.exists()) {
         cachedKeys.add(row.cacheKey);
+      } else {
+        await _deleteCacheRecord(row.cacheKey);
       }
     }
 
     final result = <DownloadCandidate>[];
-    final chapters = await _database.chaptersForBook(bookId);
-    for (final chapter in chapters) {
-      final paragraphs = await _database.paragraphsForChapter(chapter.id);
-      for (final paragraph in paragraphs) {
-        final segments = _segmenter.split(
-          paragraphId: paragraph.id,
-          text: paragraph.content,
-          maxCharacters: profile.maxSegmentCharacters,
-        );
-        for (final segment in segments) {
-          final cacheKey = CacheKey.forSegment(segment, profile);
-          result.add(
-            DownloadCandidate(
-              cacheKey: cacheKey,
-              chapterId: chapter.id,
-              chapterIndex: chapter.chapterIndex,
-              paragraphIndex: paragraph.paragraphIndex,
-              segment: segment,
-              estimatedBytes: max(4096, segment.text.runes.length * 4000),
-              cached: cachedKeys.contains(cacheKey),
+    final query =
+        _database.select(_database.paragraphs).join([
+            innerJoin(
+              _database.chapters,
+              _database.chapters.id.equalsExp(_database.paragraphs.chapterId),
             ),
-          );
-        }
+          ])
+          ..where(_database.chapters.bookId.equals(bookId))
+          ..orderBy([
+            OrderingTerm.asc(_database.chapters.chapterIndex),
+            OrderingTerm.asc(_database.paragraphs.paragraphIndex),
+          ]);
+    for (final row in await query.get()) {
+      final chapter = row.readTable(_database.chapters);
+      final paragraph = row.readTable(_database.paragraphs);
+      final segments = _segmenter.split(
+        paragraphId: paragraph.id,
+        text: paragraph.content,
+        maxCharacters: profile.maxSegmentCharacters,
+      );
+      for (final segment in segments) {
+        final cacheKey = CacheKey.forSegment(segment, profile);
+        result.add(
+          DownloadCandidate(
+            cacheKey: cacheKey,
+            chapterId: chapter.id,
+            chapterIndex: chapter.chapterIndex,
+            paragraphIndex: paragraph.paragraphIndex,
+            segment: segment,
+            estimatedBytes: max(4096, segment.text.runes.length * 4000),
+            cached: cachedKeys.contains(cacheKey),
+          ),
+        );
       }
     }
     return result;
@@ -168,13 +181,99 @@ final class DriftDownloadPlanStore
         );
   }
 
+  Future<void> recordCachedFile({
+    required int bookId,
+    required SpeechSegment segment,
+    required VoiceProfile profile,
+    required File file,
+  }) async {
+    final paragraph = await (_database.select(
+      _database.paragraphs,
+    )..where((row) => row.id.equals(segment.paragraphId))).getSingleOrNull();
+    if (paragraph == null) {
+      return;
+    }
+    final cacheKey = CacheKey.forSegment(segment, profile);
+    await _database
+        .into(_database.audioCacheEntries)
+        .insertOnConflictUpdate(
+          AudioCacheEntriesCompanion.insert(
+            cacheKey: cacheKey,
+            bookId: bookId,
+            chapterId: paragraph.chapterId,
+            paragraphId: paragraph.id,
+            filePath: file.path,
+            byteSize: await file.length(),
+            status: 'complete',
+            lastAccessedAt: DateTime.now(),
+          ),
+        );
+  }
+
+  Future<int> pruneToLimit({
+    required int bookId,
+    required int maxBytes,
+    Set<String> protectedKeys = const {},
+  }) async {
+    final query = _database.select(_database.audioCacheEntries)
+      ..where(
+        (entry) =>
+            entry.bookId.equals(bookId) & entry.status.equals('complete'),
+      )
+      ..orderBy([(entry) => OrderingTerm.asc(entry.lastAccessedAt)]);
+    final rows = await query.get();
+    var totalBytes = 0;
+    final existing = <({AudioCacheRecord record, File file, int bytes})>[];
+    for (final record in rows) {
+      final file = File(record.filePath);
+      if (!await file.exists()) {
+        await _deleteCacheRecord(record.cacheKey);
+        continue;
+      }
+      final bytes = await file.length();
+      totalBytes += bytes;
+      existing.add((record: record, file: file, bytes: bytes));
+    }
+    for (final entry in existing) {
+      if (totalBytes <= maxBytes) {
+        break;
+      }
+      if (protectedKeys.contains(entry.record.cacheKey)) {
+        continue;
+      }
+      try {
+        await entry.file.delete();
+      } on FileSystemException {
+        continue;
+      }
+      await _deleteCacheRecord(entry.record.cacheKey);
+      totalBytes -= entry.bytes;
+    }
+    return totalBytes;
+  }
+
+  Future<void> _deleteCacheRecord(String cacheKey) async {
+    await (_database.delete(
+      _database.audioCacheEntries,
+    )..where((entry) => entry.cacheKey.equals(cacheKey))).go();
+  }
+
   @override
-  Future<int> totalCacheBytes() async {
+  Future<int> totalCacheBytes(int bookId) async {
     final total = _database.audioCacheEntries.byteSize.sum();
     final query = _database.selectOnly(_database.audioCacheEntries)
       ..addColumns([total])
-      ..where(_database.audioCacheEntries.status.equals('complete'));
+      ..where(
+        _database.audioCacheEntries.bookId.equals(bookId) &
+            _database.audioCacheEntries.status.equals('complete'),
+      );
     final row = await query.getSingle();
     return row.read(total) ?? 0;
+  }
+
+  Future<DownloadPolicyRecord?> policyForBook(int bookId) {
+    return (_database.select(
+      _database.downloadPolicies,
+    )..where((policy) => policy.bookId.equals(bookId))).getSingleOrNull();
   }
 }

@@ -79,6 +79,28 @@ void main() {
     expect(directory.listSync(), isEmpty);
   });
 
+  test('replaces an existing corrupt cache file', () async {
+    final directory = await Directory.systemTemp.createTemp('voice-cache-test');
+    addTearDown(() async {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    });
+    final key = CacheKey.forSegment(testSegment, testProfile);
+    final cached = File('${directory.path}${Platform.pathSeparator}$key.mp3');
+    await cached.writeAsBytes([1, 2, 3]);
+    final synthesizer = FakeCloudSpeechSynthesizer(validMp3Bytes);
+    final repository = AudioCacheRepository(
+      directory: directory,
+      synthesizer: synthesizer,
+    );
+
+    final file = await repository.obtain(testSegment, testProfile);
+
+    expect(await file.readAsBytes(), validMp3Bytes);
+    expect(synthesizer.calls, 1);
+  });
+
   test('stores cloud MP3 output formats with an mp3 extension', () async {
     final directory = await Directory.systemTemp.createTemp('voice-cache-test');
     addTearDown(() async {

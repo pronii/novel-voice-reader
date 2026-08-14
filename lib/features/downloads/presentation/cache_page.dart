@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/downloads/domain/download_policy.dart';
 
 final class CachePage extends StatefulWidget {
@@ -10,23 +12,37 @@ final class CachePage extends StatefulWidget {
     required this.currentChapterIndex,
     required this.onApply,
     this.initialPolicy,
+    this.bookTitle,
+    this.cachedBytes = 0,
+    this.cachedSegmentCount = 0,
   });
 
   final int chapterCount;
   final int currentChapterIndex;
-  final ValueChanged<DownloadPolicy> onApply;
+  final FutureOr<void> Function(DownloadPolicy) onApply;
   final DownloadPolicy? initialPolicy;
+  final String? bookTitle;
+  final int cachedBytes;
+  final int cachedSegmentCount;
 
   @override
   State<CachePage> createState() => _CachePageState();
 }
 
 final class _CachePageState extends State<CachePage> {
+  static const _cacheSizeOptions = <int>[
+    256 * 1024 * 1024,
+    512 * 1024 * 1024,
+    1024 * 1024 * 1024,
+    2 * 1024 * 1024 * 1024,
+  ];
+
   late final TextEditingController _chaptersController;
   late bool _wholeBook;
   late bool _wifiOnly;
   late int _maxCacheBytes;
   String? _errorText;
+  bool _applying = false;
 
   int get _remainingChapters =>
       max(0, widget.chapterCount - widget.currentChapterIndex - 1);
@@ -37,7 +53,11 @@ final class _CachePageState extends State<CachePage> {
     final initial = widget.initialPolicy;
     _wholeBook = initial?.wholeBook ?? false;
     _wifiOnly = initial?.wifiOnly ?? true;
-    _maxCacheBytes = initial?.maxCacheBytes ?? 512 * 1024 * 1024;
+    final initialMaxCacheBytes =
+        initial?.maxCacheBytes ?? DownloadPolicy.defaultMaxCacheBytes;
+    _maxCacheBytes = _cacheSizeOptions.contains(initialMaxCacheBytes)
+        ? initialMaxCacheBytes
+        : DownloadPolicy.defaultMaxCacheBytes;
     _chaptersController = TextEditingController(
       text: min(initial?.chaptersAhead ?? 3, _remainingChapters).toString(),
     )..addListener(_refreshSummary);
@@ -58,6 +78,10 @@ final class _CachePageState extends State<CachePage> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          if (widget.bookTitle case final title?) ...[
+            Text(title, style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 20),
+          ],
           Text('下载范围', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 12),
           TextField(
@@ -80,6 +104,23 @@ final class _CachePageState extends State<CachePage> {
           ),
           const Divider(height: 32),
           Text('网络与容量', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('当前缓存'),
+              Text(
+                '${_formatBytes(widget.cachedBytes)} · '
+                '${widget.cachedSegmentCount} 段',
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(
+            value: min(1, widget.cachedBytes / _maxCacheBytes),
+            minHeight: 6,
+          ),
+          const SizedBox(height: 16),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('仅在 Wi-Fi 下下载'),
@@ -114,13 +155,22 @@ final class _CachePageState extends State<CachePage> {
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
-            onPressed: _apply,
+            onPressed: _applying ? null : _apply,
             icon: const Icon(Icons.check),
-            label: const Text('应用'),
+            label: Text(_applying ? '应用中' : '应用'),
           ),
         ],
       ),
     );
+  }
+
+  String _formatBytes(int bytes) {
+    const megabyte = 1024 * 1024;
+    const gigabyte = 1024 * megabyte;
+    if (bytes >= gigabyte) {
+      return '${(bytes / gigabyte).toStringAsFixed(1)} GB';
+    }
+    return '${(bytes / megabyte).toStringAsFixed(1)} MB';
   }
 
   void _refreshSummary() {
@@ -129,7 +179,7 @@ final class _CachePageState extends State<CachePage> {
     }
   }
 
-  void _apply() {
+  Future<void> _apply() async {
     final chaptersAhead = int.tryParse(_chaptersController.text);
     if (chaptersAhead == null ||
         chaptersAhead < 0 ||
@@ -137,14 +187,37 @@ final class _CachePageState extends State<CachePage> {
       setState(() => _errorText = '请输入 0 - $_remainingChapters');
       return;
     }
-    widget.onApply(
-      DownloadPolicy(
-        chaptersAhead: chaptersAhead,
-        wholeBook: _wholeBook,
-        wifiOnly: _wifiOnly,
-        maxCacheBytes: _maxCacheBytes,
-      ),
+    final policy = DownloadPolicy(
+      chaptersAhead: chaptersAhead,
+      wholeBook: _wholeBook,
+      wifiOnly: _wifiOnly,
+      maxCacheBytes: _maxCacheBytes,
     );
     FocusScope.of(context).unfocus();
+    setState(() => _applying = true);
+    try {
+      await widget.onApply(policy);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('缓存任务已更新')));
+      }
+    } on AppFailure catch (failure) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(failure.message)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('缓存设置应用失败')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _applying = false);
+      }
+    }
   }
 }

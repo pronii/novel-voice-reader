@@ -48,6 +48,29 @@ void main() {
     });
   });
 
+  test('does not duplicate v1 when it is already in the base URL', () async {
+    final adapter = RecordingHttpClientAdapter(
+      outcomes: [
+        const HttpOutcome.success([1, 2, 3]),
+      ],
+    );
+    final client = CloudTtsClient(
+      dio: Dio()..httpClientAdapter = adapter,
+      credentials: SecureCredentials(FakeSecureStore('secret')),
+    );
+    final profile = VoiceProfile.cloud(
+      baseUrl: 'https://example.com/v1',
+      model: 'tts-model',
+      voice: 'voice-a',
+      speed: 1,
+      outputFormat: 'mp3',
+    );
+
+    await client.synthesize(testSegment, profile);
+
+    expect(adapter.request?.path, 'https://example.com/v1/audio/speech');
+  });
+
   test('retries a rate-limited request and then succeeds', () async {
     final adapter = RecordingHttpClientAdapter(
       outcomes: [

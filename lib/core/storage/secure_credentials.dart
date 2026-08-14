@@ -40,6 +40,13 @@ final class SecureCredentials {
 
   Future<void> deleteApiKey() => _storage.delete(_apiKeyKey);
 
+  Future<T> runWithApiKeyUpdate<T>({
+    required String? apiKey,
+    required Future<T> Function() commit,
+  }) {
+    return _runWithKeyUpdate(key: _apiKeyKey, value: apiKey, commit: commit);
+  }
+
   Future<String?> readMiMoApiKey() => _storage.read(_mimoApiKeyKey);
 
   Future<void> writeMiMoApiKey(String value) =>
@@ -50,23 +57,33 @@ final class SecureCredentials {
   Future<T> runWithMiMoApiKeyUpdate<T>({
     required String? apiKey,
     required Future<T> Function() commit,
-  }) async {
-    if (apiKey == null) {
-      return commit();
-    }
+  }) {
+    return _runWithKeyUpdate(
+      key: _mimoApiKeyKey,
+      value: apiKey,
+      commit: commit,
+    );
+  }
 
-    final previousApiKey = await readMiMoApiKey();
-    var wroteApiKey = false;
+  Future<T> _runWithKeyUpdate<T>({
+    required String key,
+    required String? value,
+    required Future<T> Function() commit,
+  }) async {
+    final normalizedValue = value?.trim();
+    if (normalizedValue == null || normalizedValue.isEmpty) return commit();
+    final previous = await _storage.read(key);
+    var wroteValue = false;
     try {
-      await writeMiMoApiKey(apiKey);
-      wroteApiKey = true;
+      await _storage.write(key, normalizedValue);
+      wroteValue = true;
       return await commit();
     } catch (error, stackTrace) {
-      if (wroteApiKey) {
-        if (previousApiKey == null) {
-          await deleteMiMoApiKey();
+      if (wroteValue) {
+        if (previous == null) {
+          await _storage.delete(key);
         } else {
-          await writeMiMoApiKey(previousApiKey);
+          await _storage.write(key, previous);
         }
       }
       Error.throwWithStackTrace(error, stackTrace);

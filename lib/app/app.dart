@@ -7,13 +7,20 @@ import 'package:novel_voice_reader/app/providers.dart';
 import 'package:novel_voice_reader/app/router.dart';
 import 'package:novel_voice_reader/app/theme.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
+import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 
 final class NovelVoiceReaderApp extends StatefulWidget {
-  const NovelVoiceReaderApp({super.key, this.database, this.playbackRuntime});
+  const NovelVoiceReaderApp({
+    super.key,
+    this.database,
+    this.playbackRuntime,
+    this.audioCacheRuntime,
+  });
 
   final AppDatabase? database;
   final PlaybackRuntime? playbackRuntime;
+  final AudioCacheRuntime? audioCacheRuntime;
 
   @override
   State<NovelVoiceReaderApp> createState() => _NovelVoiceReaderAppState();
@@ -32,13 +39,13 @@ final class _NovelVoiceReaderAppState extends State<NovelVoiceReaderApp> {
   void dispose() {
     _router.dispose();
     final playbackRuntime = widget.playbackRuntime;
-    if (playbackRuntime != null) {
-      unawaited(playbackRuntime.dispose());
-    }
+    final audioCacheRuntime = widget.audioCacheRuntime;
     final database = widget.database;
-    if (database != null) {
-      unawaited(database.close());
-    }
+    unawaited(() async {
+      await playbackRuntime?.dispose();
+      await audioCacheRuntime?.dispose();
+      await database?.close();
+    }());
     super.dispose();
   }
 
@@ -48,6 +55,7 @@ final class _NovelVoiceReaderAppState extends State<NovelVoiceReaderApp> {
       overrides: [
         databaseProvider.overrideWithValue(widget.database),
         playbackRuntimeProvider.overrideWithValue(widget.playbackRuntime),
+        audioCacheRuntimeProvider.overrideWithValue(widget.audioCacheRuntime),
       ],
       child: MaterialApp.router(
         debugShowCheckedModeBanner: false,

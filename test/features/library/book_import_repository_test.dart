@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/features/library/data/book_import_repository.dart';
 import 'package:novel_voice_reader/features/library/domain/book_parser.dart';
@@ -17,6 +18,21 @@ void main() {
 
   tearDown(() async {
     await database.close();
+  });
+
+  test('rejects oversized files before reading their contents', () async {
+    final repository = BookImportRepository(
+      database: database,
+      txtParser: const FakeBookParser(),
+      epubParser: const FakeBookParser(),
+    );
+    final file = PlatformFile(
+      name: 'oversized.txt',
+      size: BookImportRepository.maxFileBytes + 1,
+      bytes: Uint8List(0),
+    );
+
+    await expectLater(repository.importFile(file), throwsA(isA<AppFailure>()));
   });
 
   test('imports every parsed chapter and paragraph in one book', () async {
