@@ -295,29 +295,34 @@ final class _ReaderPageState extends State<ReaderPage> {
                   borderRadius: BorderRadius.circular(28),
                   color: theme.colorScheme.surfaceContainerHighest,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        IconButton(
-                          tooltip: '减速',
-                          onPressed: _autoScroll.speed <=
-                                  AutoScrollController.minSpeed
-                              ? null
-                              : _slowDownAutoScroll,
-                          icon: const Icon(Icons.remove),
+                        Text('速度', style: theme.textTheme.labelLarge),
+                        SizedBox(
+                          width: 36,
+                          child: Text(
+                            '${_autoScroll.speedLevel}',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.labelLarge,
+                          ),
                         ),
-                        Text(
-                          '速度 ${_autoScroll.speedBand.label}',
-                          style: theme.textTheme.labelLarge,
-                        ),
-                        IconButton(
-                          tooltip: '加速',
-                          onPressed: _autoScroll.speed >=
-                                  AutoScrollController.maxSpeed
-                              ? null
-                              : _speedUpAutoScroll,
-                          icon: const Icon(Icons.add),
+                        SizedBox(
+                          width: 168,
+                          child: Slider(
+                            key: const Key('auto-scroll-speed-slider'),
+                            min: AutoScrollController.minLevel.toDouble(),
+                            max: AutoScrollController.maxLevel.toDouble(),
+                            value: _autoScroll.speedLevel
+                                .clamp(
+                                  AutoScrollController.minLevel,
+                                  AutoScrollController.maxLevel,
+                                )
+                                .toDouble(),
+                            onChanged: (value) =>
+                                _autoScroll.speedLevel = value.round(),
+                          ),
                         ),
                         const SizedBox(
                           height: 24,
@@ -343,16 +348,6 @@ final class _ReaderPageState extends State<ReaderPage> {
         },
       ),
     );
-  }
-
-  static const double _autoScrollSpeedStep = 15;
-
-  void _speedUpAutoScroll() {
-    _autoScroll.speed = _autoScroll.speed + _autoScrollSpeedStep;
-  }
-
-  void _slowDownAutoScroll() {
-    _autoScroll.speed = _autoScroll.speed - _autoScrollSpeedStep;
   }
 
   void _onBodyPointerDown(PointerDownEvent event) {
@@ -1032,7 +1027,7 @@ final class _ReaderPageState extends State<ReaderPage> {
                 ),
                 const Spacer(),
                 Text(
-                  '速度：${_autoScroll.speedBand.label}',
+                  '速度：${_autoScroll.speedLevel}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -1042,12 +1037,17 @@ final class _ReaderPageState extends State<ReaderPage> {
                 const Icon(Icons.directions_walk, size: 20),
                 Expanded(
                   child: Slider(
-                    value: _autoScroll.speed,
-                    min: AutoScrollController.minSpeed,
-                    max: AutoScrollController.maxSpeed,
-                    divisions: 28,
-                    label: _autoScroll.speedBand.label,
-                    onChanged: (value) => _autoScroll.speed = value,
+                    min: AutoScrollController.minLevel.toDouble(),
+                    max: AutoScrollController.maxLevel.toDouble(),
+                    value: _autoScroll.speedLevel
+                        .clamp(
+                          AutoScrollController.minLevel,
+                          AutoScrollController.maxLevel,
+                        )
+                        .toDouble(),
+                    label: '${_autoScroll.speedLevel}',
+                    onChanged: (value) =>
+                        _autoScroll.speedLevel = value.round(),
                   ),
                 ),
                 const Icon(Icons.directions_run, size: 20),

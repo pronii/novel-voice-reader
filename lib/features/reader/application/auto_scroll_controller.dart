@@ -53,20 +53,19 @@ class AutoScrollController extends ChangeNotifier {
   static const double maxSpeed = 150;
   static const double defaultSpeed = 45;
 
-  /// After a manual swipe ends, wait this long before resuming the crawl. The
-  /// delay lets any fling settle and gives the reader a moment to keep reading
-  /// the spot they scrolled to, matching how "auto read" behaves in mainstream
-  /// novel apps: a manual drag interrupts the crawl but never exits it.
-  static const Duration gestureResumeDelay = Duration(milliseconds: 800);
+  /// User-facing speed scale. The reader tunes an integer level in
+  /// [minLevel]..[maxLevel]; it maps linearly onto [minSpeed]..[maxSpeed], so
+  /// the exposed control is a free 1–100 dial rather than a few fixed presets.
+  static const int minLevel = 1;
+  static const int maxLevel = 100;
 
   final void Function(double offset, Duration duration) _onAdvance;
 
   Timer? _timer;
-  Timer? _resumeTimer;
   AutoScrollStatus _status = AutoScrollStatus.idle;
   // While the reader is dragging, the crawl is suspended without leaving the
-  // running state, so the toolbar still shows it as active and it can pick back
-  // up on its own once the gesture is over.
+  // running state, so the toolbar still shows it as active and it resumes the
+  // instant the gesture ends.
   bool _suspendedForGesture = false;
   double _speed;
 
@@ -83,6 +82,14 @@ class AutoScrollController extends ChangeNotifier {
   /// [minSpeed]..[maxSpeed].
   double get speed => _speed;
 
+  /// The current speed as a user-facing level in [minLevel]..[maxLevel].
+  int get speedLevel => _levelForSpeed(_speed);
+
+  /// Sets the crawl speed from a user-facing level in [minLevel]..[maxLevel].
+  set speedLevel(int level) {
+    speed = _speedForLevel(level);
+  }
+
   /// A coarse band derived from [speed], used for the "慢/中/快" label.
   AutoScrollSpeedBand get speedBand {
     const third = (maxSpeed - minSpeed) / 3;
@@ -93,6 +100,17 @@ class AutoScrollController extends ChangeNotifier {
       return AutoScrollSpeedBand.medium;
     }
     return AutoScrollSpeedBand.fast;
+  }
+
+  static double _speedForLevel(int level) {
+    final clamped = level.clamp(minLevel, maxLevel);
+    final t = (clamped - minLevel) / (maxLevel - minLevel);
+    return minSpeed + t * (maxSpeed - minSpeed);
+  }
+
+  static int _levelForSpeed(double speed) {
+    final t = (speed - minSpeed) / (maxSpeed - minSpeed);
+    return (t * (maxLevel - minLevel)).round() + minLevel;
   }
 
   /// Updates the crawl speed. Takes effect immediately: the running timer reads
@@ -111,7 +129,7 @@ class AutoScrollController extends ChangeNotifier {
     if (_status == AutoScrollStatus.running && !_suspendedForGesture) {
       return;
     }
-    _cancelGestureResume();
+    _suspendedForGesture = false;
     _status = AutoScrollStatus.running;
     _armTimer();
     notifyListeners();
@@ -122,7 +140,7 @@ class AutoScrollController extends ChangeNotifier {
     if (_status != AutoScrollStatus.running) {
       return;
     }
-    _cancelGestureResume();
+    _suspendedForGesture = false;
     _status = AutoScrollStatus.paused;
     _disarmTimer();
     notifyListeners();
@@ -144,7 +162,7 @@ class AutoScrollController extends ChangeNotifier {
     if (_status == AutoScrollStatus.idle) {
       return;
     }
-    _cancelGestureResume();
+    _suspendedForGesture = false;
     _status = AutoScrollStatus.idle;
     _disarmTimer();
     notifyListeners();
@@ -158,32 +176,21 @@ class AutoScrollController extends ChangeNotifier {
     if (_status != AutoScrollStatus.running) {
       return;
     }
-    _cancelGestureResume();
     _suspendedForGesture = true;
     _disarmTimer();
   }
 
-  /// Called when a manual scroll settles. Schedules the crawl to pick back up
-  /// after [gestureResumeDelay]; repeated calls (e.g. as a fling decelerates)
-  /// debounce, so resumption waits until scrolling has truly stopped.
+  /// Called when a manual scroll (including any fling) settles. The crawl picks
+  /// back up immediately, so letting go hands control straight back to the
+  /// auto scroll.
   void notifyUserInteractionEnd() {
     if (!_suspendedForGesture) {
       return;
     }
-    _resumeTimer?.cancel();
-    _resumeTimer = Timer(gestureResumeDelay, () {
-      _resumeTimer = null;
-      if (_suspendedForGesture && _status == AutoScrollStatus.running) {
-        _suspendedForGesture = false;
-        _armTimer();
-      }
-    });
-  }
-
-  void _cancelGestureResume() {
-    _resumeTimer?.cancel();
-    _resumeTimer = null;
     _suspendedForGesture = false;
+    if (_status == AutoScrollStatus.running) {
+      _armTimer();
+    }
   }
 
   void _armTimer() {
@@ -204,7 +211,6 @@ class AutoScrollController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _cancelGestureResume();
     _disarmTimer();
     super.dispose();
   }
