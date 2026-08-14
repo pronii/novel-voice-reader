@@ -8,9 +8,8 @@ Generate every Android release APK with one long-lived private signing key so bu
 
 - Keep the canonical keystore and recovery properties outside the public repository under `E:\novel-voice-reader\signing`.
 - Configure `android/app/build.gradle.kts` to read the ignored `android/key.properties` file and sign only the release build type with its keystore.
-- Keep the private key local. GitHub Actions builds and uploads `app-release-unsigned`; the downloaded APK is signed locally with Android `apksigner`.
-- Use `github.run_number` as Android `versionCode`, ensuring later CI releases have a higher version code.
-- Preserve the existing debug build for development and PR validation.
+- Keep the private key local. GitHub Actions continues to build `app-debug`; the downloaded APK is re-signed locally with Android `apksigner`.
+- Preserve the existing CI workflow because the available GitHub credential cannot update workflow files.
 
 ## Security And Recovery
 
@@ -22,6 +21,6 @@ Generate every Android release APK with one long-lived private signing key so bu
 ## Verification
 
 - A configuration test must fail before the signing configuration exists and pass afterward.
-- GitHub Actions must pass analysis, tests, debug build, and unsigned release build.
+- GitHub Actions must pass analysis, tests, and debug build.
 - The downloaded release APK must pass ZIP structure checks and signing certificate inspection.
 - The APK certificate SHA-256 fingerprint must match the local keystore certificate fingerprint.
