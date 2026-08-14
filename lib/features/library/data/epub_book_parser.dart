@@ -45,16 +45,16 @@ final class EpubBookParser implements BookParser {
               .map((entry) => entry.value)
               .firstOrNull;
       if (contentRef == null) {
-        throw FormatException('EPUB spine document is missing: $href');
+        // A single missing spine document shouldn't abort the whole import;
+        // skip it and keep parsing the remaining chapters.
+        continue;
       }
-      late final String html;
+      final String html;
       try {
         html = await contentRef.readContentAsText();
-      } catch (error) {
-        throw FormatException(
-          'EPUB spine document cannot be read: $href',
-          error,
-        );
+      } catch (_) {
+        // Likewise, an unreadable spine document is skipped rather than fatal.
+        continue;
       }
       final document = html_parser.parse(html);
       final blocks = _extractBlocks(document);
@@ -76,8 +76,26 @@ final class EpubBookParser implements BookParser {
   }
 
   List<String> _extractBlocks(html_dom.Document document) {
+    const semanticBlockTags = {
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'p',
+      'blockquote',
+      'li',
+    };
     final semanticBlocks = document
         .querySelectorAll('h1,h2,h3,h4,h5,h6,p,blockquote,li')
+        // Skip container blocks that wrap another semantic block (e.g. li > p,
+        // blockquote > p) so their text isn't emitted twice.
+        .where(
+          (element) => !element.children.any(
+            (child) => semanticBlockTags.contains(child.localName),
+          ),
+        )
         .map((element) => _normalizeText(element.text))
         .where((text) => text.isNotEmpty)
         .toList(growable: false);

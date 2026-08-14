@@ -41,6 +41,14 @@ final class TxtBookParser implements BookParser {
         continue;
       }
       if (_chapterHeading.hasMatch(line)) {
+        if (currentTitle == null && currentParagraphs.isNotEmpty) {
+          // Text that appears before the first chapter heading becomes its own
+          // synthetic leading chapter instead of being merged into chapter 1.
+          chapters.add(
+            ParsedChapter(title: '前言', paragraphs: currentParagraphs),
+          );
+          currentParagraphs = <String>[];
+        }
         commitChapter();
         currentTitle = line;
       } else {

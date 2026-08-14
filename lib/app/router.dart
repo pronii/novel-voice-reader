@@ -310,7 +310,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         window.sections.any((section) => section.chapter.id == chapterId)) {
       return;
     }
-    await window.centerOn(chapterId: chapterId);
+    await window.centerOn(chapterId: chapterId, resetNavigation: false);
   }
 
   Future<void> _playFrom(ReaderPageData data, ReaderParagraph paragraph) async {
@@ -406,7 +406,10 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
 
   Future<void> _selectChapter(int chapterId) async {
     final window = _chapterWindow;
-    if (window == null || chapterId == _navigationCursor?.chapterId) {
+    // Guard against re-selecting the chapter the reader is *currently showing*,
+    // not the last one navigated to — otherwise a chapter the user scrolled or
+    // played away from can no longer be re-selected from the TOC.
+    if (window == null || chapterId == _visibleChapterId) {
       return;
     }
     _navigationCursor = PlaybackCursor(chapterId: chapterId, paragraphIndex: 0);

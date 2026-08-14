@@ -127,10 +127,18 @@ final class ReaderChapterWindowController extends ChangeNotifier {
     return operation;
   }
 
-  Future<void> centerOn({required int chapterId}) async {
+  Future<void> centerOn({
+    required int chapterId,
+    bool resetNavigation = true,
+  }) async {
     _sections = await _enqueueMutation(() => _loadCentered(chapterId));
     _adjacentLoadError = null;
-    _navigationGeneration++;
+    // Playback-driven re-centering must not bump the navigation generation, or
+    // the reader treats it as a user jump and yanks the viewport back to the
+    // stale navigation cursor instead of following the playing paragraph.
+    if (resetNavigation) {
+      _navigationGeneration++;
+    }
     notifyListeners();
   }
 

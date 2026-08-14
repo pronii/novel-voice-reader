@@ -204,7 +204,7 @@ void main() {
     await directory.delete(recursive: true);
   });
 
-  test('prefetch appends multiple files to the native queue in order', () async {
+  test('prefetch caps the native queue at a single look-ahead segment', () async {
     final directory = await Directory.systemTemp.createTemp('cached-multi-queue-');
     final engine = QueuedFakeAudioPlaybackEngine();
     final provider = CachedAudioSpeechProvider(
@@ -222,6 +222,18 @@ void main() {
     await provider.prepare(current, profile);
     await provider.play();
     await (provider as PrefetchingSpeechProvider).prefetch(first, profile);
+    // A second prefetch while one segment is already queued must not deepen
+    // the player queue — a deeper queue lets the engine auto-advance past
+    // index 1 and desyncs promotion.
+    await provider.prefetch(second, profile);
+
+    expect(engine.queuedPaths, hasLength(1));
+
+    // Once the queued segment is promoted the queue drains, so the next
+    // prefetch can queue again.
+    engine.advanceToQueued();
+    await provider.prepare(first, profile);
+    await provider.play();
     await provider.prefetch(second, profile);
 
     expect(engine.queuedPaths, hasLength(2));

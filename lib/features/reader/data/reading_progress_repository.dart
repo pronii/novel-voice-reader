@@ -70,24 +70,35 @@ final class DriftPlaybackParagraphSource
     if (sameChapter != null) {
       return sameChapter;
     }
-    final currentChapter =
+    var currentChapter =
         await (_database.select(_database.chapters)
               ..where((chapter) => chapter.id.equals(cursor.chapterId)))
             .getSingleOrNull();
     if (currentChapter == null) {
       return null;
     }
-    final nextChapter =
-        await (_database.select(_database.chapters)..where(
-              (chapter) =>
-                  chapter.bookId.equals(currentChapter.bookId) &
-                  chapter.chapterIndex.equals(currentChapter.chapterIndex + 1),
-            ))
-            .getSingleOrNull();
-    if (nextChapter == null) {
-      return null;
+    // Walk forward across chapters, skipping any that contain no paragraphs, so
+    // an empty chapter between two real ones doesn't halt playback.
+    while (true) {
+      final chapter = currentChapter!;
+      final nextChapter =
+          await (_database.select(_database.chapters)..where(
+                (candidate) =>
+                    candidate.bookId.equals(chapter.bookId) &
+                    candidate.chapterIndex.equals(chapter.chapterIndex + 1),
+              ))
+              .getSingleOrNull();
+      if (nextChapter == null) {
+        return null;
+      }
+      final firstParagraph = await at(
+        PlaybackCursor(chapterId: nextChapter.id, paragraphIndex: 0),
+      );
+      if (firstParagraph != null) {
+        return firstParagraph;
+      }
+      currentChapter = nextChapter;
     }
-    return at(PlaybackCursor(chapterId: nextChapter.id, paragraphIndex: 0));
   }
 
   @override

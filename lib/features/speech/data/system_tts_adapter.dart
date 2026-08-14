@@ -26,8 +26,18 @@ abstract interface class AdjustableSystemTtsEngine {
   Future<void> setPlaybackSpeed(double speed);
 }
 
+/// Optional capability: engines that report how far into the spoken text
+/// playback has progressed, letting [SystemTtsAdapter] resume near the pause
+/// point instead of replaying the whole segment.
+abstract interface class ProgressReportingSystemTtsEngine {
+  void setProgressHandler(void Function(int endOffset) handler);
+}
+
 final class FlutterSystemTtsEngine
-    implements SystemTtsEngine, AdjustableSystemTtsEngine {
+    implements
+        SystemTtsEngine,
+        AdjustableSystemTtsEngine,
+        ProgressReportingSystemTtsEngine {
   FlutterSystemTtsEngine([FlutterTts? flutterTts])
     : _flutterTts = flutterTts ?? FlutterTts();
 
@@ -46,6 +56,13 @@ final class FlutterSystemTtsEngine
   @override
   void setErrorHandler(void Function(Object error) handler) {
     _flutterTts.setErrorHandler((message) => handler(message as Object));
+  }
+
+  @override
+  void setProgressHandler(void Function(int endOffset) handler) {
+    _flutterTts.setProgressHandler(
+      (text, start, end, word) => handler(end),
+    );
   }
 
   @override
@@ -93,11 +110,22 @@ final class SystemTtsAdapter
     _engine.setStartHandler(_onStarted);
     _engine.setCompletionHandler(_onCompleted);
     _engine.setErrorHandler(_onFailed);
+    final engine = _engine;
+    if (engine is ProgressReportingSystemTtsEngine) {
+      (engine as ProgressReportingSystemTtsEngine).setProgressHandler(
+        _onProgress,
+      );
+    }
   }
 
   final SystemTtsEngine _engine;
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
   SpeechSegment? _segment;
+  // Absolute character offset (into the current segment) spoken so far, plus
+  // the offset at which the in-flight speak() call began. Together they let
+  // resume() continue near the pause point instead of restarting the segment.
+  int _playedChars = 0;
+  int _speakBase = 0;
 
   @override
   Stream<SpeechEvent> get events => _events.stream;
@@ -105,17 +133,22 @@ final class SystemTtsAdapter
   @override
   Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {
     _segment = segment;
+    _playedChars = 0;
+    _speakBase = 0;
     await _engine.configure(profile);
   }
 
   @override
-  Future<void> play() => _speakCurrent();
+  Future<void> play() {
+    _playedChars = 0;
+    return _speakFrom(0);
+  }
 
   @override
   Future<void> pause() => _engine.pause();
 
   @override
-  Future<void> resume() => _speakCurrent();
+  Future<void> resume() => _speakFrom(_playedChars);
 
   @override
   Future<void> setPlaybackSpeed(double speed) async {
@@ -135,12 +168,19 @@ final class SystemTtsAdapter
     await _events.close();
   }
 
-  Future<void> _speakCurrent() {
+  Future<void> _speakFrom(int offset) {
     final segment = _segment;
     if (segment == null) {
       throw StateError('No speech segment has been prepared.');
     }
-    return _engine.speak(segment.text);
+    final text = segment.text;
+    final start = offset.clamp(0, text.length);
+    _speakBase = start;
+    return _engine.speak(start == 0 ? text : text.substring(start));
+  }
+
+  void _onProgress(int endOffset) {
+    _playedChars = _speakBase + endOffset;
   }
 
   void _onStarted() {
@@ -152,6 +192,8 @@ final class SystemTtsAdapter
 
   void _onCompleted() {
     final segment = _segment;
+    _playedChars = 0;
+    _speakBase = 0;
     if (segment != null) {
       _events.add(SpeechCompleted(segmentId: segment.id));
     }

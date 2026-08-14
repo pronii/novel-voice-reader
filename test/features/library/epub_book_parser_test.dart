@@ -45,14 +45,16 @@ void main() {
     },
   );
 
-  test('rejects a missing linear spine document', () async {
-    expect(
-      () => const EpubBookParser().parse(
-        _buildEpub(missingSpineDocument: true),
-        'missing-chapter.epub',
-      ),
-      throwsA(isA<FormatException>()),
+  test('skips a missing linear spine document instead of aborting', () async {
+    final parsed = await const EpubBookParser().parse(
+      _buildEpub(missingSpineDocument: true),
+      'missing-chapter.epub',
     );
+
+    // chapter2 comes first in the spine but its document is absent, so it is
+    // skipped while the remaining chapter still imports.
+    expect(parsed.chapters.map((chapter) => chapter.title), ['第一章']);
+    expect(parsed.chapters.single.paragraphs, ['第一章', '第一段。']);
   });
 }
 

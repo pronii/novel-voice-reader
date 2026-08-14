@@ -235,10 +235,15 @@ final class CachedAudioSpeechProvider
         if (generation != _prepareGeneration) {
           return;
         }
-        await queuedEngine.queueNextFilePath(file.path);
-        if (!_queuedSegmentIds.contains(segment.id)) {
-          _queuedSegmentIds.add(segment.id);
+        // Cap the player queue at a single look-ahead segment. Deeper prefetch
+        // still warms the audio cache (the expensive network fetch happened in
+        // _obtain above), but queuing more than one segment lets the engine
+        // auto-advance past index 1 and desyncs promoteQueuedFilePath.
+        if (_queuedSegmentIds.isNotEmpty) {
+          return;
         }
+        await queuedEngine.queueNextFilePath(file.path);
+        _queuedSegmentIds.add(segment.id);
       });
     }
   }

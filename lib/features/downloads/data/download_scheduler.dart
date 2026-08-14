@@ -218,8 +218,10 @@ final class DownloadScheduler {
         continue;
       }
       if (candidate.estimatedBytes > remainingBytes) {
+        // Skip this candidate but keep scanning: a later, smaller candidate may
+        // still fit within the remaining cache budget.
         cacheLimitReached = true;
-        break;
+        continue;
       }
       remainingBytes -= candidate.estimatedBytes;
 

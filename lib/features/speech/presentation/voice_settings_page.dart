@@ -67,6 +67,15 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     if (profile.providerType == SpeechProviderType.mimo) {
       _mimoVoice = profile.voice ?? VoiceProfile.defaultMiMoVoice;
       _mimoStyle.text = profile.style ?? '';
+    } else if (profile.providerType == SpeechProviderType.cloud) {
+      // Restore the saved cloud endpoint config so reopening settings doesn't
+      // silently revert to the hardcoded defaults.
+      final baseUrl = profile.baseUrl;
+      final model = profile.model;
+      final voice = profile.voice;
+      if (baseUrl != null && baseUrl.isNotEmpty) _baseUrl.text = baseUrl;
+      if (model != null && model.isNotEmpty) _model.text = model;
+      if (voice != null && voice.isNotEmpty) _voice.text = voice;
     }
   }
 

@@ -839,30 +839,41 @@ final class _ReaderPageState extends State<ReaderPage> {
                   ),
                   const Divider(height: 1),
                   Expanded(
-                    child: PageStorage(
-                      bucket: PageStorageBucket(),
-                      child: ScrollablePositionedList.builder(
-                        key: PageStorageKey<String>('chapter-directory-$query'),
-                        initialScrollIndex: currentChapterIndex < 0
-                            ? 0
-                            : currentChapterIndex,
-                        itemCount: filteredChapters.length,
-                        itemBuilder: (context, index) {
-                          final chapter = filteredChapters[index];
-                          final selected = chapter.id == currentChapterId;
-                          return ListTile(
-                            title: Text(chapter.title),
-                            leading: SizedBox(
-                              width: 32,
-                              child: Text('${chapter.index + 1}'),
+                    child: filteredChapters.isEmpty
+                        ? const Center(child: Text('没有匹配的章节'))
+                        : PageStorage(
+                            bucket: PageStorageBucket(),
+                            child: ScrollablePositionedList.builder(
+                              key: PageStorageKey<String>(
+                                'chapter-directory-$query',
+                              ),
+                              initialScrollIndex:
+                                  (currentChapterIndex < 0 ||
+                                      currentChapterIndex >=
+                                          filteredChapters.length)
+                                  ? 0
+                                  : currentChapterIndex,
+                              itemCount: filteredChapters.length,
+                              itemBuilder: (context, index) {
+                                final chapter = filteredChapters[index];
+                                final selected =
+                                    chapter.id == currentChapterId;
+                                return ListTile(
+                                  title: Text(chapter.title),
+                                  leading: SizedBox(
+                                    width: 32,
+                                    child: Text('${chapter.index + 1}'),
+                                  ),
+                                  trailing: selected
+                                      ? const Icon(Icons.check)
+                                      : null,
+                                  selected: selected,
+                                  onTap: () =>
+                                      Navigator.of(context).pop(chapter.id),
+                                );
+                              },
                             ),
-                            trailing: selected ? const Icon(Icons.check) : null,
-                            selected: selected,
-                            onTap: () => Navigator.of(context).pop(chapter.id),
-                          );
-                        },
-                      ),
-                    ),
+                          ),
                   ),
                 ],
               ),

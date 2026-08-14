@@ -124,6 +124,7 @@ final class PlaybackCoordinator implements PlaybackController {
   Future<void>? _activePrefetch;
   int? _queuedPrefetchEpoch;
   bool _disposing = false;
+  bool _paused = false;
   bool _acceptTimeline = false;
   int? _chapterCharacters;
 
@@ -138,6 +139,7 @@ final class PlaybackCoordinator implements PlaybackController {
 
   @override
   Future<void> playFrom(PlaybackCursor cursor) async {
+    _paused = false;
     final generation = ++_playbackGeneration;
     final paragraph = await _paragraphs.at(cursor);
     if (generation != _playbackGeneration) {
@@ -151,17 +153,19 @@ final class PlaybackCoordinator implements PlaybackController {
 
   @override
   Future<void> pause() async {
+    _paused = true;
     final cursor = _cursor;
     if (cursor != null) {
       await _progress.confirm(cursor);
     }
-    await _provider.pause();
+    await _runProviderTransaction(() => _provider.pause());
     _publishActivity(PlaybackActivity.paused);
   }
 
   @override
   Future<void> resume() async {
-    await _provider.resume();
+    _paused = false;
+    await _runProviderTransaction(() => _provider.resume());
     if (_cursor != null) {
       _publishActivity(PlaybackActivity.playing);
     }
@@ -171,8 +175,12 @@ final class PlaybackCoordinator implements PlaybackController {
   Future<void> setSpeed(double speed) async {
     final provider = _provider;
     if (provider is AdjustableSpeechProvider) {
-      await (provider as AdjustableSpeechProvider).setPlaybackSpeed(speed);
+      await _runProviderTransaction(
+        () => (provider as AdjustableSpeechProvider).setPlaybackSpeed(speed),
+      );
     }
+    // Retain the speed only after the provider accepts it, so a rejected change
+    // doesn't leak into the next segment's prepare.
     _speed = speed;
   }
 
@@ -182,10 +190,10 @@ final class PlaybackCoordinator implements PlaybackController {
     if (current == null) {
       return;
     }
+    _paused = false;
     final next = await _paragraphs.nextAfter(current);
-    if (next != null) {
+    if (next != null && await _startParagraph(next)) {
       await _progress.confirm(next.cursor);
-      await _startParagraph(next);
     }
   }
 
@@ -195,15 +203,15 @@ final class PlaybackCoordinator implements PlaybackController {
     if (current == null || current.paragraphIndex == 0) {
       return;
     }
+    _paused = false;
     final previous = await _paragraphs.at(
       PlaybackCursor(
         chapterId: current.chapterId,
         paragraphIndex: current.paragraphIndex - 1,
       ),
     );
-    if (previous != null) {
+    if (previous != null && await _startParagraph(previous)) {
       await _progress.confirm(previous.cursor);
-      await _startParagraph(previous);
     }
   }
 
@@ -231,7 +239,7 @@ final class PlaybackCoordinator implements PlaybackController {
     }
   }
 
-  Future<void> _startParagraph(
+  Future<bool> _startParagraph(
     PlaybackParagraph paragraph, {
     int? generation,
     int? continuationEpoch,
@@ -248,13 +256,29 @@ final class PlaybackCoordinator implements PlaybackController {
     if (continuationEpoch == null
         ? generation != _playbackGeneration
         : !_ownsContinuation(continuationEpoch)) {
-      return;
+      return false;
     }
     final segments = _segmenter.split(
       paragraphId: paragraph.id,
       text: paragraph.text,
       maxCharacters: _voiceProfile.maxSegmentCharacters,
     );
+    if (segments.isEmpty) {
+      // A paragraph with no speakable text (blank line / whitespace) must not
+      // stall playback — skip straight to the next paragraph.
+      final next = await _paragraphs.nextAfter(paragraph.cursor);
+      if (next == null ||
+          (continuationEpoch == null
+              ? generation != _playbackGeneration
+              : !_ownsContinuation(continuationEpoch))) {
+        return false;
+      }
+      return _startParagraph(
+        next,
+        generation: generation,
+        continuationEpoch: continuationEpoch,
+      );
+    }
     final takeoverEpoch = continuationEpoch ?? ++_continuationEpoch;
     if (!await _takeOverParagraph(
       segments,
@@ -262,13 +286,14 @@ final class PlaybackCoordinator implements PlaybackController {
       generation,
       takeoverEpoch,
     )) {
-      return;
+      return false;
     }
     _cursor = paragraph.cursor;
     if (!_cursorChanges.isClosed) {
       _cursorChanges.add(paragraph.cursor);
     }
     _schedulePrefetch(takeoverEpoch);
+    return true;
   }
 
   Future<bool> _takeOverParagraph(
@@ -374,6 +399,11 @@ final class PlaybackCoordinator implements PlaybackController {
         event.segmentId != _segments[_segmentIndex].id) {
       return;
     }
+    if (_paused) {
+      // A completion event that raced with pause() must not silently resume
+      // playback by auto-advancing to the next segment/paragraph.
+      return;
+    }
     if (_segmentIndex + 1 < _segments.length) {
       final nextSegmentIndex = _segmentIndex + 1;
       final nextSegment = _segments[nextSegmentIndex];
@@ -406,11 +436,9 @@ final class PlaybackCoordinator implements PlaybackController {
       _publishActivity(PlaybackActivity.completed);
       return;
     }
-    await _progress.confirm(next.cursor);
-    if (!_ownsContinuation(continuationEpoch)) {
-      return;
+    if (await _startParagraph(next, continuationEpoch: continuationEpoch)) {
+      await _progress.confirm(next.cursor);
     }
-    await _startParagraph(next, continuationEpoch: continuationEpoch);
   }
 
   void _schedulePrefetch(int continuationEpoch) {
