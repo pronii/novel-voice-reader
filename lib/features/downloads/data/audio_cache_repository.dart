@@ -14,7 +14,18 @@ abstract interface class SpeechAudioCache {
   Future<File> obtain(SpeechSegment segment, VoiceProfile profile);
 }
 
-final class AudioCacheRepository implements SpeechAudioCache {
+/// A cache that can answer whether a segment's audio is already on disk without
+/// synthesizing it. Implemented by caches whose storage layout the reader
+/// controls, so lock-screen playback can prepare cache-only audio and never
+/// fall back to a network synth.
+abstract interface class LookupSpeechAudioCache {
+  /// Returns the cached, validated audio file for [segment] if it already
+  /// exists locally, or null on a cache miss. Never synthesizes.
+  Future<File?> lookup(SpeechSegment segment, VoiceProfile profile);
+}
+
+final class AudioCacheRepository
+    implements SpeechAudioCache, LookupSpeechAudioCache {
   const AudioCacheRepository({
     required this.directory,
     required this.synthesizer,
@@ -26,11 +37,8 @@ final class AudioCacheRepository implements SpeechAudioCache {
   @override
   Future<File> obtain(SpeechSegment segment, VoiceProfile profile) async {
     await directory.create(recursive: true);
-    final key = CacheKey.forSegment(segment, profile);
     final extension = _normalizedExtension(profile.outputFormat);
-    final finalFile = File(
-      '${directory.path}${Platform.pathSeparator}$key.$extension',
-    );
+    final finalFile = _fileFor(segment, profile, extension);
     if (await finalFile.exists()) {
       try {
         await _validateExistingAudio(finalFile, extension);
@@ -56,6 +64,32 @@ final class AudioCacheRepository implements SpeechAudioCache {
       }
       rethrow;
     }
+  }
+
+  @override
+  Future<File?> lookup(SpeechSegment segment, VoiceProfile profile) async {
+    final extension = _normalizedExtension(profile.outputFormat);
+    final finalFile = _fileFor(segment, profile, extension);
+    if (!await finalFile.exists()) {
+      return null;
+    }
+    try {
+      await _validateExistingAudio(finalFile, extension);
+      return finalFile;
+    } on FormatException {
+      // A corrupt cache entry is treated as a miss; never synthesize here.
+      await finalFile.delete();
+      return null;
+    }
+  }
+
+  File _fileFor(
+    SpeechSegment segment,
+    VoiceProfile profile,
+    String extension,
+  ) {
+    final key = CacheKey.forSegment(segment, profile);
+    return File('${directory.path}${Platform.pathSeparator}$key.$extension');
   }
 
   static String _normalizedExtension(String? outputFormat) {

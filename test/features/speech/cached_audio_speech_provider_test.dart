@@ -163,16 +163,19 @@ void main() {
     await directory.delete(recursive: true);
   });
 
-  test('prefetch queues the next file for native background continuation', () async {
+  test('advances through the native queue without a new prepare or synth', () async {
     final directory = await Directory.systemTemp.createTemp('cached-queue-');
     final engine = QueuedFakeAudioPlaybackEngine();
+    final synthesizer = FakeCloudSpeechSynthesizer();
     final provider = CachedAudioSpeechProvider(
       cache: AudioCacheRepository(
         directory: directory,
-        synthesizer: FakeCloudSpeechSynthesizer(),
+        synthesizer: synthesizer,
       ),
       engine: engine,
     );
+    final events = <SpeechEvent>[];
+    final subscription = provider.events.listen(events.add);
     const current = SpeechSegment(
       id: '20:0',
       paragraphId: 20,
@@ -192,19 +195,33 @@ void main() {
     await (provider as PrefetchingSpeechProvider).prefetch(next, profile);
 
     expect(engine.queuedPaths, hasLength(1));
-    engine.advanceToQueued();
-    await provider.prepare(next, profile);
-    await provider.play();
+    expect((provider as PlaylistSpeechProvider).currentSegmentId, '20:0');
+    final synthCallsBeforeAdvance = synthesizer.calls;
 
-    expect(engine.filePaths, hasLength(1));
-    expect(engine.promotedPaths, [engine.queuedPaths.single]);
+    // just_audio finishes the current file and advances into the queued one by
+    // itself. The provider must NOT prepare()/play() again — that is the whole
+    // point of the native playlist on a locked screen.
+    engine.advanceToQueued();
+    await pumpEventQueue();
+
+    expect(
+      events.whereType<SpeechCompleted>().map((event) => event.segmentId),
+      ['20:0'],
+    );
+    expect(
+      events.whereType<SpeechStarted>().map((event) => event.segmentId),
+      ['20:0', '21:0'],
+    );
+    expect(provider.currentSegmentId, '21:0');
+    expect(synthesizer.calls, synthCallsBeforeAdvance);
     expect(engine.playCalls, 1);
 
+    await subscription.cancel();
     await provider.dispose();
     await directory.delete(recursive: true);
   });
 
-  test('prefetch caps the native queue at a single look-ahead segment', () async {
+  test('queues a deep look-ahead playlist without a one-item cap', () async {
     final directory = await Directory.systemTemp.createTemp('cached-multi-queue-');
     final engine = QueuedFakeAudioPlaybackEngine();
     final provider = CachedAudioSpeechProvider(
@@ -217,27 +234,24 @@ void main() {
     const current = SpeechSegment(id: '60:0', paragraphId: 60, text: '当前', partIndex: 0);
     const first = SpeechSegment(id: '61:0', paragraphId: 61, text: '第一项', partIndex: 0);
     const second = SpeechSegment(id: '62:0', paragraphId: 62, text: '第二项', partIndex: 0);
+    const third = SpeechSegment(id: '63:0', paragraphId: 63, text: '第三项', partIndex: 0);
     final profile = _cloudProfile();
 
     await provider.prepare(current, profile);
     await provider.play();
-    await (provider as PrefetchingSpeechProvider).prefetch(first, profile);
-    // A second prefetch while one segment is already queued must not deepen
-    // the player queue — a deeper queue lets the engine auto-advance past
-    // index 1 and desyncs promotion.
-    await provider.prefetch(second, profile);
+    final prefetching = provider as PrefetchingSpeechProvider;
+    await prefetching.prefetch(first, profile);
+    await prefetching.prefetch(second, profile);
+    await prefetching.prefetch(third, profile);
 
-    expect(engine.queuedPaths, hasLength(1));
+    // Every prefetched segment is appended to the native playlist so the player
+    // has a deep runway to advance through while the screen is locked.
+    expect(engine.queuedPaths, hasLength(3));
+    expect(engine.queuedPaths.toSet(), hasLength(3));
 
-    // Once the queued segment is promoted the queue drains, so the next
-    // prefetch can queue again.
-    engine.advanceToQueued();
-    await provider.prepare(first, profile);
-    await provider.play();
-    await provider.prefetch(second, profile);
-
-    expect(engine.queuedPaths, hasLength(2));
-    expect(engine.queuedPaths[0], isNot(engine.queuedPaths[1]));
+    // A duplicate prefetch of an already-queued segment must not re-append it.
+    await prefetching.prefetch(second, profile);
+    expect(engine.queuedPaths, hasLength(3));
 
     await provider.dispose();
     await directory.delete(recursive: true);
@@ -316,7 +330,7 @@ void main() {
     await directory.delete(recursive: true);
   });
 
-  test('attributes a queued terminal completion to the promoted segment', () async {
+  test('attributes a terminal completion after a native advance', () async {
     final directory = await Directory.systemTemp.createTemp('cached-terminal-');
     final engine = QueuedFakeAudioPlaybackEngine();
     final provider = CachedAudioSpeechProvider(
@@ -335,16 +349,59 @@ void main() {
     await provider.prepare(current, profile);
     await provider.play();
     await (provider as PrefetchingSpeechProvider).prefetch(next, profile);
-    engine.advanceToQueued(completed: true);
+    // Native advance into the queued segment, then that segment reaches its own
+    // terminal completion.
+    engine.advanceToQueued();
     await pumpEventQueue();
-    await provider.prepare(next, profile);
-    await provider.play();
+    engine.complete();
     await pumpEventQueue();
 
     expect(
       events.whereType<SpeechCompleted>().map((event) => event.segmentId),
       ['50:0', '51:0'],
     );
+
+    await subscription.cancel();
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
+
+  test('prepareCached plays cached audio and misses without synthesizing', () async {
+    final directory = await Directory.systemTemp.createTemp('cached-lookup-');
+    final engine = FakeAudioPlaybackEngine();
+    final synthesizer = FakeCloudSpeechSynthesizer();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: synthesizer,
+      ),
+      engine: engine,
+    );
+    final events = <SpeechEvent>[];
+    final subscription = provider.events.listen(events.add);
+    const cached = SpeechSegment(id: '80:0', paragraphId: 80, text: '已缓存', partIndex: 0);
+    const uncached = SpeechSegment(id: '81:0', paragraphId: 81, text: '未缓存', partIndex: 0);
+    final profile = _cloudProfile();
+
+    final cacheOnly = provider as CacheOnlySpeechProvider;
+
+    // Cache miss: no synth, no banner event, reports not-ready.
+    final miss = await cacheOnly.prepareCached(uncached, profile);
+    expect(miss, isFalse);
+    expect(synthesizer.calls, 0);
+    expect(engine.filePath, isNull);
+    expect(events.whereType<SpeechFailed>(), isEmpty);
+
+    // Warm the cache for the other segment via a normal (network) prepare.
+    await provider.prepare(cached, profile);
+    expect(synthesizer.calls, 1);
+
+    // Cache hit: prepares from disk, still no extra synth.
+    final hit = await cacheOnly.prepareCached(cached, profile);
+    expect(hit, isTrue);
+    expect(synthesizer.calls, 1);
+    expect(provider.currentSegmentId, '80:0');
+    expect(events.whereType<SpeechFailed>(), isEmpty);
 
     await subscription.cancel();
     await provider.dispose();
@@ -539,30 +596,28 @@ final class AdjustableFakeAudioPlaybackEngine extends FakeAudioPlaybackEngine
 final class QueuedFakeAudioPlaybackEngine extends FakeAudioPlaybackEngine
     implements QueuedAudioPlaybackEngine {
   final List<String> queuedPaths = [];
-  final List<String> promotedPaths = [];
-  String? _activeQueuedPath;
-  bool _queuedCompleted = false;
+
+  @override
+  Future<void> setFilePath(String path) async {
+    // A hard (re)start replaces the whole native playlist, matching
+    // JustAudioPlaybackEngine.
+    queuedPaths.clear();
+    await super.setFilePath(path);
+  }
 
   @override
   Future<void> queueNextFilePath(String path) async => queuedPaths.add(path);
 
-  void advanceToQueued({bool completed = false}) {
-    _activeQueuedPath = queuedPaths.first;
-    _queuedCompleted = completed;
-    final currentPath = filePath;
-    if (currentPath != null) {
-      _completed.add(currentPath);
+  /// Simulates just_audio auto-advancing from the current item into the head of
+  /// the look-ahead queue: the finished path is emitted on [completed] and the
+  /// queue head becomes the current item — no prepare()/play() round-trip.
+  void advanceToQueued() {
+    final finished = filePath;
+    if (queuedPaths.isNotEmpty) {
+      filePath = queuedPaths.removeAt(0);
     }
-  }
-
-  @override
-  Future<QueuedAudioPromotion> promoteQueuedFilePath(String path) async {
-    promotedPaths.add(path);
-    if (path != _activeQueuedPath) {
-      return QueuedAudioPromotion.notPromoted;
+    if (finished != null) {
+      _completed.add(finished);
     }
-    return _queuedCompleted
-        ? QueuedAudioPromotion.completed
-        : QueuedAudioPromotion.playing;
   }
 }

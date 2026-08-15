@@ -104,10 +104,20 @@ final class PlaybackRuntime {
   int _replacementGeneration = 0;
   int _coordinatorGeneration = 0;
   PlaybackCursor? _currentCursor;
+  bool _foreground = true;
 
   Stream<PlaybackCursor?> get cursorChanges => _cursorChanges.stream;
 
   PlaybackCursor? get currentCursor => _currentCursor;
+
+  /// Forwards app foreground/background transitions to the active coordinator so
+  /// it can switch to cache-only prepares while the screen is locked and refill
+  /// the queue when the app returns. Remembered so a coordinator installed while
+  /// backgrounded inherits the correct state.
+  void setForeground(bool foreground) {
+    _foreground = foreground;
+    _coordinator?.setForeground(foreground);
+  }
 
   PlaybackReplacementToken beginReplacement() {
     return PlaybackReplacementToken._(++_replacementGeneration);
@@ -189,6 +199,7 @@ final class PlaybackRuntime {
     await _activitySubscription?.cancel();
     final generation = ++_coordinatorGeneration;
     _coordinator = next;
+    next.setForeground(_foreground);
     handler.publishTimeline(PlaybackTimeline.zero);
     _cursorSubscription = next.cursorChanges.listen((cursor) {
       if (generation == _coordinatorGeneration &&

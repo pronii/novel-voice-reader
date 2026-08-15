@@ -163,6 +163,18 @@ final class PlaybackCoordinator implements PlaybackController {
   Timer? _watchdog;
   int _segmentRetries = 0;
 
+  /// Whether the app is in the foreground. While false (screen locked / app
+  /// backgrounded) the coordinator prepares from cache only and never reaches
+  /// the network — iOS suspends background HTTP, so a synth would fail and
+  /// surface a banner instead of continuing lock-screen playback.
+  bool _foreground = true;
+
+  /// True when a locked-screen cache miss stalled playback at the last local
+  /// segment. The pending [_softPauseRefill] re-drives playback (network
+  /// allowed) once the app returns to the foreground.
+  bool _softPaused = false;
+  Future<void> Function()? _softPauseRefill;
+
   @override
   PlaybackCursor? get cursor => _cursor;
 
@@ -172,9 +184,35 @@ final class PlaybackCoordinator implements PlaybackController {
 
   Stream<PlaybackActivity> get activityChanges => _activityChanges.stream;
 
+  /// Reports whether the app is in the foreground. When it transitions back to
+  /// the foreground after a locked-screen cache miss soft-paused playback, the
+  /// stalled segment is re-driven with the network available so playback
+  /// resumes on its own.
+  void setForeground(bool foreground) {
+    final wasForeground = _foreground;
+    _foreground = foreground;
+    if (!foreground || wasForeground || _disposing || _paused) {
+      return;
+    }
+    if (_softPaused) {
+      final refill = _softPauseRefill;
+      _softPaused = false;
+      _softPauseRefill = null;
+      if (refill != null) {
+        unawaited(refill());
+      }
+    }
+  }
+
+  void _clearSoftPause() {
+    _softPaused = false;
+    _softPauseRefill = null;
+  }
+
   @override
   Future<void> playFrom(PlaybackCursor cursor) async {
     _paused = false;
+    _clearSoftPause();
     final generation = ++_playbackGeneration;
     final paragraph = await _paragraphs.at(cursor);
     if (generation != _playbackGeneration) {
@@ -227,6 +265,7 @@ final class PlaybackCoordinator implements PlaybackController {
       return;
     }
     _paused = false;
+    _clearSoftPause();
     final next = await _paragraphs.nextAfter(current);
     if (next != null && await _startParagraph(next)) {
       await _progress.confirm(next.cursor);
@@ -240,6 +279,7 @@ final class PlaybackCoordinator implements PlaybackController {
       return;
     }
     _paused = false;
+    _clearSoftPause();
     final previous = await _paragraphs.at(
       PlaybackCursor(
         chapterId: current.chapterId,
@@ -280,6 +320,7 @@ final class PlaybackCoordinator implements PlaybackController {
     PlaybackParagraph paragraph, {
     int? generation,
     int? continuationEpoch,
+    bool continuation = false,
   }) async {
     if (continuationEpoch == null) {
       generation ??= ++_playbackGeneration;
@@ -314,6 +355,7 @@ final class PlaybackCoordinator implements PlaybackController {
         next,
         generation: generation,
         continuationEpoch: continuationEpoch,
+        continuation: continuation,
       );
     }
     final takeoverEpoch = continuationEpoch ?? ++_continuationEpoch;
@@ -322,6 +364,7 @@ final class PlaybackCoordinator implements PlaybackController {
       chapterCharacters,
       generation,
       takeoverEpoch,
+      continuation,
     )) {
       return false;
     }
@@ -338,6 +381,7 @@ final class PlaybackCoordinator implements PlaybackController {
     int? chapterCharacters,
     int? generation,
     int continuationEpoch,
+    bool continuation,
   ) {
     return _runProviderTransaction(() async {
       if (continuationEpoch != _continuationEpoch ||
@@ -354,6 +398,7 @@ final class PlaybackCoordinator implements PlaybackController {
       return _prepareAndPlaySegmentLocked(
         continuationEpoch,
         segments.first,
+        continuation: continuation,
       );
     });
   }
@@ -361,31 +406,88 @@ final class PlaybackCoordinator implements PlaybackController {
   Future<bool> _prepareAndPlayContinuation(
     int continuationEpoch,
     int segmentIndex,
-    SpeechSegment segment,
-  ) {
+    SpeechSegment segment, {
+    bool continuation = false,
+  }) {
     return _runProviderTransaction(() async {
       if (!_ownsContinuation(continuationEpoch)) {
         return false;
       }
       _segmentIndex = segmentIndex;
-      return _prepareAndPlaySegmentLocked(continuationEpoch, segment);
+      return _prepareAndPlaySegmentLocked(
+        continuationEpoch,
+        segment,
+        continuation: continuation,
+      );
     });
   }
 
   Future<bool> _prepareAndPlaySegmentLocked(
     int continuationEpoch,
-    SpeechSegment segment,
-  ) async {
+    SpeechSegment segment, {
+    bool continuation = false,
+  }) async {
     if (!_ownsContinuation(continuationEpoch)) {
       return false;
     }
     _cancelWatchdog();
+    final provider = _provider;
+
+    // Native auto-advance: the player already moved into this segment from its
+    // look-ahead queue while the screen was locked. Do NOT prepare()/play()
+    // again — that would restart audio and, on a cache miss, hit the network.
+    // Just resync bookkeeping to the segment the native player is already
+    // speaking so progress, watchdog, and prefetch track the native cursor.
+    if (continuation &&
+        provider is PlaylistSpeechProvider &&
+        (provider as PlaylistSpeechProvider).currentSegmentId == segment.id) {
+      _acceptTimeline = true;
+      _timelineChanges.add(_enrichTimeline(PlaybackTimeline.zero));
+      if (!_ownsContinuation(continuationEpoch)) {
+        return false;
+      }
+      _publishActivity(PlaybackActivity.playing);
+      _armWatchdog(continuationEpoch, segment);
+      return true;
+    }
+
     _acceptTimeline = false;
     _timelineChanges.add(_enrichTimeline(PlaybackTimeline.zero));
+
+    // Cache-only path while backgrounded/locked: never synthesize over the
+    // network. On a cache miss soft-pause at the last local segment instead of
+    // failing; setForeground(true) refills the queue when the app returns.
+    if (!_foreground && provider is CacheOnlySpeechProvider) {
+      final ready = await (provider as CacheOnlySpeechProvider).prepareCached(
+        segment,
+        _voiceProfile,
+      );
+      if (!_ownsContinuation(continuationEpoch)) {
+        return false;
+      }
+      if (!ready) {
+        _softPaused = true;
+        _cancelWatchdog();
+        _acceptTimeline = false;
+        _publishActivity(PlaybackActivity.paused);
+        return false;
+      }
+      return _playPreparedSegmentLocked(continuationEpoch, segment);
+    }
+
     await _provider.prepare(segment, _voiceProfile);
     if (!_ownsContinuation(continuationEpoch)) {
       return false;
     }
+    return _playPreparedSegmentLocked(continuationEpoch, segment);
+  }
+
+  /// Shared tail for a freshly prepared segment: (re)enable the timeline, apply
+  /// the current speed, start playback, and arm the completion watchdog.
+  Future<bool> _playPreparedSegmentLocked(
+    int continuationEpoch,
+    SpeechSegment segment,
+  ) async {
     _acceptTimeline = true;
     _timelineChanges.add(_enrichTimeline(PlaybackTimeline.zero));
     final provider = _provider;
@@ -482,7 +584,15 @@ final class PlaybackCoordinator implements PlaybackController {
         continuationEpoch,
         nextSegmentIndex,
         nextSegment,
+        continuation: true,
       )) {
+        if (_softPaused && _ownsContinuation(continuationEpoch)) {
+          _softPauseRefill = () => _resumeWithinParagraph(
+            continuationEpoch,
+            nextSegmentIndex,
+            nextSegment,
+          );
+        }
         return;
       }
       _schedulePrefetch(continuationEpoch);
@@ -508,6 +618,40 @@ final class PlaybackCoordinator implements PlaybackController {
       _publishActivity(PlaybackActivity.completed);
       return;
     }
+    if (await _startParagraph(
+      next,
+      continuationEpoch: continuationEpoch,
+      continuation: true,
+    )) {
+      await _progress.confirm(next.cursor);
+    } else if (_softPaused && _ownsContinuation(continuationEpoch)) {
+      _softPauseRefill = () => _resumeParagraph(continuationEpoch, next);
+    }
+  }
+
+  /// Re-drives a segment inside the current paragraph after a locked-screen
+  /// cache miss soft-paused it — invoked once the app is foreground again, so
+  /// prepare() may now synthesize over the network.
+  Future<void> _resumeWithinParagraph(
+    int continuationEpoch,
+    int segmentIndex,
+    SpeechSegment segment,
+  ) async {
+    if (await _prepareAndPlayContinuation(
+      continuationEpoch,
+      segmentIndex,
+      segment,
+    )) {
+      _schedulePrefetch(continuationEpoch);
+    }
+  }
+
+  /// Re-drives a paragraph boundary after a locked-screen cache miss soft-paused
+  /// it — invoked once the app is foreground again.
+  Future<void> _resumeParagraph(
+    int continuationEpoch,
+    PlaybackParagraph next,
+  ) async {
     if (await _startParagraph(next, continuationEpoch: continuationEpoch)) {
       await _progress.confirm(next.cursor);
     }
@@ -639,7 +783,13 @@ final class PlaybackCoordinator implements PlaybackController {
       if (!_ownsContinuation(continuationEpoch)) {
         return;
       }
-      const targetCharacters = 750;
+      // Prefetch a wall-clock window of upcoming audio, not a fixed character
+      // count, so the native look-ahead queue holds enough segments to keep
+      // lock-screen playback going without a Dart round-trip. At the ~0.24s
+      // per character estimate, five minutes is roughly 1250 characters.
+      const prefetchTarget = Duration(minutes: 5);
+      const microsPerCharacter = 240000;
+      final targetCharacters = prefetchTarget.inMicroseconds ~/ microsPerCharacter;
       var plannedCharacters = 0;
       var cursor = _cursor;
       var segments = _segments.skip(_segmentIndex + 1).toList();

@@ -194,6 +194,170 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('prefetches at least three minutes of upcoming audio', () async {
+    final provider = FakeSpeechProvider();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource([
+        '当前段',
+        for (var i = 0; i < 8; i++) List.filled(360, '甲').join(),
+      ]),
+      voiceProfile: VoiceProfile.mimo(),
+    );
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    await pumpEventQueue();
+
+    // The target is expressed as wall-clock time, not the old 750-character
+    // cap: at ~0.24s/char the prefetched runway must cover at least three
+    // minutes, which is more characters than the retired 750 limit allowed.
+    final prefetchedCharacters = provider.prefetched.fold<int>(
+      0,
+      (total, segment) => total + segment.text.runes.length,
+    );
+    const microsPerCharacter = 240000;
+    final prefetchedDuration = Duration(
+      microseconds: prefetchedCharacters * microsPerCharacter,
+    );
+    expect(
+      prefetchedDuration,
+      greaterThanOrEqualTo(const Duration(minutes: 3)),
+    );
+    expect(prefetchedCharacters, greaterThan(750));
+    await coordinator.dispose();
+  });
+
+  test(
+    'advances through the native queue without re-preparing while locked',
+    () async {
+      final provider = PlaylistCacheSpeechProvider();
+      final coordinator = PlaybackCoordinator(
+        provider: provider,
+        progress: FakeProgressRepository(),
+        paragraphs: FakeParagraphSource([List.filled(720, '文').join()]),
+        voiceProfile: VoiceProfile.mimo(),
+      );
+
+      await coordinator.playFrom(
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      );
+      await pumpEventQueue();
+
+      // The paragraph split into two 360-char segments; the second is prefetched
+      // into the native look-ahead queue.
+      expect(provider.prepared.map((segment) => segment.id), ['1:0']);
+      expect(provider.queue, ['1:1']);
+
+      coordinator.setForeground(false);
+      final preparesBefore = provider.prepared.length;
+
+      // just_audio finishes segment 1:0 and advances into 1:1 by itself. The
+      // coordinator must NOT prepare()/prepareCached() again — the audio is
+      // already playing from the native queue.
+      provider.advanceNative();
+      await pumpEventQueue();
+
+      expect(provider.prepared.length, preparesBefore);
+      expect(provider.cacheChecked, isEmpty);
+      expect(provider.currentSegmentId, '1:1');
+      await coordinator.dispose();
+    },
+  );
+
+  test(
+    'locked cache miss at a paragraph boundary soft-pauses without a banner',
+    () async {
+      final provider = PlaylistCacheSpeechProvider()..prefetchCaches = false;
+      final progress = FakeProgressRepository();
+      final failures = <AppFailure>[];
+      final coordinator = PlaybackCoordinator(
+        provider: provider,
+        progress: progress,
+        paragraphs: FakeParagraphSource(const ['甲', '乙']),
+        voiceProfile: VoiceProfile.system(),
+        onFailure: failures.add,
+        retryDelay: (_) async {},
+      );
+      final activities = <PlaybackActivity>[];
+      final subscription = coordinator.activityChanges.listen(activities.add);
+
+      await coordinator.playFrom(
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      );
+      await pumpEventQueue();
+
+      coordinator.setForeground(false);
+      // The current segment finishes but the next paragraph was never cached
+      // (background HTTP is suspended on a locked screen).
+      provider.completeCurrent();
+      await pumpEventQueue();
+
+      // Cache-only prepare missed: no network synth, no banner, and playback is
+      // soft-paused at the last local segment.
+      expect(provider.prepared.map((segment) => segment.id), ['1:0']);
+      expect(provider.cacheChecked.map((segment) => segment.id), ['2:0']);
+      expect(failures, isEmpty);
+      expect(activities.last, PlaybackActivity.paused);
+
+      // Returning to the foreground refills the queue: the missed segment may
+      // now synthesize over the network and playback continues.
+      coordinator.setForeground(true);
+      await pumpEventQueue();
+
+      expect(provider.prepared.map((segment) => segment.id), ['1:0', '2:0']);
+      expect(
+        progress.confirmed,
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 1),
+      );
+      await subscription.cancel();
+      await coordinator.dispose();
+    },
+  );
+
+  test(
+    'locked cache miss mid-paragraph soft-pauses then resumes on foreground',
+    () async {
+      final provider = PlaylistCacheSpeechProvider()..prefetchCaches = false;
+      final failures = <AppFailure>[];
+      final coordinator = PlaybackCoordinator(
+        provider: provider,
+        progress: FakeProgressRepository(),
+        paragraphs: FakeParagraphSource([List.filled(720, '文').join()]),
+        voiceProfile: VoiceProfile.mimo(),
+        onFailure: failures.add,
+        retryDelay: (_) async {},
+      );
+      final activities = <PlaybackActivity>[];
+      final subscription = coordinator.activityChanges.listen(activities.add);
+
+      await coordinator.playFrom(
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      );
+      await pumpEventQueue();
+      expect(provider.prepared.map((segment) => segment.id), ['1:0']);
+
+      coordinator.setForeground(false);
+      provider.completeCurrent();
+      await pumpEventQueue();
+
+      // The next in-paragraph segment was not cached: soft-pause, no banner.
+      expect(provider.prepared.map((segment) => segment.id), ['1:0']);
+      expect(provider.cacheChecked.map((segment) => segment.id), ['1:1']);
+      expect(failures, isEmpty);
+      expect(activities.last, PlaybackActivity.paused);
+
+      coordinator.setForeground(true);
+      await pumpEventQueue();
+
+      expect(provider.prepared.map((segment) => segment.id), ['1:0', '1:1']);
+      await subscription.cancel();
+      await coordinator.dispose();
+    },
+  );
+
   test('a continuation cannot borrow a newer request generation', () async {
     final provider = ControllablePrepareSpeechProvider();
     final paragraphs = ControllableTakeoverChapterSource(
@@ -843,6 +1007,105 @@ final class FakeSpeechProvider
   }
 
   void publishTimeline(PlaybackTimeline timeline) => _timeline.add(timeline);
+}
+
+/// A speech provider that models a native look-ahead playlist plus a local
+/// cache, so the coordinator's lock-screen behaviour (native auto-advance and
+/// cache-only prepare) can be exercised without a real audio engine.
+final class PlaylistCacheSpeechProvider
+    implements
+        SpeechProvider,
+        PrefetchingSpeechProvider,
+        AdjustableSpeechProvider,
+        PlaylistSpeechProvider,
+        CacheOnlySpeechProvider {
+  final _events = StreamController<SpeechEvent>.broadcast(sync: true);
+  final List<SpeechSegment> prepared = [];
+  final List<SpeechSegment> prefetched = [];
+  final List<SpeechSegment> cacheChecked = [];
+  final Set<String> cached = {};
+  final List<String> queue = [];
+  final List<double> speedChanges = [];
+  int playCalls = 0;
+  int pauseCalls = 0;
+  bool prefetchCaches = true;
+  String? _currentSegmentId;
+
+  @override
+  Stream<SpeechEvent> get events => _events.stream;
+
+  @override
+  String? get currentSegmentId => _currentSegmentId;
+
+  @override
+  Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {
+    prepared.add(segment);
+    cached.add(segment.id);
+    queue.clear();
+    _currentSegmentId = segment.id;
+  }
+
+  @override
+  Future<bool> prepareCached(
+    SpeechSegment segment,
+    VoiceProfile profile,
+  ) async {
+    cacheChecked.add(segment);
+    if (!cached.contains(segment.id)) {
+      return false;
+    }
+    queue.clear();
+    _currentSegmentId = segment.id;
+    return true;
+  }
+
+  @override
+  Future<void> prefetch(SpeechSegment segment, VoiceProfile profile) async {
+    if (!prefetchCaches) {
+      return;
+    }
+    prefetched.add(segment);
+    cached.add(segment.id);
+    queue.add(segment.id);
+  }
+
+  @override
+  Future<void> setPlaybackSpeed(double speed) async => speedChanges.add(speed);
+
+  @override
+  Future<void> play() async => playCalls++;
+
+  @override
+  Future<void> pause() async => pauseCalls++;
+
+  @override
+  Future<void> resume() async {}
+
+  @override
+  Future<void> stop() async {
+    queue.clear();
+    _currentSegmentId = null;
+  }
+
+  /// Simulates just_audio finishing the current segment and auto-advancing into
+  /// the head of the native queue before the coordinator sees the completion.
+  void advanceNative() {
+    final finished = _currentSegmentId;
+    if (queue.isNotEmpty) {
+      _currentSegmentId = queue.removeAt(0);
+    }
+    if (finished != null) {
+      _events.add(SpeechCompleted(segmentId: finished));
+    }
+  }
+
+  /// Simulates the current segment finishing with nothing left in the queue.
+  void completeCurrent() {
+    final id = _currentSegmentId;
+    if (id != null) {
+      _events.add(SpeechCompleted(segmentId: id));
+    }
+  }
 }
 
 final class ChapterAwareParagraphSource

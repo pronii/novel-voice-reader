@@ -33,12 +33,12 @@ abstract interface class AdjustableAudioPlaybackEngine {
 }
 
 abstract interface class QueuedAudioPlaybackEngine {
+  /// Appends [path] to the native playlist so the player advances into it by
+  /// itself when the current item ends. The playlist may hold many look-ahead
+  /// items — this is what keeps lock-screen playback continuous without a
+  /// per-segment prepare() round-trip.
   Future<void> queueNextFilePath(String path);
-
-  Future<QueuedAudioPromotion> promoteQueuedFilePath(String path);
 }
-
-enum QueuedAudioPromotion { notPromoted, playing, completed }
 
 final class JustAudioPlaybackEngine
     implements
@@ -74,10 +74,14 @@ final class JustAudioPlaybackEngine
       }
     }, onError: controller.addError);
     final stateSubscription = _player.processingStateStream.listen((state) {
-      if (state == ProcessingState.completed && _player.currentIndex == 0) {
-        final path = _player.sequence.firstOrNull?.tag as String?;
-        if (path != null) {
-          controller.add(path);
+      if (state == ProcessingState.completed) {
+        final index = _player.currentIndex ?? 0;
+        final sequence = _player.sequence;
+        if (index < sequence.length) {
+          final path = sequence[index].tag as String?;
+          if (path != null) {
+            controller.add(path);
+          }
         }
       }
     }, onError: controller.addError);
@@ -95,6 +99,8 @@ final class JustAudioPlaybackEngine
 
   @override
   Future<void> setFilePath(String path) async {
+    // A hard (re)start: replace the whole native playlist with this one file.
+    // Prefetch re-appends look-ahead items afterwards.
     _queuedPaths.clear();
     await _player.setAudioSource(AudioSource.file(path, tag: path));
   }
@@ -106,21 +112,6 @@ final class JustAudioPlaybackEngine
     }
     await _player.addAudioSource(AudioSource.file(path, tag: path));
     _queuedPaths.add(path);
-  }
-
-  @override
-  Future<QueuedAudioPromotion> promoteQueuedFilePath(String path) async {
-    if (_queuedPaths.isEmpty ||
-        _queuedPaths.first != path ||
-        _player.currentIndex != 1) {
-      return QueuedAudioPromotion.notPromoted;
-    }
-    await _player.removeAudioSourceAt(0);
-    final completed = _player.processingState == ProcessingState.completed;
-    _queuedPaths.removeAt(0);
-    return completed
-        ? QueuedAudioPromotion.completed
-        : QueuedAudioPromotion.playing;
   }
 
   @override
@@ -139,12 +130,21 @@ final class JustAudioPlaybackEngine
   Future<void> dispose() => _player.dispose();
 }
 
+class _PlaylistItem {
+  const _PlaylistItem({required this.segment, required this.path});
+
+  final SpeechSegment segment;
+  final String path;
+}
+
 final class CachedAudioSpeechProvider
     implements
         SpeechProvider,
         DisposableSpeechProvider,
         AdjustableSpeechProvider,
         PrefetchingSpeechProvider,
+        PlaylistSpeechProvider,
+        CacheOnlySpeechProvider,
         TimedSpeechProvider {
   CachedAudioSpeechProvider({required this.cache, required this.engine}) {
     _completionSubscription = engine.completed.listen(_onCompleted);
@@ -156,15 +156,26 @@ final class CachedAudioSpeechProvider
   late final StreamSubscription<String> _completionSubscription;
   final Map<String, Future<File>> _inFlight = {};
   Future<void> _sourceUpdates = Future<void>.value();
-  SpeechSegment? _segment;
+
+  /// The segment currently loaded in the native player. After a native
+  /// auto-advance this points at the segment the player advanced into; once the
+  /// queue fully drains it stays on the last-played segment so resume() can
+  /// replay it and so the coordinator sees the next target as a fresh prepare.
+  _PlaylistItem? _current;
+
+  /// Look-ahead segments appended to the native playlist, in play order. The
+  /// native player advances into these by itself; Dart never calls prepare()
+  /// to start them, keeping lock-screen playback continuous.
+  final List<_PlaylistItem> _queued = [];
+  final Map<String, SpeechSegment> _segmentsByPath = {};
   bool _started = false;
   int _prepareGeneration = 0;
-  final List<String> _queuedSegmentIds = [];
-  final Map<String, SpeechSegment> _segmentsByPath = {};
-  bool _nativePlaybackActive = false;
 
   @override
   Stream<SpeechEvent> get events => _events.stream;
+
+  @override
+  String? get currentSegmentId => _current?.segment.id;
 
   @override
   Stream<PlaybackTimeline> get playbackTimeline {
@@ -187,29 +198,10 @@ final class CachedAudioSpeechProvider
         if (generation != _prepareGeneration) {
           return;
         }
-        final playbackEngine = engine;
-        final promotion =
-            playbackEngine is QueuedAudioPlaybackEngine &&
-                _queuedSegmentIds.isNotEmpty &&
-                _queuedSegmentIds.first == segment.id
-            ? await (playbackEngine as QueuedAudioPlaybackEngine)
-                  .promoteQueuedFilePath(file.path)
-            : QueuedAudioPromotion.notPromoted;
-        if (promotion == QueuedAudioPromotion.notPromoted) {
-          await engine.setFilePath(file.path);
-          _queuedSegmentIds.clear();
-        }
-        if (generation == _prepareGeneration) {
-          _segment = segment;
-          _started = false;
-          _nativePlaybackActive = promotion != QueuedAudioPromotion.notPromoted;
-          if (promotion != QueuedAudioPromotion.notPromoted) {
-            _queuedSegmentIds.removeAt(0);
-          }
-          if (promotion == QueuedAudioPromotion.completed) {
-            scheduleMicrotask(_onCompleted);
-          }
-        }
+        await engine.setFilePath(file.path);
+        _current = _PlaylistItem(segment: segment, path: file.path);
+        _queued.clear();
+        _started = false;
       });
     } catch (error) {
       if (generation != _prepareGeneration) {
@@ -224,6 +216,37 @@ final class CachedAudioSpeechProvider
   }
 
   @override
+  Future<bool> prepareCached(SpeechSegment segment, VoiceProfile profile) async {
+    final audioCache = cache;
+    if (audioCache is! LookupSpeechAudioCache) {
+      // The active cache can't answer a lookup without synthesizing, so treat
+      // this as a miss rather than reaching the network on a locked screen.
+      return false;
+    }
+    final generation = ++_prepareGeneration;
+    final file = await (audioCache as LookupSpeechAudioCache).lookup(
+      segment,
+      profile,
+    );
+    if (file == null || generation != _prepareGeneration) {
+      return false;
+    }
+    _rememberSegment(file.path, segment);
+    var ready = false;
+    await _enqueueSourceUpdate(() async {
+      if (generation != _prepareGeneration) {
+        return;
+      }
+      await engine.setFilePath(file.path);
+      _current = _PlaylistItem(segment: segment, path: file.path);
+      _queued.clear();
+      _started = false;
+      ready = true;
+    });
+    return ready;
+  }
+
+  @override
   Future<void> prefetch(SpeechSegment segment, VoiceProfile profile) async {
     final generation = _prepareGeneration;
     final file = await _obtain(segment, profile);
@@ -231,39 +254,40 @@ final class CachedAudioSpeechProvider
       return;
     }
     final playbackEngine = engine;
-    if (_segment != null && playbackEngine is QueuedAudioPlaybackEngine) {
-      final queuedEngine = playbackEngine as QueuedAudioPlaybackEngine;
-      await _enqueueSourceUpdate(() async {
-        if (generation != _prepareGeneration) {
-          return;
-        }
-        // Cap the player queue at a single look-ahead segment. Deeper prefetch
-        // still warms the audio cache (the expensive network fetch happened in
-        // _obtain above), but queuing more than one segment lets the engine
-        // auto-advance past index 1 and desyncs promoteQueuedFilePath.
-        if (_queuedSegmentIds.isNotEmpty) {
-          return;
-        }
-        _rememberSegment(file.path, segment);
-        await queuedEngine.queueNextFilePath(file.path);
-        _queuedSegmentIds.add(segment.id);
-      });
+    if (_current == null || playbackEngine is! QueuedAudioPlaybackEngine) {
+      // Nothing is playing yet (or the engine can't queue): the fetch above
+      // already warmed the audio cache, which is all prefetch owes when there
+      // is no active native playlist to append to.
+      return;
     }
+    final queuedEngine = playbackEngine as QueuedAudioPlaybackEngine;
+    await _enqueueSourceUpdate(() async {
+      if (generation != _prepareGeneration || _current == null) {
+        return;
+      }
+      // Deep look-ahead: append every prefetched segment to the native
+      // playlist so just_audio advances through them by itself while the
+      // screen is locked. No 1-deep cap — the coordinator bounds how far
+      // ahead it prefetches by wall-clock time.
+      if (_current!.segment.id == segment.id ||
+          _queued.any((item) => item.segment.id == segment.id)) {
+        return;
+      }
+      _rememberSegment(file.path, segment);
+      await queuedEngine.queueNextFilePath(file.path);
+      _queued.add(_PlaylistItem(segment: segment, path: file.path));
+    });
   }
 
   @override
   Future<void> play() async {
-    final segment = _segment;
-    if (segment == null) {
+    final current = _current;
+    if (current == null) {
       throw StateError('No speech segment has been prepared.');
     }
     if (!_started) {
       _started = true;
-      _events.add(SpeechStarted(segmentId: segment.id));
-    }
-    if (_nativePlaybackActive) {
-      _nativePlaybackActive = false;
-      return;
+      _events.add(SpeechStarted(segmentId: current.segment.id));
     }
     unawaited(_playEngine());
   }
@@ -273,7 +297,7 @@ final class CachedAudioSpeechProvider
 
   @override
   Future<void> resume() async {
-    if (_segment == null) {
+    if (_current == null) {
       throw StateError('No speech segment has been prepared.');
     }
     unawaited(_playEngine());
@@ -291,8 +315,8 @@ final class CachedAudioSpeechProvider
   @override
   Future<void> stop() async {
     _started = false;
-    _nativePlaybackActive = false;
-    _queuedSegmentIds.clear();
+    _current = null;
+    _queued.clear();
     _segmentsByPath.clear();
     await engine.stop();
   }
@@ -307,16 +331,40 @@ final class CachedAudioSpeechProvider
   }
 
   void _onCompleted([String? path]) {
-    final segment = path == null ? _segment : _segmentsByPath.remove(path);
-    if (segment != null) {
-      _started = false;
-      _events.add(SpeechCompleted(segmentId: segment.id));
+    final _PlaylistItem? finished;
+    if (path == null || (_current != null && _current!.path == path)) {
+      finished = _current;
+    } else {
+      // A path that isn't the current head (e.g. a duplicate terminal signal
+      // for an already-advanced item): attribute the completion via the map so
+      // the coordinator still hears it, but leave the native cursor untouched.
+      final segment = _segmentsByPath[path];
+      if (segment != null) {
+        _events.add(SpeechCompleted(segmentId: segment.id));
+      }
+      return;
     }
+    if (finished == null) {
+      return;
+    }
+    _started = false;
+    _events.add(SpeechCompleted(segmentId: finished.segment.id));
+    if (_queued.isNotEmpty) {
+      // just_audio has already advanced into the next queued file. Promote it
+      // to current — no prepare() round-trip — and announce it started so the
+      // coordinator's progress/prefetch bookkeeping tracks the native cursor.
+      _current = _queued.removeAt(0);
+      _started = true;
+      _events.add(SpeechStarted(segmentId: _current!.segment.id));
+    }
+    // When the queue is empty we keep _current on the finished segment: resume()
+    // can replay it, and the coordinator's next target differs from it, so it
+    // performs a fresh (cache-only when locked) prepare instead of skipping.
   }
 
   void _rememberSegment(String path, SpeechSegment segment) {
     _segmentsByPath[path] = segment;
-    while (_segmentsByPath.length > 4) {
+    while (_segmentsByPath.length > 8) {
       _segmentsByPath.remove(_segmentsByPath.keys.first);
     }
   }
@@ -325,11 +373,11 @@ final class CachedAudioSpeechProvider
     try {
       await engine.play();
     } catch (_) {
-      final segment = _segment;
-      if (segment != null) {
+      final current = _current;
+      if (current != null) {
         _events.add(
           SpeechFailed(
-            segmentId: segment.id,
+            segmentId: current.segment.id,
             failure: const AppFailure('云端音频播放失败'),
           ),
         );
