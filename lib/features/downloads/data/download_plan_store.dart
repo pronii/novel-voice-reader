@@ -114,15 +114,28 @@ final class DriftDownloadPlanStore
 
   @override
   Future<void> putJob(DownloadJobSnapshot job) async {
+    // The primary key is the autoIncrement `id`, but jobs are identified by
+    // their unique `cacheKey`. insertOnConflictUpdate targets the primary key,
+    // so re-inserting an existing job would violate the cacheKey UNIQUE
+    // constraint. Upsert explicitly on cacheKey instead.
     await _database
         .into(_database.downloadJobs)
-        .insertOnConflictUpdate(
+        .insert(
           DownloadJobsCompanion.insert(
             paragraphId: job.paragraphId,
             cacheKey: job.taskId,
             priority: job.priority,
             retryCount: Value(job.retryCount),
             status: job.status.name,
+          ),
+          onConflict: DoUpdate(
+            (_) => DownloadJobsCompanion.custom(
+              paragraphId: Constant(job.paragraphId),
+              priority: Constant(job.priority),
+              retryCount: Constant(job.retryCount),
+              status: Constant(job.status.name),
+            ),
+            target: [_database.downloadJobs.cacheKey],
           ),
         );
   }
