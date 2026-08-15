@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';
@@ -42,11 +44,26 @@ void main() {
 
     expect(delegate.events, ['configure']);
   });
+
+  test('ensureActive re-activates the session without deactivating', () async {
+    final delegate = RecordingAudioSessionDelegate();
+    final session = BackgroundAudioSession(delegate, false);
+
+    final active = await session.ensureActive();
+
+    expect(active, isTrue);
+    expect(delegate.events, ['activate']);
+    expect(delegate.deactivations, 0);
+  });
 }
 
 final class RecordingAudioSessionDelegate implements AudioSessionDelegate {
   final events = <String>[];
+  final interruptionController =
+      StreamController<AudioInterruption>.broadcast();
+  final devicesController = StreamController<void>.broadcast();
   AudioSessionConfiguration? configuration;
+  int deactivations = 0;
 
   @override
   Future<void> configure(AudioSessionConfiguration configuration) async {
@@ -56,7 +73,16 @@ final class RecordingAudioSessionDelegate implements AudioSessionDelegate {
 
   @override
   Future<bool> setActive(bool active) async {
-    events.add('activate');
+    events.add(active ? 'activate' : 'deactivate');
+    if (!active) {
+      deactivations++;
+    }
     return active;
   }
+
+  @override
+  Stream<AudioInterruption> get interruptions => interruptionController.stream;
+
+  @override
+  Stream<void> get devicesChanged => devicesController.stream;
 }

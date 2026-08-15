@@ -13,6 +13,8 @@ import 'package:novel_voice_reader/features/downloads/application/audio_cache_ru
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_path.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
+import 'package:novel_voice_reader/features/playback/data/background_keep_alive.dart';
+import 'package:novel_voice_reader/features/playback/data/background_playback_sustainer.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -43,6 +45,16 @@ Future<void> main() async {
         androidNotificationOngoing: true,
       ),
     ),
+  );
+  // Keep the audio session rendering across inter-segment gaps and recover it
+  // after interruptions / route changes, so locked-screen background playback
+  // does not get suspended a minute or two in.
+  BackgroundPlaybackSustainer(
+    session: audioSession,
+    keepAlive: SilentKeepAlivePlayer(
+      temporaryDirectory: getTemporaryDirectory,
+    ),
+    handler: handler,
   );
   runApp(
     NovelVoiceReaderApp(

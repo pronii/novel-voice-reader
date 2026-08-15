@@ -392,7 +392,15 @@ final class NovelAudioHandler extends BaseAudioHandler {
   }
 
   @override
-  Future<void> onTaskRemoved() => pause();
+  Future<void> onTaskRemoved() async {
+    // Swiping the app out of Android recents must not kill playback that is
+    // still running on the lock screen / media notification. Only tear down
+    // when nothing is actively playing.
+    if (playbackState.value.playing) {
+      return;
+    }
+    await stop();
+  }
 
   PlaybackState _state({required bool playing, Duration? updatePosition}) {
     return PlaybackState(
