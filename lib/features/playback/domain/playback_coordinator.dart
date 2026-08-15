@@ -8,6 +8,15 @@ import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
+/// Schedules a one-shot watchdog timer. Injectable so tests can fire timeouts
+/// deterministically instead of waiting on wall-clock time.
+typedef WatchdogTimerFactory =
+    Timer Function(Duration duration, void Function() onTimeout);
+
+Timer _defaultScheduleWatchdog(Duration duration, void Function() onTimeout) =>
+    Timer(duration, onTimeout);
+
+
 abstract interface class PlaybackController {
   PlaybackCursor? get cursor;
 
@@ -60,6 +69,9 @@ final class PlaybackCoordinator implements PlaybackController {
     required VoiceProfile voiceProfile,
     SpeechSegmenter segmenter = const SpeechSegmenter(),
     void Function(AppFailure failure)? onFailure,
+    Duration watchdogGrace = const Duration(seconds: 15),
+    int maxSegmentRetries = 2,
+    WatchdogTimerFactory scheduleWatchdog = _defaultScheduleWatchdog,
   }) {
     return PlaybackCoordinator._(
       provider,
@@ -68,6 +80,9 @@ final class PlaybackCoordinator implements PlaybackController {
       voiceProfile,
       segmenter,
       onFailure,
+      watchdogGrace,
+      maxSegmentRetries,
+      scheduleWatchdog,
     );
   }
 
@@ -78,6 +93,9 @@ final class PlaybackCoordinator implements PlaybackController {
     this._voiceProfile,
     this._segmenter,
     this._onFailure,
+    this._watchdogGrace,
+    this._maxSegmentRetries,
+    this._scheduleWatchdog,
   ) {
     _subscription = _provider.events.listen((event) {
       _speechEventTransactions = _speechEventTransactions.then<void>(
@@ -92,6 +110,7 @@ final class PlaybackCoordinator implements PlaybackController {
           .listen((timeline) {
             if (_acceptTimeline && !_timelineChanges.isClosed) {
               _timelineChanges.add(_enrichTimeline(timeline));
+              _extendWatchdogForTimeline(timeline);
             }
           });
     }
@@ -103,6 +122,9 @@ final class PlaybackCoordinator implements PlaybackController {
   final VoiceProfile _voiceProfile;
   final SpeechSegmenter _segmenter;
   final void Function(AppFailure failure)? _onFailure;
+  final Duration _watchdogGrace;
+  final int _maxSegmentRetries;
+  final WatchdogTimerFactory _scheduleWatchdog;
   late final StreamSubscription<SpeechEvent> _subscription;
   StreamSubscription<PlaybackTimeline>? _timelineSubscription;
   final StreamController<PlaybackCursor> _cursorChanges =
@@ -127,6 +149,8 @@ final class PlaybackCoordinator implements PlaybackController {
   bool _paused = false;
   bool _acceptTimeline = false;
   int? _chapterCharacters;
+  Timer? _watchdog;
+  int _segmentRetries = 0;
 
   @override
   PlaybackCursor? get cursor => _cursor;
@@ -154,6 +178,7 @@ final class PlaybackCoordinator implements PlaybackController {
   @override
   Future<void> pause() async {
     _paused = true;
+    _cancelWatchdog();
     final cursor = _cursor;
     if (cursor != null) {
       await _progress.confirm(cursor);
@@ -218,6 +243,7 @@ final class PlaybackCoordinator implements PlaybackController {
   Future<void> dispose() async {
     _disposing = true;
     _acceptTimeline = false;
+    _cancelWatchdog();
     _playbackGeneration++;
     _continuationEpoch++;
     _queuedPrefetchEpoch = null;
@@ -312,6 +338,7 @@ final class PlaybackCoordinator implements PlaybackController {
       _chapterCharacters = chapterCharacters;
       _segments = segments;
       _segmentIndex = 0;
+      _segmentRetries = 0;
       _activeContinuationEpoch = continuationEpoch;
       return _prepareAndPlaySegmentLocked(
         continuationEpoch,
@@ -341,6 +368,7 @@ final class PlaybackCoordinator implements PlaybackController {
     if (!_ownsContinuation(continuationEpoch)) {
       return false;
     }
+    _cancelWatchdog();
     _acceptTimeline = false;
     _timelineChanges.add(_enrichTimeline(PlaybackTimeline.zero));
     await _provider.prepare(segment, _voiceProfile);
@@ -360,6 +388,7 @@ final class PlaybackCoordinator implements PlaybackController {
     final current = _ownsContinuation(continuationEpoch);
     if (current) {
       _publishActivity(PlaybackActivity.playing);
+      _armWatchdog(continuationEpoch, segment);
     }
     return current;
   }
@@ -388,6 +417,22 @@ final class PlaybackCoordinator implements PlaybackController {
       if (_segments.isEmpty || event.segmentId != _segments[_segmentIndex].id) {
         return;
       }
+      if (!_paused && _segmentRetries < _maxSegmentRetries) {
+        _segmentRetries++;
+        // A transient synth/playback failure (a momentary network or audio
+        // session blip, common right after the screen locks) should retry the
+        // current segment rather than stopping playback dead.
+        if (await _prepareAndPlayContinuation(
+          continuationEpoch,
+          _segmentIndex,
+          _segments[_segmentIndex],
+        )) {
+          _schedulePrefetch(continuationEpoch);
+        }
+        return;
+      }
+      _segmentRetries = 0;
+      _cancelWatchdog();
       _acceptTimeline = false;
       _timelineChanges.add(PlaybackTimeline.zero);
       _publishActivity(PlaybackActivity.failed);
@@ -404,6 +449,15 @@ final class PlaybackCoordinator implements PlaybackController {
       // playback by auto-advancing to the next segment/paragraph.
       return;
     }
+    _cancelWatchdog();
+    await _advanceAfterSegmentCompleted(continuationEpoch);
+  }
+
+  /// Advances to the next segment (or paragraph) once the current segment has
+  /// finished — either because the provider reported completion or because the
+  /// watchdog gave up waiting for a completion that never arrived.
+  Future<void> _advanceAfterSegmentCompleted(int continuationEpoch) async {
+    _segmentRetries = 0;
     if (_segmentIndex + 1 < _segments.length) {
       final nextSegmentIndex = _segmentIndex + 1;
       final nextSegment = _segments[nextSegmentIndex];
@@ -431,6 +485,7 @@ final class PlaybackCoordinator implements PlaybackController {
       if (!_ownsContinuation(continuationEpoch)) {
         return;
       }
+      _cancelWatchdog();
       _acceptTimeline = false;
       _timelineChanges.add(PlaybackTimeline.zero);
       _publishActivity(PlaybackActivity.completed);
@@ -439,6 +494,93 @@ final class PlaybackCoordinator implements PlaybackController {
     if (await _startParagraph(next, continuationEpoch: continuationEpoch)) {
       await _progress.confirm(next.cursor);
     }
+  }
+
+  void _armWatchdog(int continuationEpoch, SpeechSegment segment) {
+    _cancelWatchdog();
+    if (_disposing) {
+      return;
+    }
+    final segmentIndex = _segmentIndex;
+    _watchdog = _scheduleWatchdog(_watchdogTimeoutFor(segment), () {
+      // Serialise with real speech events so a timeout that races an actual
+      // completion (or supersession) is re-checked under the same ownership
+      // guards and becomes a no-op if the segment already advanced.
+      _speechEventTransactions = _speechEventTransactions.then<void>(
+        (_) => _onWatchdogTimeout(continuationEpoch, segmentIndex),
+        onError: (Object _, StackTrace _) =>
+            _onWatchdogTimeout(continuationEpoch, segmentIndex),
+      );
+      unawaited(_speechEventTransactions);
+    });
+  }
+
+  void _cancelWatchdog() {
+    _watchdog?.cancel();
+    _watchdog = null;
+  }
+
+  Duration _watchdogTimeoutFor(SpeechSegment segment) {
+    const microsPerCharacter = 240000;
+    final characters = segment.text.runes.length;
+    final speed = _speed <= 0 ? 1.0 : _speed;
+    final estimate = Duration(
+      microseconds: (characters * microsPerCharacter / speed).round(),
+    );
+    return estimate + _watchdogGrace;
+  }
+
+  void _extendWatchdogForTimeline(PlaybackTimeline timeline) {
+    // A cloud segment that is genuinely playing but longer than the character
+    // estimate must not be falsely retried: while positions keep arriving,
+    // push the deadline out to the real remaining duration plus grace.
+    if (_watchdog == null) {
+      return;
+    }
+    final continuationEpoch = _activeContinuationEpoch;
+    if (continuationEpoch == null || !_ownsContinuation(continuationEpoch)) {
+      return;
+    }
+    final duration = timeline.duration;
+    if (duration == null || timeline.position >= duration) {
+      return;
+    }
+    final remaining = duration - timeline.position + _watchdogGrace;
+    final segmentIndex = _segmentIndex;
+    _cancelWatchdog();
+    _watchdog = _scheduleWatchdog(remaining, () {
+      _speechEventTransactions = _speechEventTransactions.then<void>(
+        (_) => _onWatchdogTimeout(continuationEpoch, segmentIndex),
+        onError: (Object _, StackTrace _) =>
+            _onWatchdogTimeout(continuationEpoch, segmentIndex),
+      );
+      unawaited(_speechEventTransactions);
+    });
+  }
+
+  Future<void> _onWatchdogTimeout(int continuationEpoch, int segmentIndex) async {
+    if (_paused ||
+        _disposing ||
+        _segments.isEmpty ||
+        segmentIndex != _segmentIndex ||
+        !_ownsContinuation(continuationEpoch)) {
+      return;
+    }
+    if (_segmentRetries < _maxSegmentRetries) {
+      _segmentRetries++;
+      // The completion callback never arrived — a well-known failure mode for
+      // flutter_tts on a locked iOS screen. Replay the current segment so the
+      // chapter keeps moving instead of stalling on one sentence forever.
+      await _prepareAndPlayContinuation(
+        continuationEpoch,
+        segmentIndex,
+        _segments[segmentIndex],
+      );
+      return;
+    }
+    // Retries exhausted: treat the segment as finished and move on rather than
+    // freezing here.
+    await _advanceAfterSegmentCompleted(continuationEpoch);
   }
 
   void _schedulePrefetch(int continuationEpoch) {

@@ -65,10 +65,23 @@ final class BackgroundAudioSession {
   /// Re-activates the session after the OS deactivated it (following an
   /// interruption or an output-route change). Returns whether it is now active.
   ///
+  /// The first `setActive` after the OS reclaimed audio focus can transiently
+  /// fail, so retry a bounded number of times rather than swallowing a single
+  /// failure and leaving background playback dead.
+  ///
   /// This never deactivates the session: background playback keeps the session
   /// active across the gaps between spoken segments so iOS does not suspend the
   /// isolate mid-chapter.
-  Future<bool> ensureActive() => _delegate.setActive(true);
+  Future<bool> ensureActive() async {
+    for (var attempt = 0; attempt < _activationAttempts; attempt++) {
+      if (await _delegate.setActive(true)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static const int _activationAttempts = 3;
 }
 
 final class _PluginAudioSessionDelegate implements AudioSessionDelegate {

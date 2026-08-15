@@ -58,6 +58,56 @@ void main() {
     await coordinator.dispose();
   });
 
+  test(
+    'retries the current segment when a completion never arrives, then advances',
+    () async {
+      final provider = FakeSpeechProvider();
+      final progress = FakeProgressRepository();
+      final callbacks = <void Function()>[];
+      final coordinator = PlaybackCoordinator(
+        provider: provider,
+        progress: progress,
+        paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+        voiceProfile: VoiceProfile.system(),
+        maxSegmentRetries: 1,
+        scheduleWatchdog: (duration, onTimeout) {
+          callbacks.add(onTimeout);
+          return Timer(const Duration(days: 1), () {});
+        },
+      );
+
+      await coordinator.playFrom(
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      );
+      expect(provider.prepared.map((segment) => segment.text), ['第一段']);
+
+      // The completion callback never arrives (a well-known flutter_tts failure
+      // mode on a locked iOS screen): the watchdog fires and replays the current
+      // segment instead of stalling on one sentence forever.
+      callbacks.last();
+      await pumpEventQueue();
+      expect(provider.prepared.map((segment) => segment.text), [
+        '第一段',
+        '第一段',
+      ]);
+      expect(
+        coordinator.cursor,
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      );
+
+      // Still no completion: retries are exhausted, so playback advances to the
+      // next paragraph rather than freezing.
+      callbacks.last();
+      await pumpEventQueue();
+      expect(provider.prepared.last.text, '第二段');
+      expect(
+        progress.confirmed,
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 1),
+      );
+      await coordinator.dispose();
+    },
+  );
+
   test('prefetches the next paragraph while the current one plays', () async {
     final provider = FakeSpeechProvider();
     final coordinator = PlaybackCoordinator(

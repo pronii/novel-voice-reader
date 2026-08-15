@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
@@ -26,6 +27,16 @@ abstract interface class AdjustableSystemTtsEngine {
   Future<void> setPlaybackSpeed(double speed);
 }
 
+/// Optional capability: engines that must prepare the platform audio session
+/// before speaking. On iOS the synthesizer otherwise defaults to the `ambient`
+/// category, which the OS silences once the screen locks — playback dies a
+/// minute or two after locking and completion callbacks stop firing.
+abstract interface class SessionConfigurableSystemTtsEngine {
+  /// Configures the underlying platform audio session for uninterrupted
+  /// background playback. Idempotent; called once before the first `speak`.
+  Future<void> configureSession();
+}
+
 /// Optional capability: engines that report how far into the spoken text
 /// playback has progressed, letting [SystemTtsAdapter] resume near the pause
 /// point instead of replaying the whole segment.
@@ -37,11 +48,14 @@ final class FlutterSystemTtsEngine
     implements
         SystemTtsEngine,
         AdjustableSystemTtsEngine,
+        SessionConfigurableSystemTtsEngine,
         ProgressReportingSystemTtsEngine {
-  FlutterSystemTtsEngine([FlutterTts? flutterTts])
-    : _flutterTts = flutterTts ?? FlutterTts();
+  FlutterSystemTtsEngine([FlutterTts? flutterTts, bool? isIos])
+    : _flutterTts = flutterTts ?? FlutterTts(),
+      _isIos = isIos ?? Platform.isIOS;
 
   final FlutterTts _flutterTts;
+  final bool _isIos;
 
   @override
   void setStartHandler(void Function() handler) {
@@ -62,6 +76,28 @@ final class FlutterSystemTtsEngine
   void setProgressHandler(void Function(int endOffset) handler) {
     _flutterTts.setProgressHandler(
       (text, start, end, word) => handler(end),
+    );
+  }
+
+  @override
+  Future<void> configureSession() async {
+    if (!_isIos) {
+      return;
+    }
+    // AVSpeechSynthesizer defaults to the `ambient` audio category, which iOS
+    // silences the moment the screen locks and then stops delivering the
+    // completion callback the coordinator relies on to advance. Share the
+    // app's AVAudioSession (so we don't fight the just_audio / audio_service
+    // session) and force the `playback` category so spoken audio keeps
+    // rendering with the screen locked.
+    await _flutterTts.setSharedInstance(true);
+    await _flutterTts.setIosAudioCategory(
+      IosTextToSpeechAudioCategory.playback,
+      const [
+        IosTextToSpeechAudioCategoryOptions.mixWithOthers,
+        IosTextToSpeechAudioCategoryOptions.allowBluetooth,
+        IosTextToSpeechAudioCategoryOptions.allowBluetoothA2DP,
+      ],
     );
   }
 
@@ -121,6 +157,7 @@ final class SystemTtsAdapter
   final SystemTtsEngine _engine;
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
   SpeechSegment? _segment;
+  bool _sessionConfigured = false;
   // Absolute character offset (into the current segment) spoken so far, plus
   // the offset at which the in-flight speak() call began. Together they let
   // resume() continue near the pause point instead of restarting the segment.
@@ -132,10 +169,24 @@ final class SystemTtsAdapter
 
   @override
   Future<void> prepare(SpeechSegment segment, VoiceProfile profile) async {
+    await _ensureSessionConfigured();
     _segment = segment;
     _playedChars = 0;
     _speakBase = 0;
     await _engine.configure(profile);
+  }
+
+  Future<void> _ensureSessionConfigured() async {
+    if (_sessionConfigured) {
+      return;
+    }
+    final engine = _engine;
+    if (engine is SessionConfigurableSystemTtsEngine) {
+      await (engine as SessionConfigurableSystemTtsEngine).configureSession();
+    }
+    // Set even when the engine is not session-configurable so we don't retry
+    // the capability probe on every prepare.
+    _sessionConfigured = true;
   }
 
   @override

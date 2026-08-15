@@ -16,6 +16,14 @@ import 'package:novel_voice_reader/features/playback/data/background_audio_handl
 import 'package:novel_voice_reader/features/playback/data/background_keep_alive.dart';
 import 'package:novel_voice_reader/features/playback/data/background_playback_sustainer.dart';
 
+/// Retains the background playback sustainer for the whole process lifetime.
+///
+/// The sustainer only stays reachable through the stream subscriptions it wires
+/// up; keeping an explicit top-level reference guarantees it is never garbage
+/// collected out from under a locked-screen playback session.
+// ignore: unused_element
+BackgroundPlaybackSustainer? _backgroundPlaybackSustainer;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final database = AppDatabase(driftDatabase(name: 'novel_voice_reader'));
@@ -49,10 +57,10 @@ Future<void> main() async {
   // Keep the audio session rendering across inter-segment gaps and recover it
   // after interruptions / route changes, so locked-screen background playback
   // does not get suspended a minute or two in.
-  BackgroundPlaybackSustainer(
+  _backgroundPlaybackSustainer = BackgroundPlaybackSustainer(
     session: audioSession,
     keepAlive: SilentKeepAlivePlayer(
-      temporaryDirectory: getTemporaryDirectory,
+      supportDirectory: getApplicationSupportDirectory,
     ),
     handler: handler,
   );

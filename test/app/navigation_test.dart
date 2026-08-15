@@ -115,13 +115,19 @@ void main() {
       handler: NovelAudioHandler(controller),
     );
     final cursor = PlaybackCursor(chapterId: chapter.id, paragraphIndex: 0);
+    final coordinator = PlaybackCoordinator(
+      provider: _NavigationSpeechProvider(),
+      progress: _NavigationProgressRepository(),
+      paragraphs: _NavigationParagraphSource(),
+      voiceProfile: VoiceProfile.system(),
+      // This test never emits SpeechCompleted, so a live watchdog would keep
+      // retrying/advancing and starve the fake-async isolate. Inject an inert,
+      // cancellable timer — the watchdog itself is covered in the coordinator
+      // unit tests, not here.
+      scheduleWatchdog: _inertWatchdog,
+    );
     await runtime.replaceAndPlayFrom(
-      PlaybackCoordinator(
-        provider: _NavigationSpeechProvider(),
-        progress: _NavigationProgressRepository(),
-        paragraphs: _NavigationParagraphSource(),
-        voiceProfile: VoiceProfile.system(),
-      ),
+      coordinator,
       cursor,
       token: runtime.beginReplacement(),
     );
@@ -251,13 +257,17 @@ void main() {
       handler: NovelAudioHandler(controller),
     );
     final target = PlaybackCursor(chapterId: chapters[6].id, paragraphIndex: 0);
+    final coordinator = PlaybackCoordinator(
+      provider: _NavigationSpeechProvider(),
+      progress: _NavigationProgressRepository(),
+      paragraphs: _NavigationParagraphSource(),
+      voiceProfile: VoiceProfile.system(),
+      // See the highlight test above: no SpeechCompleted is emitted here, so the
+      // watchdog is stubbed out to keep the fake-async isolate quiescent.
+      scheduleWatchdog: _inertWatchdog,
+    );
     await runtime.replaceAndPlayFrom(
-      PlaybackCoordinator(
-        provider: _NavigationSpeechProvider(),
-        progress: _NavigationProgressRepository(),
-        paragraphs: _NavigationParagraphSource(),
-        voiceProfile: VoiceProfile.system(),
-      ),
+      coordinator,
       target,
       token: runtime.beginReplacement(),
     );
@@ -507,6 +517,25 @@ final class _SpeedPlaybackController implements PlaybackController {
 
   @override
   Future<void> setSpeed(double speed) async => speedChanges.add(speed);
+}
+
+// A watchdog factory that never schedules anything: it returns a fake [Timer]
+// that is not created through the zone's clock, so the fake-async harness never
+// tracks it as a pending timer, and it never fires. These navigation tests do
+// not exercise the watchdog (which is covered by the coordinator unit tests);
+// stubbing it out keeps the fake-async isolate quiescent.
+Timer _inertWatchdog(Duration duration, void Function() onTimeout) =>
+    _InertTimer();
+
+final class _InertTimer implements Timer {
+  @override
+  void cancel() {}
+
+  @override
+  bool get isActive => false;
+
+  @override
+  int get tick => 0;
 }
 
 final class _NavigationParagraphSource implements PlaybackParagraphSource {

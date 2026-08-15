@@ -222,7 +222,7 @@ void main() {
     },
   );
 
-  test('an asynchronous speech failure resets the playing state', () async {
+  test('a sustained speech failure resets the playing state', () async {
     final provider = RuntimeSpeechProvider();
     final failures = <AppFailure>[];
     final controller = AttachablePlaybackController();
@@ -240,8 +240,13 @@ void main() {
       ),
     );
 
-    provider.fail(provider.prepared.single.id);
-    await pumpEventQueue();
+    // Transient failures are retried; only once retries are exhausted does the
+    // failure surface and reset the playing state. Fail the current segment
+    // enough times to exceed the retry budget (initial + 2 retries).
+    for (var attempt = 0; attempt < 3; attempt++) {
+      provider.fail(provider.prepared.last.id);
+      await pumpEventQueue();
+    }
 
     expect(handler.playbackState.value.playing, isFalse);
     expect(handler.currentTimeline, PlaybackTimeline.zero);

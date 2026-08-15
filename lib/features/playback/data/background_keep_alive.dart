@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:just_audio/just_audio.dart';
@@ -24,31 +25,105 @@ abstract interface class KeepAlivePlayer {
   Future<void> dispose();
 }
 
-/// A [KeepAlivePlayer] backed by an isolated [AudioPlayer] looping a silent
+/// The low-level audio operations [SilentKeepAlivePlayer] needs, extracted so
+/// the recovery logic can be exercised without a real platform audio player.
+abstract interface class KeepAliveAudioOutput {
+  Future<void> configure({required double volume});
+
+  /// Loads [filePath] as a looping source.
+  Future<void> loadLoop(String filePath);
+
+  Future<void> play();
+
+  Future<void> pause();
+
+  /// Emits whenever the running loop errors (e.g. the backing file was evicted
+  /// by the OS), so the keep-alive can rebuild and restart it.
+  Stream<Object> get errors;
+
+  Future<void> dispose();
+}
+
+/// A [KeepAliveAudioOutput] backed by a dedicated just_audio [AudioPlayer].
+final class JustAudioKeepAliveOutput implements KeepAliveAudioOutput {
+  JustAudioKeepAliveOutput([AudioPlayer? player])
+    : _player = player ?? AudioPlayer();
+
+  final AudioPlayer _player;
+
+  @override
+  Stream<Object> get errors => _player.playbackEventStream.transform(
+    StreamTransformer<PlaybackEvent, Object>.fromHandlers(
+      handleData: (_, _) {},
+      handleError: (error, _, sink) => sink.add(error),
+    ),
+  );
+
+  @override
+  Future<void> configure({required double volume}) async {
+    await _player.setVolume(volume);
+    await _player.setLoopMode(LoopMode.one);
+  }
+
+  @override
+  Future<void> loadLoop(String filePath) async {
+    await _player.setAudioSource(AudioSource.file(filePath));
+  }
+
+  @override
+  Future<void> play() => _player.play();
+
+  @override
+  Future<void> pause() => _player.pause();
+
+  @override
+  Future<void> dispose() => _player.dispose();
+}
+
+/// A [KeepAlivePlayer] backed by a [KeepAliveAudioOutput] looping a near-silent
 /// clip generated at runtime, so no bundled asset is required.
 final class SilentKeepAlivePlayer implements KeepAlivePlayer {
   SilentKeepAlivePlayer({
-    required Future<Directory> Function() temporaryDirectory,
-    AudioPlayer? player,
-  }) : _player = player ?? AudioPlayer(),
+    required Future<Directory> Function() supportDirectory,
+    KeepAliveAudioOutput? output,
+  }) : _output = output ?? JustAudioKeepAliveOutput(),
        // ignore: prefer_initializing_formals
-       _temporaryDirectory = temporaryDirectory;
+       _supportDirectory = supportDirectory {
+    _errorSubscription = _output.errors.listen((_) {
+      // The running loop failed (typically the backing file was purged while
+      // backgrounded). Rebuild the source and resume so the session keeps
+      // rendering instead of silently dying.
+      unawaited(_recover());
+    });
+  }
 
-  final AudioPlayer _player;
-  final Future<Directory> Function() _temporaryDirectory;
+  final KeepAliveAudioOutput _output;
+  final Future<Directory> Function() _supportDirectory;
+  late final StreamSubscription<Object> _errorSubscription;
   Future<void>? _prepared;
+  bool _running = false;
   bool _disposed = false;
+
+  // A very low, non-zero amplitude. iOS revokes background-audio eligibility
+  // from sessions that render pure silence (all-zero PCM at volume 0), so the
+  // clip carries a faint tone and the player runs at a tiny — but non-zero —
+  // volume. The product is inaudible yet counts as real output.
+  static const double _volume = 0.02;
 
   Future<void> _ensurePrepared() {
     return _prepared ??= () async {
-      final directory = await _temporaryDirectory();
-      final file = File('${directory.path}/nvr_keep_alive_silence.wav');
+      final directory = await _supportDirectory();
+      final file = File('${directory.path}/nvr_keep_alive_tone.wav');
+      // The application-support directory is never purged from under a
+      // backgrounded app (unlike the OS temporary directory), but rewrite the
+      // clip if it is somehow missing so a stale memoized future can't leave us
+      // pointing at a file that no longer exists.
       if (!file.existsSync()) {
-        await file.writeAsBytes(buildSilenceWav(const Duration(seconds: 1)));
+        file.parent.createSync(recursive: true);
+        await file.writeAsBytes(buildKeepAliveTone(const Duration(seconds: 1)));
       }
-      await _player.setVolume(0);
-      await _player.setLoopMode(LoopMode.one);
-      await _player.setAudioSource(AudioSource.file(file.path));
+      await _output.configure(volume: _volume);
+      await _output.loadLoop(file.path);
     }();
   }
 
@@ -57,11 +132,18 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
     if (_disposed) {
       return;
     }
-    await _ensurePrepared();
-    if (_disposed) {
-      return;
+    _running = true;
+    try {
+      await _ensurePrepared();
+      if (_disposed) {
+        return;
+      }
+      await _output.play();
+    } catch (_) {
+      // The prepared source may have been evicted; rebuild once and retry so a
+      // transient failure doesn't permanently kill the keep-alive loop.
+      await _recover();
     }
-    await _player.play();
   }
 
   @override
@@ -69,21 +151,51 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
     if (_disposed) {
       return;
     }
-    await _player.pause();
+    _running = false;
+    await _output.pause();
+  }
+
+  Future<void> _recover() async {
+    if (_disposed || !_running) {
+      return;
+    }
+    _prepared = null;
+    try {
+      await _ensurePrepared();
+      if (_disposed || !_running) {
+        return;
+      }
+      await _output.play();
+    } catch (_) {
+      // Give up quietly; the next start()/route change/interruption recovery
+      // will try again.
+    }
   }
 
   @override
   Future<void> dispose() async {
     _disposed = true;
-    await _player.dispose();
+    _running = false;
+    await _errorSubscription.cancel();
+    await _output.dispose();
   }
 }
 
-/// Builds a mono 8 kHz 16-bit PCM WAV file containing [duration] of silence.
-Uint8List buildSilenceWav(Duration duration) {
+/// Builds a mono 8 kHz 16-bit PCM WAV file containing [duration] of a
+/// near-silent, low-amplitude tone.
+///
+/// The samples are deliberately non-zero: iOS drops background-audio
+/// eligibility for sessions it detects are rendering pure silence, so the
+/// keep-alive clip carries a faint sine wave that is inaudible at the tiny
+/// playback volume but still registers as genuine output.
+Uint8List buildKeepAliveTone(Duration duration) {
   const sampleRate = 8000;
   const bytesPerSample = 2;
   const channels = 1;
+  // ~1/1000 of full scale; combined with the player's low volume this is
+  // inaudible, but the PCM stream is unmistakably non-silent.
+  const amplitude = 32;
+  const frequency = 220.0;
   final samples = (sampleRate * duration.inMilliseconds / 1000).round();
   final dataBytes = samples * bytesPerSample * channels;
   final byteRate = sampleRate * bytesPerSample * channels;
@@ -118,6 +230,12 @@ Uint8List buildSilenceWav(Duration duration) {
   header.setUint8(39, 0x61); // 'a'
   header.setUint32(40, dataBytes, Endian.little);
   builder.add(header.buffer.asUint8List());
-  builder.add(Uint8List(dataBytes)); // zero-filled == silence
+  final data = ByteData(dataBytes);
+  for (var i = 0; i < samples; i++) {
+    final value = (amplitude * sin(2 * pi * frequency * i / sampleRate))
+        .round();
+    data.setInt16(i * bytesPerSample, value, Endian.little);
+  }
+  builder.add(data.buffer.asUint8List());
   return builder.toBytes();
 }

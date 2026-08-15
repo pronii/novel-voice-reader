@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:novel_voice_reader/features/speech/data/system_tts_adapter.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
@@ -112,6 +113,60 @@ void main() {
     expect(engine.spoken, ['正文', '正文']);
     await adapter.dispose();
   });
+
+  test(
+    'configures the platform audio session once before the first speak',
+    () async {
+      final engine = SessionConfigurableFakeSystemTtsEngine();
+      final adapter = SystemTtsAdapter(engine);
+      const first = SpeechSegment(
+        id: '1:0',
+        paragraphId: 1,
+        text: '第一句',
+        partIndex: 0,
+      );
+      const second = SpeechSegment(
+        id: '1:1',
+        paragraphId: 1,
+        text: '第二句',
+        partIndex: 1,
+      );
+
+      await adapter.prepare(first, VoiceProfile.system());
+      await adapter.play();
+      await adapter.prepare(second, VoiceProfile.system());
+      await adapter.play();
+
+      // The iOS session (playback category / shared instance) must be armed
+      // before any audio is produced, and only once for the provider's life.
+      expect(engine.configureSessionCalls, 1);
+      expect(engine.configuredBeforeFirstSpeak, isTrue);
+      await adapter.dispose();
+    },
+  );
+
+  test(
+    'FlutterSystemTtsEngine shares the audio session when configuring on iOS',
+    () async {
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            return 1;
+          });
+      final engine = FlutterSystemTtsEngine(FlutterTts(), true);
+
+      await engine.configureSession();
+
+      // setIosAudioCategory itself is guarded by the real platform inside
+      // flutter_tts, so on a non-iOS host we can only assert the shared-session
+      // call fires; the category application is covered by on-device testing.
+      final shared = calls
+          .where((call) => call.method == 'setSharedInstance')
+          .single;
+      expect(shared.arguments, isTrue);
+    },
+  );
 }
 
 class FakeSystemTtsEngine implements SystemTtsEngine {
@@ -164,5 +219,17 @@ final class AdjustableFakeSystemTtsEngine extends FakeSystemTtsEngine
   @override
   Future<void> setPlaybackSpeed(double speed) async {
     speedChanges.add(speed);
+  }
+}
+
+final class SessionConfigurableFakeSystemTtsEngine extends FakeSystemTtsEngine
+    implements SessionConfigurableSystemTtsEngine {
+  int configureSessionCalls = 0;
+  bool configuredBeforeFirstSpeak = false;
+
+  @override
+  Future<void> configureSession() async {
+    configureSessionCalls++;
+    configuredBeforeFirstSpeak = spoken.isEmpty;
   }
 }
