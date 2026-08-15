@@ -118,6 +118,21 @@ final class AudioCacheRuntime {
     return operation;
   }
 
+  /// Returns the cached, validated audio file for [segment] if it is already on
+  /// disk, or null on a miss/corrupt entry. Never synthesizes, records a
+  /// download, or prunes — this is the lock-screen "hit disk and keep playing"
+  /// path, which must not touch the network or the download plan.
+  Future<File?> lookup({
+    required int bookId,
+    required SpeechSegment segment,
+    required VoiceProfile profile,
+  }) {
+    return AudioCacheRepository(
+      directory: cacheDirectoryForBook(bookId),
+      synthesizer: _synthesizer(profile),
+    ).lookup(segment, profile);
+  }
+
   SpeechAudioCache forBook(int bookId) => _RuntimeBookAudioCache(this, bookId);
 
   /// Restores persisted cache plans once at launch and whenever connectivity
@@ -311,7 +326,8 @@ final class AudioCacheRuntime {
   }
 }
 
-final class _RuntimeBookAudioCache implements SpeechAudioCache {
+final class _RuntimeBookAudioCache
+    implements SpeechAudioCache, LookupSpeechAudioCache {
   const _RuntimeBookAudioCache(this._runtime, this._bookId);
 
   final AudioCacheRuntime _runtime;
@@ -320,5 +336,10 @@ final class _RuntimeBookAudioCache implements SpeechAudioCache {
   @override
   Future<File> obtain(SpeechSegment segment, VoiceProfile profile) {
     return _runtime.obtain(bookId: _bookId, segment: segment, profile: profile);
+  }
+
+  @override
+  Future<File?> lookup(SpeechSegment segment, VoiceProfile profile) {
+    return _runtime.lookup(bookId: _bookId, segment: segment, profile: profile);
   }
 }

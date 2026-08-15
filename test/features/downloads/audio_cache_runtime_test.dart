@@ -9,8 +9,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
+import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_task_dispatcher.dart';
+import 'package:novel_voice_reader/features/downloads/domain/cache_key.dart';
 import 'package:novel_voice_reader/features/downloads/domain/download_policy.dart';
+import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
@@ -140,6 +143,144 @@ void main() {
       hasLength(1),
     );
   });
+
+  test('lookup returns a warmed segment file without synthesizing', () async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    final root = await Directory.systemTemp.createTemp('audio-cache-lookup');
+    addTearDown(() async {
+      await database.close();
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    final bookId = await database.createBookWithChapter(
+      title: '查找测试书',
+      chapterTitle: '第一章',
+      paragraphs: const ['第一段。'],
+    );
+    final adapter = _CountingAudioAdapter();
+    final dio = Dio()..httpClientAdapter = adapter;
+    final runtime = AudioCacheRuntime(
+      database: database,
+      cacheDirectoryForBook: (id) => _bookDir(root, id),
+      dio: dio,
+      credentials: SecureCredentials(_MemorySecureStore()),
+      networkGate: const AllowAllDownloadNetworkGate(),
+    );
+    addTearDown(runtime.dispose);
+    final profile = _cloudProfile();
+    const segment = SpeechSegment(
+      id: '1:0',
+      paragraphId: 1,
+      text: '第一段。',
+      partIndex: 0,
+    );
+
+    final warmed = await runtime.obtain(
+      bookId: bookId,
+      segment: segment,
+      profile: profile,
+    );
+    expect(adapter.fetchCount, 1);
+
+    final cache = runtime.forBook(bookId);
+    expect(cache, isA<LookupSpeechAudioCache>());
+    final found = await (cache as LookupSpeechAudioCache).lookup(
+      segment,
+      profile,
+    );
+
+    expect(found != null, isTrue);
+    expect(found!.path, warmed.path);
+    expect(adapter.fetchCount, 1, reason: 'lookup must not synthesize');
+  });
+
+  test('lookup returns null on a miss without synthesizing', () async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    final root = await Directory.systemTemp.createTemp('audio-cache-miss');
+    addTearDown(() async {
+      await database.close();
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    final bookId = await database.createBookWithChapter(
+      title: '缺失测试书',
+      chapterTitle: '第一章',
+      paragraphs: const ['第一段。'],
+    );
+    final adapter = _CountingAudioAdapter();
+    final dio = Dio()..httpClientAdapter = adapter;
+    final runtime = AudioCacheRuntime(
+      database: database,
+      cacheDirectoryForBook: (id) => _bookDir(root, id),
+      dio: dio,
+      credentials: SecureCredentials(_MemorySecureStore()),
+      networkGate: const AllowAllDownloadNetworkGate(),
+    );
+    addTearDown(runtime.dispose);
+    final profile = _cloudProfile();
+    const segment = SpeechSegment(
+      id: '1:0',
+      paragraphId: 1,
+      text: '还没有缓存。',
+      partIndex: 0,
+    );
+
+    final found = await runtime.lookup(
+      bookId: bookId,
+      segment: segment,
+      profile: profile,
+    );
+
+    expect(found, null);
+    expect(adapter.fetchCount, 0, reason: 'a miss must never synthesize');
+  });
+
+  test('lookup treats a corrupt cache file as a miss', () async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    final root = await Directory.systemTemp.createTemp('audio-cache-corrupt');
+    addTearDown(() async {
+      await database.close();
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    final bookId = await database.createBookWithChapter(
+      title: '损坏测试书',
+      chapterTitle: '第一章',
+      paragraphs: const ['第一段。'],
+    );
+    final adapter = _CountingAudioAdapter();
+    final dio = Dio()..httpClientAdapter = adapter;
+    final runtime = AudioCacheRuntime(
+      database: database,
+      cacheDirectoryForBook: (id) => _bookDir(root, id),
+      dio: dio,
+      credentials: SecureCredentials(_MemorySecureStore()),
+      networkGate: const AllowAllDownloadNetworkGate(),
+    );
+    addTearDown(runtime.dispose);
+    final profile = _cloudProfile();
+    const segment = SpeechSegment(
+      id: '1:0',
+      paragraphId: 1,
+      text: '损坏的缓存。',
+      partIndex: 0,
+    );
+
+    final bookDir = _bookDir(root, bookId);
+    await bookDir.create(recursive: true);
+    final key = CacheKey.forSegment(segment, profile);
+    final corrupt = File(
+      '${bookDir.path}${Platform.pathSeparator}$key.mp3',
+    );
+    await corrupt.writeAsBytes(const [0x00, 0x00, 0x00, 0x00], flush: true);
+
+    final found = await runtime.lookup(
+      bookId: bookId,
+      segment: segment,
+      profile: profile,
+    );
+
+    expect(found, null);
+    expect(await corrupt.exists(), isFalse);
+    expect(adapter.fetchCount, 0, reason: 'a corrupt entry must never synthesize');
+  });
 }
 
 AudioCacheRuntime _runtime({
@@ -180,6 +321,9 @@ Future<void> _savePolicy(
       );
 }
 
+Directory _bookDir(Directory root, int bookId) =>
+    Directory('${root.path}${Platform.pathSeparator}book-$bookId');
+
 VoiceProfile _cloudProfile() => VoiceProfile.cloud(
   baseUrl: 'https://example.com',
   model: 'tts-model',
@@ -215,6 +359,34 @@ final class _AudioHttpAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    return ResponseBody.fromBytes(const [
+      0x49,
+      0x44,
+      0x33,
+      0x04,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+    ], 200);
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+final class _CountingAudioAdapter implements HttpClientAdapter {
+  int fetchCount = 0;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    fetchCount++;
     return ResponseBody.fromBytes(const [
       0x49,
       0x44,
