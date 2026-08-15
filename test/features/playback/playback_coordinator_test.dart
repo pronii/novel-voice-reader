@@ -128,6 +128,28 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('locking reschedules look-ahead synthesis while audio is active', () async {
+    final provider = FakeSpeechProvider();
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+      voiceProfile: VoiceProfile.mimo(),
+    );
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    await pumpEventQueue();
+    provider.prefetched.clear();
+
+    coordinator.setForeground(false);
+    await pumpEventQueue();
+
+    expect(provider.prefetched.map((segment) => segment.text), ['第二段']);
+    await coordinator.dispose();
+  });
+
   test('serializes provider takeover and only plays the newest request', () async {
     final provider = ControllablePrepareSpeechProvider();
     final coordinator = PlaybackCoordinator(
@@ -268,7 +290,7 @@ void main() {
   );
 
   test(
-    'locked cache miss at a paragraph boundary soft-pauses without a banner',
+    'locked cache miss at a paragraph boundary falls back to synthesis',
     () async {
       final provider = PlaylistCacheSpeechProvider()..prefetchCaches = false;
       final progress = FakeProgressRepository();
@@ -277,7 +299,7 @@ void main() {
         provider: provider,
         progress: progress,
         paragraphs: FakeParagraphSource(const ['甲', '乙']),
-        voiceProfile: VoiceProfile.system(),
+        voiceProfile: VoiceProfile.mimo(),
         onFailure: failures.add,
         retryDelay: (_) async {},
       );
@@ -290,24 +312,16 @@ void main() {
       await pumpEventQueue();
 
       coordinator.setForeground(false);
-      // The current segment finishes but the next paragraph was never cached
-      // (background HTTP is suspended on a locked screen).
+      // The current segment finishes but the next paragraph was never cached.
       provider.completeCurrent();
       await pumpEventQueue();
 
-      // Cache-only prepare missed: no network synth, no banner, and playback is
-      // soft-paused at the last local segment.
-      expect(provider.prepared.map((segment) => segment.id), ['1:0']);
+      // Cache lookup misses, then normal prepare performs the TTS synthesis and
+      // playback continues without waiting for the app to return foreground.
+      expect(provider.prepared.map((segment) => segment.id), ['1:0', '2:0']);
       expect(provider.cacheChecked.map((segment) => segment.id), ['2:0']);
       expect(failures, isEmpty);
-      expect(activities.last, PlaybackActivity.paused);
-
-      // Returning to the foreground refills the queue: the missed segment may
-      // now synthesize over the network and playback continues.
-      coordinator.setForeground(true);
-      await pumpEventQueue();
-
-      expect(provider.prepared.map((segment) => segment.id), ['1:0', '2:0']);
+      expect(activities.last, PlaybackActivity.playing);
       expect(
         progress.confirmed,
         const PlaybackCursor(chapterId: 1, paragraphIndex: 1),
@@ -318,7 +332,7 @@ void main() {
   );
 
   test(
-    'locked cache miss mid-paragraph soft-pauses then resumes on foreground',
+    'locked cache miss mid-paragraph falls back to synthesis',
     () async {
       final provider = PlaylistCacheSpeechProvider()..prefetchCaches = false;
       final failures = <AppFailure>[];
@@ -343,16 +357,12 @@ void main() {
       provider.completeCurrent();
       await pumpEventQueue();
 
-      // The next in-paragraph segment was not cached: soft-pause, no banner.
-      expect(provider.prepared.map((segment) => segment.id), ['1:0']);
+      // The next in-paragraph segment was not cached, so cache-first lookup
+      // falls through to synthesis while the screen remains locked.
+      expect(provider.prepared.map((segment) => segment.id), ['1:0', '1:1']);
       expect(provider.cacheChecked.map((segment) => segment.id), ['1:1']);
       expect(failures, isEmpty);
-      expect(activities.last, PlaybackActivity.paused);
-
-      coordinator.setForeground(true);
-      await pumpEventQueue();
-
-      expect(provider.prepared.map((segment) => segment.id), ['1:0', '1:1']);
+      expect(activities.last, PlaybackActivity.playing);
       await subscription.cancel();
       await coordinator.dispose();
     },
@@ -1011,7 +1021,7 @@ final class FakeSpeechProvider
 
 /// A speech provider that models a native look-ahead playlist plus a local
 /// cache, so the coordinator's lock-screen behaviour (native auto-advance and
-/// cache-only prepare) can be exercised without a real audio engine.
+/// cache-first prepare) can be exercised without a real audio engine.
 final class PlaylistCacheSpeechProvider
     implements
         SpeechProvider,

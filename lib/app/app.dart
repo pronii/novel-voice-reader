@@ -36,7 +36,7 @@ final class _NovelVoiceReaderAppState extends State<NovelVoiceReaderApp>
     _router = createAppRouter();
     WidgetsBinding.instance.addObserver(this);
     // Seed the current lifecycle state so a runtime created while the app is
-    // already backgrounded starts in cache-only mode.
+    // already backgrounded starts in cache-first mode.
     final initial = WidgetsBinding.instance.lifecycleState;
     if (initial != null) {
       widget.playbackRuntime?.setForeground(initial == AppLifecycleState.resumed);
@@ -46,9 +46,8 @@ final class _NovelVoiceReaderAppState extends State<NovelVoiceReaderApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    // The screen lock / app background is what suspends background HTTP on iOS.
-    // Tell the playback runtime so it prepares from cache only while not
-    // resumed and refills the look-ahead queue once we are foreground again.
+    // Tell playback when the UI is backgrounded so it can prefer local audio
+    // without forbidding TTS synthesis needed to sustain background playback.
     widget.playbackRuntime?.setForeground(state == AppLifecycleState.resumed);
   }
 

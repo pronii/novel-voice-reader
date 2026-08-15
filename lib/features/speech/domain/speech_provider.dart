@@ -42,8 +42,8 @@ abstract interface class PlaylistSpeechProvider {
 }
 
 /// A provider that can prepare a segment using only already-cached audio,
-/// never reaching the network. Used while the screen is locked / the app is
-/// backgrounded so a cache miss soft-pauses instead of failing with a banner.
+/// never reaching the network. Used as the first, fast lookup while the screen
+/// is locked; the coordinator may still fall back to normal synthesis on miss.
 abstract interface class CacheOnlySpeechProvider {
   /// Prepares [segment] only if its audio is already cached locally. Returns
   /// true when it was prepared and is ready to play, false on a cache miss.

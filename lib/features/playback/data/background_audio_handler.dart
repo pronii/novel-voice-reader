@@ -111,9 +111,8 @@ final class PlaybackRuntime {
   PlaybackCursor? get currentCursor => _currentCursor;
 
   /// Forwards app foreground/background transitions to the active coordinator so
-  /// it can switch to cache-only prepares while the screen is locked and refill
-  /// the queue when the app returns. Remembered so a coordinator installed while
-  /// backgrounded inherits the correct state.
+  /// it can prefer cached prepares while the screen is locked. Remembered so a
+  /// coordinator installed while backgrounded inherits the correct state.
   void setForeground(bool foreground) {
     _foreground = foreground;
     _coordinator?.setForeground(foreground);

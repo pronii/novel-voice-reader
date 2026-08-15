@@ -359,7 +359,7 @@ final class CachedAudioSpeechProvider
     }
     // When the queue is empty we keep _current on the finished segment: resume()
     // can replay it, and the coordinator's next target differs from it, so it
-    // performs a fresh (cache-only when locked) prepare instead of skipping.
+    // performs a fresh cache-first prepare instead of skipping.
   }
 
   void _rememberSegment(String path, SpeechSegment segment) {
