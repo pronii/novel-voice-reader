@@ -629,6 +629,7 @@ PlaybackCoordinator createCoordinator(
     paragraphs: paragraphs ?? RuntimeParagraphSource(),
     voiceProfile: VoiceProfile.system(),
     onFailure: onFailure,
+    retryDelay: (_) async {},
   );
 }
 

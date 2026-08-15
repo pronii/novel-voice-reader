@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
@@ -285,6 +286,111 @@ void main() {
     await disposal;
     expect(disposed, isTrue);
   });
+
+  test(
+    'retries a transient prefetch failure without surfacing a banner',
+    () async {
+      final provider = FakeSpeechProvider()..prefetchFailuresRemaining = 2;
+      final failures = <AppFailure>[];
+      final coordinator = PlaybackCoordinator(
+        provider: provider,
+        progress: FakeProgressRepository(),
+        paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+        voiceProfile: VoiceProfile.system(),
+        onFailure: failures.add,
+        retryDelay: (_) async {},
+      );
+
+      await coordinator.playFrom(
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      );
+      // The prefetch throws twice (a transient locked-screen network blip) and
+      // is retried with backoff until it warms the next segment's cache. The
+      // failure must never reach _onFailure — prefetch is best-effort work.
+      await pumpEventQueue();
+
+      expect(provider.prefetched.map((segment) => segment.text), ['第二段']);
+      expect(provider.prefetchFailuresRemaining, 0);
+      expect(failures, isEmpty);
+      await coordinator.dispose();
+    },
+  );
+
+  test(
+    'retries the same segment after a transient prepare failure, no banner',
+    () async {
+      final provider = FakeSpeechProvider();
+      final failures = <AppFailure>[];
+      final coordinator = PlaybackCoordinator(
+        provider: provider,
+        progress: FakeProgressRepository(),
+        paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+        voiceProfile: VoiceProfile.system(),
+        onFailure: failures.add,
+        maxSegmentRetries: 2,
+        retryDelay: (_) async {},
+      );
+
+      await coordinator.playFrom(
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      );
+      expect(provider.prepared.map((segment) => segment.text), ['第一段']);
+
+      // A transient synth/session blip fails the current segment. With backoff,
+      // the coordinator replays the SAME segment instead of stopping dead.
+      provider.failCurrent();
+      await pumpEventQueue();
+
+      expect(provider.prepared.map((segment) => segment.text), [
+        '第一段',
+        '第一段',
+      ]);
+      expect(
+        coordinator.cursor,
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      );
+      expect(failures, isEmpty);
+
+      // The retry now plays through: completion advances to the next paragraph.
+      provider.completeCurrent();
+      await pumpEventQueue();
+      expect(provider.prepared.last.text, '第二段');
+      await coordinator.dispose();
+    },
+  );
+
+  test(
+    'surfaces the banner only after prepare retries are exhausted',
+    () async {
+      final provider = FakeSpeechProvider();
+      final failures = <AppFailure>[];
+      final coordinator = PlaybackCoordinator(
+        provider: provider,
+        progress: FakeProgressRepository(),
+        paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+        voiceProfile: VoiceProfile.system(),
+        onFailure: failures.add,
+        maxSegmentRetries: 1,
+        retryDelay: (_) async {},
+      );
+
+      await coordinator.playFrom(
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      );
+
+      // First failure retries the segment (no banner yet).
+      provider.failCurrent();
+      await pumpEventQueue();
+      expect(failures, isEmpty);
+
+      // Second failure exhausts the single retry and finally surfaces the
+      // banner via _onFailure.
+      provider.failCurrent();
+      await pumpEventQueue();
+      expect(failures.single.message, '云端语音播放准备失败');
+      await coordinator.dispose();
+    },
+  );
 
   test('pause persists the current cursor and delegates to provider', () async {
     final provider = FakeSpeechProvider();
@@ -663,6 +769,7 @@ final class FakeSpeechProvider
   Completer<void>? prefetchBlock;
   int activePrefetches = 0;
   int maxActivePrefetches = 0;
+  int prefetchFailuresRemaining = 0;
 
   @override
   Stream<SpeechEvent> get events => _events.stream;
@@ -677,13 +784,17 @@ final class FakeSpeechProvider
 
   @override
   Future<void> prefetch(SpeechSegment segment, VoiceProfile profile) async {
-    prefetched.add(segment);
     activePrefetches++;
     if (activePrefetches > maxActivePrefetches) {
       maxActivePrefetches = activePrefetches;
     }
     try {
       await prefetchBlock?.future;
+      if (prefetchFailuresRemaining > 0) {
+        prefetchFailuresRemaining--;
+        throw StateError('transient prefetch failure');
+      }
+      prefetched.add(segment);
     } finally {
       activePrefetches--;
     }
@@ -720,6 +831,15 @@ final class FakeSpeechProvider
 
   void completeCurrent() {
     _events.add(SpeechCompleted(segmentId: prepared.last.id));
+  }
+
+  void failCurrent() {
+    _events.add(
+      SpeechFailed(
+        segmentId: prepared.last.id,
+        failure: const AppFailure('云端语音播放准备失败'),
+      ),
+    );
   }
 
   void publishTimeline(PlaybackTimeline timeline) => _timeline.add(timeline);

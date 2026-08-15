@@ -16,6 +16,13 @@ typedef WatchdogTimerFactory =
 Timer _defaultScheduleWatchdog(Duration duration, void Function() onTimeout) =>
     Timer(duration, onTimeout);
 
+/// Delays a retry attempt. Injectable so tests can make backoff instant instead
+/// of waiting on wall-clock time.
+typedef PlaybackRetryDelay = Future<void> Function(Duration duration);
+
+Future<void> _defaultRetryDelay(Duration duration) =>
+    Future<void>.delayed(duration);
+
 
 abstract interface class PlaybackController {
   PlaybackCursor? get cursor;
@@ -72,6 +79,7 @@ final class PlaybackCoordinator implements PlaybackController {
     Duration watchdogGrace = const Duration(seconds: 15),
     int maxSegmentRetries = 2,
     WatchdogTimerFactory scheduleWatchdog = _defaultScheduleWatchdog,
+    PlaybackRetryDelay retryDelay = _defaultRetryDelay,
   }) {
     return PlaybackCoordinator._(
       provider,
@@ -83,6 +91,7 @@ final class PlaybackCoordinator implements PlaybackController {
       watchdogGrace,
       maxSegmentRetries,
       scheduleWatchdog,
+      retryDelay,
     );
   }
 
@@ -96,6 +105,7 @@ final class PlaybackCoordinator implements PlaybackController {
     this._watchdogGrace,
     this._maxSegmentRetries,
     this._scheduleWatchdog,
+    this._retryDelay,
   ) {
     _subscription = _provider.events.listen((event) {
       _speechEventTransactions = _speechEventTransactions.then<void>(
@@ -125,6 +135,7 @@ final class PlaybackCoordinator implements PlaybackController {
   final Duration _watchdogGrace;
   final int _maxSegmentRetries;
   final WatchdogTimerFactory _scheduleWatchdog;
+  final PlaybackRetryDelay _retryDelay;
   late final StreamSubscription<SpeechEvent> _subscription;
   StreamSubscription<PlaybackTimeline>? _timelineSubscription;
   final StreamController<PlaybackCursor> _cursorChanges =
@@ -421,7 +432,13 @@ final class PlaybackCoordinator implements PlaybackController {
         _segmentRetries++;
         // A transient synth/playback failure (a momentary network or audio
         // session blip, common right after the screen locks) should retry the
-        // current segment rather than stopping playback dead.
+        // current segment rather than stopping playback dead. Back off first so
+        // a suspended-network window on a locked screen has time to recover
+        // before we burn through the retry budget and surface the banner.
+        await _retryDelay(_retryBackoff(_segmentRetries));
+        if (_paused || !_ownsContinuation(continuationEpoch)) {
+          return;
+        }
         if (await _prepareAndPlayContinuation(
           continuationEpoch,
           _segmentIndex,
@@ -633,7 +650,19 @@ final class PlaybackCoordinator implements PlaybackController {
           if (!_ownsContinuation(continuationEpoch)) {
             return;
           }
-          await provider.prefetch(segment, _voiceProfile);
+          // Prefetch happens while the current segment is still playing, so the
+          // audio session and network are still alive even on a locked screen.
+          // Retrying a failed synth here (rather than swallowing it) is what
+          // warms the cache before the segment is needed; if it still fails
+          // after backoff, stop this pass — a later advance/retry reschedules
+          // prefetch — and let prepare() remain the authoritative fallback.
+          if (!await _prefetchSegmentWithRetry(
+            provider,
+            segment,
+            continuationEpoch,
+          )) {
+            return;
+          }
           plannedCharacters += segment.text.runes.length;
           if (plannedCharacters >= targetCharacters) {
             return;
@@ -656,6 +685,37 @@ final class PlaybackCoordinator implements PlaybackController {
     } catch (_) {
       // Normal prepare remains the authoritative fallback and error path.
     }
+  }
+
+  /// Attempts to warm a single segment's cache, retrying a transient failure a
+  /// few times with exponential backoff. Returns whether the segment was
+  /// prefetched. Failures are never surfaced to the user: prepare() is the
+  /// authoritative fallback if prefetch ultimately gives up.
+  Future<bool> _prefetchSegmentWithRetry(
+    PrefetchingSpeechProvider provider,
+    SpeechSegment segment,
+    int continuationEpoch,
+  ) async {
+    const maxAttempts = 4;
+    for (var attempt = 1; ; attempt++) {
+      if (_disposing || !_ownsContinuation(continuationEpoch)) {
+        return false;
+      }
+      try {
+        await provider.prefetch(segment, _voiceProfile);
+        return true;
+      } catch (_) {
+        if (attempt >= maxAttempts) {
+          return false;
+        }
+        await _retryDelay(_retryBackoff(attempt));
+      }
+    }
+  }
+
+  Duration _retryBackoff(int attempt) {
+    final capped = attempt.clamp(1, 5);
+    return Duration(milliseconds: 250 * (1 << (capped - 1)));
   }
 
   void _publishActivity(PlaybackActivity activity) {
