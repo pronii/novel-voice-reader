@@ -30,7 +30,6 @@ final class BackgroundPlaybackSustainer {
     _onPlaybackState(handler.playbackState.value);
   }
 
-
   final BackgroundAudioSession _session;
   final KeepAlivePlayer _keepAlive;
   final NovelAudioHandler _handler;
@@ -67,9 +66,9 @@ final class BackgroundPlaybackSustainer {
   // Residual real-device risk (no device available to verify): iOS only posts
   // an interruption for a genuine external focus-loss (phone call, Siri, another
   // app claiming the session) — not for our own players starting/stopping within
-  // the shared session. Because the TTS engine (setSharedInstance(true), see
-  // system_tts_adapter.configureSession) and the keep-alive loop render into one
-  // AVAudioSession, swapping between them mid-chapter should not surface here, so
+  // the shared session. Because cached remote audio and the keep-alive loop
+  // render into one AVAudioSession, swapping between them mid-chapter should not
+  // surface here, so
   // pausing on `began` should never fire against our own audio-chain switches.
   // audio_session cannot introspect the interruption's origin, so if this proves
   // false on device the fix is native (AVAudioSession delegate), not here.

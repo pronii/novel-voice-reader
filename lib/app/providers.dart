@@ -31,24 +31,19 @@ final sleepTimerControllerProvider = Provider<SleepTimerController>((ref) {
   return controller;
 });
 
-Future<VoiceProfile> loadActiveVoiceProfile(AppDatabase database) async {
+Future<VoiceProfile?> loadActiveVoiceProfile(AppDatabase database) async {
   final query = database.select(database.voiceProfiles)
     ..orderBy([(profile) => OrderingTerm.desc(profile.id)])
     ..limit(1);
   return voiceProfileFromRecord(await query.getSingleOrNull());
 }
 
-VoiceProfile voiceProfileFromRecord(VoiceProfileRecord? record) {
+VoiceProfile? voiceProfileFromRecord(VoiceProfileRecord? record) {
   if (record == null) {
-    return VoiceProfile.system();
+    return null;
   }
   try {
     return switch (record.providerType) {
-      'system' => VoiceProfile.system(
-        voice: record.voice,
-        speed: record.speed,
-        pitch: record.pitch ?? 1,
-      ),
       'cloud'
           when record.baseUrl != null &&
               record.model != null &&
@@ -65,10 +60,10 @@ VoiceProfile voiceProfileFromRecord(VoiceProfileRecord? record) {
         style: record.style,
         speed: record.speed,
       ),
-      _ => VoiceProfile.system(),
+      _ => null,
     };
   } on ArgumentError {
-    return VoiceProfile.system();
+    return null;
   }
 }
 

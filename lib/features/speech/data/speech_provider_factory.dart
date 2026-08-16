@@ -6,7 +6,6 @@ import 'package:novel_voice_reader/features/downloads/data/audio_cache_repositor
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/data/cloud_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
-import 'package:novel_voice_reader/features/speech/data/system_tts_adapter.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
@@ -16,21 +15,17 @@ final class SpeechProviderFactory {
     this.credentials,
     required this.cacheDirectory,
     this.audioCache,
-    SystemTtsEngine Function()? systemEngineFactory,
     AudioPlaybackEngine Function()? audioEngineFactory,
-  }) : systemEngineFactory = systemEngineFactory ?? FlutterSystemTtsEngine.new,
-       audioEngineFactory = audioEngineFactory ?? JustAudioPlaybackEngine.new;
+  }) : audioEngineFactory = audioEngineFactory ?? JustAudioPlaybackEngine.new;
 
   final Dio? dio;
   final SecureCredentials? credentials;
   final Directory cacheDirectory;
   final SpeechAudioCache? audioCache;
-  final SystemTtsEngine Function() systemEngineFactory;
   final AudioPlaybackEngine Function() audioEngineFactory;
 
   SpeechProvider create(VoiceProfile profile) {
     return switch (profile.providerType) {
-      SpeechProviderType.system => SystemTtsAdapter(systemEngineFactory()),
       SpeechProviderType.cloud => _cached(
         () => CloudTtsClient(
           dio: _requiredDio,

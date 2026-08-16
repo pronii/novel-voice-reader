@@ -1,6 +1,6 @@
 # 声阅
 
-声阅是一个 Flutter Android/iOS 小说朗读应用。用户可导入 UTF-8、UTF-16、GB18030 TXT 或非 DRM EPUB，使用系统 TTS、OpenAI 兼容语音接口或 Xiaomi MiMo 朗读，并为每本书单独设置后续音频缓存。
+声阅是一个 Flutter Android/iOS 小说朗读应用。用户可导入 UTF-8、UTF-16、GB18030 TXT 或非 DRM EPUB，使用 OpenAI 兼容语音接口或 Xiaomi MiMo 朗读，并为每本书单独设置后续音频缓存。
 
 EPUB 解析只读取书籍 spine 中的章节正文。缺失封面、图片、字体等非正文资源不会阻止导入；缺少章节正文、受 DRM 保护或没有可阅读内容的 EPUB 仍会被拒绝。
 
@@ -27,8 +27,6 @@ flutter build ios --debug --no-codesign
 ```
 
 ## 语音服务
-
-“系统”模式直接使用设备 TTS，不需要 API Key，也不会生成可复用的音频缓存。
 
 在“语音设置”选择“兼容”，填写 Base URL、模型、音色与 API Key。服务需兼容：
 

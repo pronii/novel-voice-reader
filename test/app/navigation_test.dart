@@ -16,6 +16,8 @@ import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart'
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
+import '../support/test_voice_profile.dart';
+
 void main() {
   testWidgets('wires the effective playback speed through the player route', (
     tester,
@@ -119,7 +121,7 @@ void main() {
       provider: _NavigationSpeechProvider(),
       progress: _NavigationProgressRepository(),
       paragraphs: _NavigationParagraphSource(),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
       // This test never emits SpeechCompleted, so a live watchdog would keep
       // retrying/advancing and starve the fake-async isolate. Inject an inert,
       // cancellable timer — the watchdog itself is covered in the coordinator
@@ -261,7 +263,7 @@ void main() {
       provider: _NavigationSpeechProvider(),
       progress: _NavigationProgressRepository(),
       paragraphs: _NavigationParagraphSource(),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
       // See the highlight test above: no SpeechCompleted is emitted here, so the
       // watchdog is stubbed out to keep the fake-async isolate quiescent.
       scheduleWatchdog: _inertWatchdog,

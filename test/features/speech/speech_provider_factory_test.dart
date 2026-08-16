@@ -8,7 +8,6 @@ import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_prov
 import 'package:novel_voice_reader/features/speech/data/cloud_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
-import 'package:novel_voice_reader/features/speech/data/system_tts_adapter.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
@@ -30,20 +29,9 @@ void main() {
       dio: Dio(),
       credentials: SecureCredentials(EmptySecureStore()),
       cacheDirectory: directory,
-      systemEngineFactory: FakeSystemTtsEngine.new,
       audioEngineFactory: FakeAudioPlaybackEngine.new,
     );
   }
-
-  test('creates a system adapter for a system profile', () async {
-    final directory = await createTempCacheDirectory();
-    final factory = buildFactory(directory);
-
-    final provider = factory.create(VoiceProfile.system());
-
-    expect(provider, isA<SystemTtsAdapter>());
-    await (provider as SystemTtsAdapter).dispose();
-  });
 
   test('creates cached cloud playback for a cloud profile', () async {
     final directory = await createTempCacheDirectory();
@@ -128,29 +116,6 @@ final class EmptySecureStore implements SecureKeyValueStore {
 
   @override
   Future<void> write(String key, String value) async {}
-}
-
-final class FakeSystemTtsEngine implements SystemTtsEngine {
-  @override
-  Future<void> configure(VoiceProfile profile) async {}
-
-  @override
-  Future<void> pause() async {}
-
-  @override
-  void setCompletionHandler(void Function() handler) {}
-
-  @override
-  void setErrorHandler(void Function(Object error) handler) {}
-
-  @override
-  void setStartHandler(void Function() handler) {}
-
-  @override
-  Future<void> speak(String text) async {}
-
-  @override
-  Future<void> stop() async {}
 }
 
 final class FakeAudioPlaybackEngine implements AudioPlaybackEngine {

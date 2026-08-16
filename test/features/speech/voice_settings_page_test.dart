@@ -7,6 +7,18 @@ import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:novel_voice_reader/features/speech/presentation/voice_settings_page.dart';
 
 void main() {
+  testWidgets('offers only remote TTS providers', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: VoiceSettingsPage()));
+
+    expect(find.text('Base URL'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('tts-provider-dropdown')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('系统'), findsNothing);
+    expect(find.text('兼容'), findsWidgets);
+    expect(find.text('MiMo'), findsOneWidget);
+  });
+
   testWidgets('selects a TTS provider from a dropdown on a narrow phone', (
     tester,
   ) async {

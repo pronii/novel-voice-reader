@@ -11,6 +11,8 @@ import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
+import '../../support/test_voice_profile.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -627,7 +629,7 @@ PlaybackCoordinator createCoordinator(
     provider: provider,
     progress: RuntimeProgressRepository(),
     paragraphs: paragraphs ?? RuntimeParagraphSource(),
-    voiceProfile: VoiceProfile.system(),
+    voiceProfile: testVoiceProfile(),
     onFailure: onFailure,
     retryDelay: (_) async {},
   );

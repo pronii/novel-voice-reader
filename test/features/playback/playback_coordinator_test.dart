@@ -9,6 +9,8 @@ import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
+import '../../support/test_voice_profile.dart';
+
 void main() {
   test('publishes the cursor when each paragraph starts playing', () async {
     final provider = FakeSpeechProvider();
@@ -16,7 +18,7 @@ void main() {
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
     final cursors = <PlaybackCursor>[];
     final subscription = coordinator.cursorChanges.listen(cursors.add);
@@ -42,7 +44,7 @@ void main() {
       provider: provider,
       progress: progress,
       paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
 
     await coordinator.playFrom(
@@ -69,7 +71,7 @@ void main() {
         provider: provider,
         progress: progress,
         paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
-        voiceProfile: VoiceProfile.system(),
+        voiceProfile: testVoiceProfile(),
         maxSegmentRetries: 1,
         scheduleWatchdog: (duration, onTimeout) {
           callbacks.add(onTimeout);
@@ -82,9 +84,8 @@ void main() {
       );
       expect(provider.prepared.map((segment) => segment.text), ['第一段']);
 
-      // The completion callback never arrives (a well-known flutter_tts failure
-      // mode on a locked iOS screen): the watchdog fires and replays the current
-      // segment instead of stalling on one sentence forever.
+      // The completion callback never arrives: the watchdog fires and recovers
+      // the remote-audio segment instead of stalling forever.
       callbacks.last();
       await pumpEventQueue();
       expect(provider.prepared.map((segment) => segment.text), [
@@ -171,7 +172,7 @@ void main() {
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
 
     await coordinator.playFrom(
@@ -212,7 +213,7 @@ void main() {
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
 
     final first = coordinator.playFrom(
@@ -476,7 +477,7 @@ void main() {
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: FakeParagraphSource(const ['第一段', '第二段', '第三段']),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
 
     await coordinator.playFrom(
@@ -500,7 +501,7 @@ void main() {
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
     await coordinator.playFrom(
       const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
@@ -526,7 +527,7 @@ void main() {
         provider: provider,
         progress: FakeProgressRepository(),
         paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
-        voiceProfile: VoiceProfile.system(),
+        voiceProfile: testVoiceProfile(),
         onFailure: failures.add,
         retryDelay: (_) async {},
       );
@@ -555,7 +556,7 @@ void main() {
         provider: provider,
         progress: FakeProgressRepository(),
         paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
-        voiceProfile: VoiceProfile.system(),
+        voiceProfile: testVoiceProfile(),
         onFailure: failures.add,
         maxSegmentRetries: 2,
         retryDelay: (_) async {},
@@ -598,7 +599,7 @@ void main() {
         provider: provider,
         progress: FakeProgressRepository(),
         paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
-        voiceProfile: VoiceProfile.system(),
+        voiceProfile: testVoiceProfile(),
         onFailure: failures.add,
         maxSegmentRetries: 1,
         retryDelay: (_) async {},
@@ -629,7 +630,7 @@ void main() {
       provider: provider,
       progress: progress,
       paragraphs: FakeParagraphSource(const ['第一段']),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
     const cursor = PlaybackCursor(chapterId: 1, paragraphIndex: 0);
     await coordinator.playFrom(cursor);
@@ -647,7 +648,7 @@ void main() {
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: FakeParagraphSource(const ['第一段']),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
 
     await coordinator.setSpeed(1.25);
@@ -662,7 +663,7 @@ void main() {
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: FakeParagraphSource(const ['第一段']),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
 
     await expectLater(coordinator.setSpeed(1.25), throwsStateError);
@@ -724,7 +725,7 @@ void main() {
         List.filled(10, '当').join(),
         List.filled(5, '后').join(),
       ]),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
     final timelines = <PlaybackTimeline>[];
     final subscription = coordinator.timelineChanges.listen(timelines.add);
@@ -754,7 +755,7 @@ void main() {
         List.filled(10, '当').join(),
         List.filled(5, '后').join(),
       ]),
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
     final timelines = <PlaybackTimeline>[];
     final subscription = coordinator.timelineChanges.listen(timelines.add);
@@ -783,7 +784,7 @@ void main() {
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: paragraphs,
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
     final timelines = <PlaybackTimeline>[];
     final subscription = coordinator.timelineChanges.listen(timelines.add);
@@ -826,7 +827,7 @@ void main() {
       provider: provider,
       progress: FakeProgressRepository(),
       paragraphs: paragraphs,
-      voiceProfile: VoiceProfile.system(),
+      voiceProfile: testVoiceProfile(),
     );
 
     final first = coordinator.playFrom(

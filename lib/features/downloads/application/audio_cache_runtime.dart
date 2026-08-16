@@ -25,7 +25,7 @@ final class AudioCacheRuntime {
     required Dio dio,
     required SecureCredentials credentials,
     DownloadNetworkGate? networkGate,
-    Future<VoiceProfile> Function()? activeProfileLoader,
+    Future<VoiceProfile?> Function()? activeProfileLoader,
     Stream<List<ConnectivityResult>>? connectivityChanges,
   }) : _store = DriftDownloadPlanStore(database),
        _database = database,
@@ -49,7 +49,7 @@ final class AudioCacheRuntime {
   final Dio _dio;
   final SecureCredentials _credentials;
   final DownloadNetworkGate _networkGate;
-  final Future<VoiceProfile> Function()? _activeProfileLoader;
+  final Future<VoiceProfile?> Function()? _activeProfileLoader;
   final Stream<List<ConnectivityResult>>? _connectivityChanges;
   final Map<String, Future<File>> _inFlight = {};
   final Map<int, LinkedHashSet<String>> _recentKeysByBook = {};
@@ -168,7 +168,7 @@ final class AudioCacheRuntime {
     final loadProfile = _activeProfileLoader;
     if (loadProfile == null || _disposeFuture != null) return;
     final profile = await loadProfile();
-    if (profile.providerType == SpeechProviderType.system) return;
+    if (profile == null) return;
     final policies = await _database.select(_database.downloadPolicies).get();
     for (final policyRecord in policies) {
       try {
@@ -318,9 +318,6 @@ final class AudioCacheRuntime {
       SpeechProviderType.mimo => MiMoTtsClient(
         dio: _dio,
         credentials: _credentials,
-      ),
-      SpeechProviderType.system => throw StateError(
-        'System TTS cannot be stored as downloadable audio.',
       ),
     };
   }

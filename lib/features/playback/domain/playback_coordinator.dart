@@ -689,9 +689,9 @@ final class PlaybackCoordinator implements PlaybackController {
     }
     if (_segmentRetries < _maxSegmentRetries) {
       _segmentRetries++;
-      // The completion callback never arrived — a well-known failure mode for
-      // flutter_tts on a locked iOS screen. Replay the current segment so the
-      // chapter keeps moving instead of stalling on one sentence forever.
+      // The completion callback never arrived while the app was backgrounded.
+      // Replay the current segment so the chapter keeps moving instead of
+      // stalling on one sentence forever.
       await _prepareAndPlayContinuation(
         continuationEpoch,
         segmentIndex,

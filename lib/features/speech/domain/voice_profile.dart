@@ -1,4 +1,4 @@
-enum SpeechProviderType { system, cloud, mimo }
+enum SpeechProviderType { cloud, mimo }
 
 final class VoiceProfile {
   static const _cloudOutputFormats = <String>{
@@ -23,21 +23,6 @@ final class VoiceProfile {
     'Milo',
     'Dean',
   ];
-
-  factory VoiceProfile.system({
-    String? voice,
-    double speed = 1,
-    double pitch = 1,
-  }) {
-    _validateSpeed(speed);
-    _validatePitch(pitch);
-    return VoiceProfile._(
-      providerType: SpeechProviderType.system,
-      voice: voice,
-      speed: speed,
-      pitch: pitch,
-    );
-  }
 
   factory VoiceProfile.cloud({
     required String baseUrl,
@@ -115,7 +100,6 @@ final class VoiceProfile {
     this.model,
     this.voice,
     required this.speed,
-    this.pitch,
     this.outputFormat,
     this.style,
   });
@@ -125,7 +109,6 @@ final class VoiceProfile {
   final String? model;
   final String? voice;
   final double speed;
-  final double? pitch;
   final String? outputFormat;
   final String? style;
 
@@ -145,12 +128,6 @@ final class VoiceProfile {
   static void _validateSpeed(double speed) {
     if (!speed.isFinite || speed <= 0) {
       throw ArgumentError.value(speed, 'speed', 'Must be positive.');
-    }
-  }
-
-  static void _validatePitch(double pitch) {
-    if (!pitch.isFinite || pitch <= 0) {
-      throw ArgumentError.value(pitch, 'pitch', 'Must be positive.');
     }
   }
 }

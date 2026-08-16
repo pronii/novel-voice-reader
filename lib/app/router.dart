@@ -338,6 +338,10 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
       _pendingPlaybackRuntime = runtime;
       _pendingPlaybackReplacement = replacementToken;
       final profile = await loadActiveVoiceProfile(database);
+      if (profile == null) {
+        _showSpeechFailure(const AppFailure('请先配置远程语音服务'));
+        return;
+      }
       final audioCacheRuntime = ref.read(audioCacheRuntimeProvider);
       final Directory cacheDirectory;
       if (audioCacheRuntime == null) {
@@ -394,8 +398,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
       await (database.update(database.books)
             ..where((book) => book.id.equals(widget.bookId)))
           .write(BooksCompanion(lastReadAt: Value(DateTime.now())));
-      if (audioCacheRuntime != null &&
-          profile.providerType != SpeechProviderType.system) {
+      if (audioCacheRuntime != null) {
         final policyRecord =
             await (database.select(database.downloadPolicies)
                   ..where((policy) => policy.bookId.equals(widget.bookId)))
@@ -543,7 +546,7 @@ final class _VoiceSettingsInitialData {
     required this.hasSavedMiMoApiKey,
   });
 
-  final VoiceProfile profile;
+  final VoiceProfile? profile;
   final bool hasSavedCloudApiKey;
   final bool hasSavedMiMoApiKey;
 }
@@ -559,7 +562,7 @@ final _voiceSettingsInitialDataProvider =
       final database = ref.watch(databaseProvider);
       final credentials = ref.watch(_secureCredentialsProvider);
       final profile = database == null
-          ? VoiceProfile.system()
+          ? null
           : await loadActiveVoiceProfile(database);
       String? cloudApiKey;
       String? mimoApiKey;
@@ -613,7 +616,7 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
               } finally {
                 dio.close(force: true);
               }
-            case SpeechProviderType.system || SpeechProviderType.cloud:
+            case SpeechProviderType.cloud:
               throw const AppFailure('当前语音服务不支持连接测试');
           }
         },
@@ -632,7 +635,6 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
                       model: Value(profile.model),
                       voice: Value(profile.voice),
                       speed: Value(profile.speed),
-                      pitch: Value(profile.pitch),
                       outputFormat: Value(profile.outputFormat),
                       style: Value(profile.style),
                     ),
@@ -654,7 +656,6 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
             );
             return;
           }
-          await persistProfile();
         },
       ),
     );
@@ -697,8 +698,8 @@ final class _CacheSettingsRoutePage extends ConsumerWidget {
           cachedSegmentCount: data.cachedSegmentCount,
           onApply: (policy) async {
             final profile = await loadActiveVoiceProfile(database);
-            if (profile.providerType == SpeechProviderType.system) {
-              throw const AppFailure('请先选择兼容或 MiMo 语音服务');
+            if (profile == null) {
+              throw const AppFailure('请先配置兼容或 MiMo 语音服务');
             }
             final runtime = ref.read(audioCacheRuntimeProvider);
             if (runtime == null) {

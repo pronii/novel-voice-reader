@@ -25,7 +25,7 @@ void main() {
       ),
       throwsArgumentError,
     );
-    expect(() => VoiceProfile.system(speed: double.nan), throwsArgumentError);
+    expect(() => VoiceProfile.mimo(speed: double.nan), throwsArgumentError);
   });
 
   test('rejects an invalid cloud endpoint or empty model fields', () {
@@ -113,8 +113,7 @@ void main() {
     expect(() => VoiceProfile.mimo(voice: 'unknown'), throwsArgumentError);
   });
 
-  test('keeps the existing segment limit for non-MiMo providers', () {
-    expect(VoiceProfile.system().maxSegmentCharacters, 1000);
+  test('uses provider-specific segment limits', () {
     expect(
       VoiceProfile.cloud(
         baseUrl: 'https://example.com',

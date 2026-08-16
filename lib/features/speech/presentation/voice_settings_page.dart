@@ -42,7 +42,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   final _mimoApiKey = TextEditingController();
   final _mimoStyle = TextEditingController();
 
-  SpeechProviderType _provider = SpeechProviderType.system;
+  SpeechProviderType _provider = SpeechProviderType.cloud;
   String _mimoVoice = VoiceProfile.defaultMiMoVoice;
   double _speed = 1;
   bool _saving = false;
@@ -107,10 +107,6 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
             isExpanded: true,
             decoration: const InputDecoration(labelText: '语音服务'),
             items: const [
-              DropdownMenuItem(
-                value: SpeechProviderType.system,
-                child: _ProviderOption(icon: Icons.phone_android, label: '系统'),
-              ),
               DropdownMenuItem(
                 value: SpeechProviderType.cloud,
                 child: _ProviderOption(icon: Icons.cloud_outlined, label: '兼容'),
@@ -286,7 +282,6 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     return VoiceSettingsSubmission(
       profile: profile,
       credentials: switch (_provider) {
-        SpeechProviderType.system => const SpeechCredentialsInput(),
         SpeechProviderType.cloud => SpeechCredentialsInput(
           apiKey: _apiKey.text,
         ),
@@ -299,7 +294,6 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
 
   VoiceProfile _buildProfile() {
     return switch (_provider) {
-      SpeechProviderType.system => VoiceProfile.system(speed: _speed),
       SpeechProviderType.cloud => VoiceProfile.cloud(
         baseUrl: _baseUrl.text,
         model: _model.text,
@@ -318,7 +312,6 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   bool _hasUsableCredential(VoiceSettingsSubmission submission) {
     if (submission.credentials.normalizedApiKey != null) return true;
     final saved = switch (_provider) {
-      SpeechProviderType.system => true,
       SpeechProviderType.cloud => widget.hasSavedCloudApiKey,
       SpeechProviderType.mimo => widget.hasSavedMiMoApiKey,
     };
