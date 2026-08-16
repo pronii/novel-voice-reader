@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:mocktail/mocktail.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
@@ -11,6 +13,36 @@ import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart'
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
+  test('terminal completion uses the last known path when index is null', () async {
+    final player = _MockAudioPlayer();
+    final indexes = StreamController<int?>.broadcast(sync: true);
+    final states = StreamController<ProcessingState>.broadcast(sync: true);
+    int? currentIndex = 0;
+    final sequence = <IndexedAudioSource>[
+      AudioSource.file('/tmp/first.mp3', tag: '/tmp/first.mp3'),
+      AudioSource.file('/tmp/second.mp3', tag: '/tmp/second.mp3'),
+    ];
+    when(() => player.currentIndex).thenAnswer((_) => currentIndex);
+    when(() => player.currentIndexStream).thenAnswer((_) => indexes.stream);
+    when(() => player.processingStateStream).thenAnswer((_) => states.stream);
+    when(() => player.sequence).thenReturn(sequence);
+    final engine = JustAudioPlaybackEngine(player);
+    final paths = <String>[];
+    final subscription = engine.completed.listen(paths.add);
+
+    currentIndex = 1;
+    indexes.add(1);
+    currentIndex = null;
+    indexes.add(null);
+    states.add(ProcessingState.completed);
+    await pumpEventQueue();
+
+    expect(paths, ['/tmp/first.mp3', '/tmp/second.mp3']);
+    await subscription.cancel();
+    await indexes.close();
+    await states.close();
+  });
+
   test('forwards the audio engine playback timeline', () async {
     final directory = await Directory.systemTemp.createTemp('cached-timeline-');
     final engine = FakeAudioPlaybackEngine();
@@ -482,6 +514,8 @@ void main() {
     await directory.delete(recursive: true);
   });
 }
+
+final class _MockAudioPlayer extends Mock implements AudioPlayer {}
 
 VoiceProfile _cloudProfile() => VoiceProfile.cloud(
   baseUrl: 'https://example.com',

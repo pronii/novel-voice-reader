@@ -55,6 +55,16 @@ final class JustAudioPlaybackEngine
   @override
   Stream<String> get completed => Stream<String>.multi((controller) {
     var previousIndex = _player.currentIndex ?? 0;
+    String? lastKnownPath;
+
+    void rememberPath(int? index) {
+      final sequence = _player.sequence;
+      if (index != null && index >= 0 && index < sequence.length) {
+        lastKnownPath = sequence[index].tag as String?;
+      }
+    }
+
+    rememberPath(_player.currentIndex);
     final indexSubscription = _player.currentIndexStream.listen((index) {
       if (index != null && index > previousIndex) {
         final sequence = _player.sequence;
@@ -71,17 +81,18 @@ final class JustAudioPlaybackEngine
       }
       if (index != null) {
         previousIndex = index;
+        rememberPath(index);
       }
     }, onError: controller.addError);
     final stateSubscription = _player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed) {
-        final index = _player.currentIndex ?? 0;
+        final index = _player.currentIndex;
         final sequence = _player.sequence;
-        if (index < sequence.length) {
-          final path = sequence[index].tag as String?;
-          if (path != null) {
-            controller.add(path);
-          }
+        final path = index != null && index >= 0 && index < sequence.length
+            ? sequence[index].tag as String?
+            : lastKnownPath;
+        if (path != null) {
+          controller.add(path);
         }
       }
     }, onError: controller.addError);
