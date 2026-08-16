@@ -109,6 +109,62 @@ void main() {
     },
   );
 
+  test('watchdog does not replay cloud audio that is still active', () async {
+    final provider = FakeSpeechProvider()
+      ..playbackStatus = SpeechPlaybackStatus.active;
+    final callbacks = <void Function()>[];
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+      voiceProfile: VoiceProfile.mimo(),
+      scheduleWatchdog: (duration, onTimeout) {
+        callbacks.add(onTimeout);
+        return Timer(const Duration(days: 1), () {});
+      },
+    );
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    callbacks.last();
+    await pumpEventQueue();
+
+    expect(provider.prepared.map((segment) => segment.text), ['第一段']);
+    expect(callbacks, hasLength(2));
+    await coordinator.dispose();
+  });
+
+  test('watchdog advances completed cloud audio without replaying it', () async {
+    final provider = FakeSpeechProvider()
+      ..playbackStatus = SpeechPlaybackStatus.completed;
+    final progress = FakeProgressRepository();
+    final callbacks = <void Function()>[];
+    final coordinator = PlaybackCoordinator(
+      provider: provider,
+      progress: progress,
+      paragraphs: FakeParagraphSource(const ['第一段', '第二段']),
+      voiceProfile: VoiceProfile.mimo(),
+      scheduleWatchdog: (duration, onTimeout) {
+        callbacks.add(onTimeout);
+        return Timer(const Duration(days: 1), () {});
+      },
+    );
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+    callbacks.last();
+    await pumpEventQueue();
+
+    expect(provider.prepared.map((segment) => segment.text), ['第一段', '第二段']);
+    expect(
+      progress.confirmed,
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 1),
+    );
+    await coordinator.dispose();
+  });
+
   test('prefetches the next paragraph while the current one plays', () async {
     final provider = FakeSpeechProvider();
     final coordinator = PlaybackCoordinator(
@@ -932,6 +988,7 @@ final class FakeSpeechProvider
         SpeechProvider,
         AdjustableSpeechProvider,
         PrefetchingSpeechProvider,
+        PlaybackStatusSpeechProvider,
         TimedSpeechProvider {
   final _events = StreamController<SpeechEvent>.broadcast(sync: true);
   final _timeline = StreamController<PlaybackTimeline>.broadcast(sync: true);
@@ -944,6 +1001,9 @@ final class FakeSpeechProvider
   int activePrefetches = 0;
   int maxActivePrefetches = 0;
   int prefetchFailuresRemaining = 0;
+
+  @override
+  SpeechPlaybackStatus playbackStatus = SpeechPlaybackStatus.unknown;
 
   @override
   Stream<SpeechEvent> get events => _events.stream;

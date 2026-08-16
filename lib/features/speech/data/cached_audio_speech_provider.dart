@@ -32,6 +32,10 @@ abstract interface class AdjustableAudioPlaybackEngine {
   Future<void> setSpeed(double speed);
 }
 
+abstract interface class PlaybackStatusAudioEngine {
+  SpeechPlaybackStatus get playbackStatus;
+}
+
 abstract interface class QueuedAudioPlaybackEngine {
   /// Appends [path] to the native playlist so the player advances into it by
   /// itself when the current item ends. The playlist may hold many look-ahead
@@ -44,6 +48,7 @@ final class JustAudioPlaybackEngine
     implements
         AudioPlaybackEngine,
         AdjustableAudioPlaybackEngine,
+        PlaybackStatusAudioEngine,
         QueuedAudioPlaybackEngine,
         TimedAudioPlaybackEngine {
   JustAudioPlaybackEngine([AudioPlayer? player])
@@ -51,6 +56,17 @@ final class JustAudioPlaybackEngine
 
   final AudioPlayer _player;
   final List<String> _queuedPaths = [];
+
+  @override
+  SpeechPlaybackStatus get playbackStatus {
+    if (_player.processingState == ProcessingState.completed) {
+      return SpeechPlaybackStatus.completed;
+    }
+    if (_player.playing) {
+      return SpeechPlaybackStatus.active;
+    }
+    return SpeechPlaybackStatus.unknown;
+  }
 
   @override
   Stream<String> get completed => Stream<String>.multi((controller) {
@@ -156,6 +172,7 @@ final class CachedAudioSpeechProvider
         PrefetchingSpeechProvider,
         PlaylistSpeechProvider,
         CacheOnlySpeechProvider,
+        PlaybackStatusSpeechProvider,
         TimedSpeechProvider {
   CachedAudioSpeechProvider({required this.cache, required this.engine}) {
     _completionSubscription = engine.completed.listen(_onCompleted);
@@ -187,6 +204,14 @@ final class CachedAudioSpeechProvider
 
   @override
   String? get currentSegmentId => _current?.segment.id;
+
+  @override
+  SpeechPlaybackStatus get playbackStatus {
+    final playbackEngine = engine;
+    return playbackEngine is PlaybackStatusAudioEngine
+        ? (playbackEngine as PlaybackStatusAudioEngine).playbackStatus
+        : SpeechPlaybackStatus.unknown;
+  }
 
   @override
   Stream<PlaybackTimeline> get playbackTimeline {

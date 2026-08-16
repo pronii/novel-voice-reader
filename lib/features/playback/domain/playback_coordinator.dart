@@ -669,6 +669,24 @@ final class PlaybackCoordinator implements PlaybackController {
         !_ownsContinuation(continuationEpoch)) {
       return;
     }
+    final provider = _provider;
+    if (provider is PlaybackStatusSpeechProvider) {
+      switch ((provider as PlaybackStatusSpeechProvider).playbackStatus) {
+        case SpeechPlaybackStatus.active:
+          // Position events can be throttled while iOS is locked. If the native
+          // player is still active, replaying would duplicate the current words
+          // and replace the prepared queue, so keep waiting instead.
+          _armWatchdog(continuationEpoch, _segments[segmentIndex]);
+          return;
+        case SpeechPlaybackStatus.completed:
+          // The native player reached the end but its completion event was
+          // lost. Advance once rather than restarting the same audio file.
+          await _advanceAfterSegmentCompleted(continuationEpoch);
+          return;
+        case SpeechPlaybackStatus.unknown:
+          break;
+      }
+    }
     if (_segmentRetries < _maxSegmentRetries) {
       _segmentRetries++;
       // The completion callback never arrived — a well-known failure mode for

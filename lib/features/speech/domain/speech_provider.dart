@@ -55,6 +55,14 @@ abstract interface class TimedSpeechProvider {
   Stream<PlaybackTimeline> get playbackTimeline;
 }
 
+enum SpeechPlaybackStatus { unknown, active, completed }
+
+/// Exposes native playback state so timeout recovery can avoid replaying audio
+/// that is still progressing or has already completed without an event.
+abstract interface class PlaybackStatusSpeechProvider {
+  SpeechPlaybackStatus get playbackStatus;
+}
+
 sealed class SpeechEvent {
   const SpeechEvent();
 }
