@@ -33,6 +33,8 @@ abstract interface class KeepAliveAudioOutput {
   /// Loads [filePath] as a looping source.
   Future<void> loadLoop(String filePath);
 
+  /// Starts output. Some players complete this future only when playback ends,
+  /// so callers starting a looping source must not wait for it to finish.
   Future<void> play();
 
   Future<void> pause();
@@ -101,6 +103,7 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
   final Future<Directory> Function() _supportDirectory;
   late final StreamSubscription<Object> _errorSubscription;
   Future<void>? _prepared;
+  Future<void>? _recovery;
   bool _running = false;
   bool _disposed = false;
 
@@ -138,7 +141,10 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
       if (_disposed) {
         return;
       }
-      await _output.play();
+      // just_audio's play future completes only when playback is paused or
+      // stopped. The keep-alive source loops forever, so waiting here would
+      // permanently block the sustainer's recovery queue after the first start.
+      _startOutput(recoverOnError: true);
     } catch (_) {
       // The prepared source may have been evicted; rebuild once and retry so a
       // transient failure doesn't permanently kill the keep-alive loop.
@@ -155,7 +161,22 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
     await _output.pause();
   }
 
-  Future<void> _recover() async {
+  Future<void> _recover() {
+    final existing = _recovery;
+    if (existing != null) {
+      return existing;
+    }
+    late final Future<void> operation;
+    operation = _recoverOnce().whenComplete(() {
+      if (identical(_recovery, operation)) {
+        _recovery = null;
+      }
+    });
+    _recovery = operation;
+    return operation;
+  }
+
+  Future<void> _recoverOnce() async {
     if (_disposed || !_running) {
       return;
     }
@@ -165,11 +186,31 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
       if (_disposed || !_running) {
         return;
       }
-      await _output.play();
+      // A recovery attempt gets one play request. A failed retry is consumed
+      // here and left for the next explicit start/error signal, preventing a
+      // tight infinite recovery loop.
+      _startOutput(recoverOnError: false);
     } catch (_) {
       // Give up quietly; the next start()/route change/interruption recovery
       // will try again.
     }
+  }
+
+  void _startOutput({required bool recoverOnError}) {
+    final play = _output.play();
+    // Playback errors are also exposed through [KeepAliveAudioOutput.errors],
+    // which drives the rebuild path. Consume this completion future here so a
+    // platform-level play failure is not reported as an unhandled async error.
+    unawaited(
+      play.then<void>(
+        (_) {},
+        onError: (Object _, StackTrace _) {
+          if (recoverOnError) {
+            unawaited(_recover());
+          }
+        },
+      ),
+    );
   }
 
   @override
@@ -177,6 +218,7 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
     _disposed = true;
     _running = false;
     await _errorSubscription.cancel();
+    await _recovery;
     await _output.dispose();
   }
 }

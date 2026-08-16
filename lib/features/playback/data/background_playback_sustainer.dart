@@ -98,7 +98,13 @@ final class BackgroundPlaybackSustainer {
     if (!_engaged) {
       return;
     }
-    _enqueue(() => _session.ensureActive());
+    _enqueue(() async {
+      await _session.ensureActive();
+      // iOS may stop an AudioPlayer when its output route changes without
+      // reporting a playback error. Restart the loop after re-activating the
+      // shared session so background execution is not lost silently.
+      await _keepAlive.start();
+    });
   }
 
   Future<void> _enqueue(Future<void> Function() action) {

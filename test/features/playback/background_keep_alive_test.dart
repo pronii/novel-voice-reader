@@ -60,6 +60,7 @@ void main() {
     output.failNextPlay = true;
 
     await player.start();
+    await pumpEventQueue();
 
     expect(clip.existsSync(), isTrue); // rewritten
     expect(output.loadedPaths, hasLength(2)); // source reloaded
@@ -67,6 +68,27 @@ void main() {
 
     await player.dispose();
   });
+
+  test(
+    'does not wait for an infinite loop to finish before returning',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('nvr_keep_alive');
+      addTearDown(() => directory.delete(recursive: true));
+      final output = _RecordingKeepAliveOutput()
+        ..playCompletion = Completer<void>();
+      final player = SilentKeepAlivePlayer(
+        supportDirectory: () async => directory,
+        output: output,
+      );
+
+      await player.start().timeout(const Duration(seconds: 1));
+      await player.stop().timeout(const Duration(seconds: 1));
+
+      expect(output.playCalls, 1);
+      expect(output.pauseCalls, 1);
+      await player.dispose().timeout(const Duration(seconds: 1));
+    },
+  );
 
   test('recovers when the running loop reports an error', () async {
     final directory = await Directory.systemTemp.createTemp('nvr_keep_alive');
@@ -117,6 +139,7 @@ final class _RecordingKeepAliveOutput implements KeepAliveAudioOutput {
   int playCalls = 0;
   int pauseCalls = 0;
   bool failNextPlay = false;
+  Completer<void>? playCompletion;
 
   void emitError(Object error) => _errors.add(error);
 
@@ -137,6 +160,10 @@ final class _RecordingKeepAliveOutput implements KeepAliveAudioOutput {
     if (failNextPlay) {
       failNextPlay = false;
       throw StateError('play failed');
+    }
+    final completion = playCompletion;
+    if (completion != null) {
+      await completion.future;
     }
   }
 

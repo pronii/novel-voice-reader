@@ -82,37 +82,43 @@ void main() {
     await harness.dispose();
   });
 
-  test('does not resume when playback was paused before the interruption', () async {
-    final harness = _Harness();
+  test(
+    'does not resume when playback was paused before the interruption',
+    () async {
+      final harness = _Harness();
 
-    harness.delegate.emitInterruption(AudioInterruption.began);
-    await pumpEventQueue();
-    harness.delegate.emitInterruption(AudioInterruption.endedShouldResume);
-    await pumpEventQueue();
+      harness.delegate.emitInterruption(AudioInterruption.began);
+      await pumpEventQueue();
+      harness.delegate.emitInterruption(AudioInterruption.endedShouldResume);
+      await pumpEventQueue();
 
-    expect(harness.controller.resumeCalls, 0);
-    expect(harness.handler.playbackState.value.playing, isFalse);
+      expect(harness.controller.resumeCalls, 0);
+      expect(harness.handler.playbackState.value.playing, isFalse);
 
-    await harness.dispose();
-  });
+      await harness.dispose();
+    },
+  );
 
-  test('stays paused when an interruption ends without a resume hint', () async {
-    final harness = _Harness();
+  test(
+    'stays paused when an interruption ends without a resume hint',
+    () async {
+      final harness = _Harness();
 
-    harness.handler.markPlaying();
-    await pumpEventQueue();
+      harness.handler.markPlaying();
+      await pumpEventQueue();
 
-    harness.delegate.emitInterruption(AudioInterruption.began);
-    await pumpEventQueue();
-    harness.delegate.emitInterruption(AudioInterruption.endedShouldStay);
-    await pumpEventQueue();
+      harness.delegate.emitInterruption(AudioInterruption.began);
+      await pumpEventQueue();
+      harness.delegate.emitInterruption(AudioInterruption.endedShouldStay);
+      await pumpEventQueue();
 
-    expect(harness.controller.resumeCalls, 0);
-    expect(harness.handler.playbackState.value.playing, isFalse);
-    expect(harness.delegate.deactivations, 0);
+      expect(harness.controller.resumeCalls, 0);
+      expect(harness.handler.playbackState.value.playing, isFalse);
+      expect(harness.delegate.deactivations, 0);
 
-    await harness.dispose();
-  });
+      await harness.dispose();
+    },
+  );
 
   test('re-activates the session on route changes while playing', () async {
     final harness = _Harness();
@@ -120,6 +126,7 @@ void main() {
     harness.handler.markPlaying();
     await pumpEventQueue();
     final activationsBeforeRouteChange = harness.delegate.activations;
+    final startsBeforeRouteChange = harness.keepAlive.startCalls;
 
     harness.delegate.emitDevicesChanged();
     await pumpEventQueue();
@@ -128,6 +135,7 @@ void main() {
       harness.delegate.activations,
       greaterThan(activationsBeforeRouteChange),
     );
+    expect(harness.keepAlive.startCalls, greaterThan(startsBeforeRouteChange));
     expect(harness.delegate.deactivations, 0);
 
     await harness.dispose();
