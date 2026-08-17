@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:mocktail/mocktail.dart';
@@ -543,6 +544,43 @@ void main() {
     await subscription.cancel();
     await provider.dispose();
   });
+
+  test('surfaces the just_audio load code on a PlatformException', () async {
+    final engine = _ThrowingAudioPlaybackEngine(
+      PlatformException(code: '-11800', message: 'The operation could not be completed'),
+    );
+    final directory = await Directory.systemTemp.createTemp('cached-platform-');
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: FakeCloudSpeechSynthesizer(),
+      ),
+      engine: engine,
+    );
+    final events = <SpeechEvent>[];
+    final subscription = provider.events.listen(events.add);
+    const segment = SpeechSegment(
+      id: '9:0',
+      paragraphId: 9,
+      text: '正文',
+      partIndex: 0,
+    );
+
+    await expectLater(
+      provider.prepare(segment, _cloudProfile()),
+      throwsA(isA<PlatformException>()),
+    );
+
+    // The AVFoundation code is carried into the failure so lock-screen telemetry
+    // pinpoints the native load reason, not just "PlatformException".
+    final failure = events.whereType<SpeechFailed>().single;
+    expect(failure.failure.message, contains('PlatformException'));
+    expect(failure.failure.message, contains('-11800'));
+
+    await subscription.cancel();
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
 }
 
 final class _MockAudioPlayer extends Mock implements AudioPlayer {}
@@ -699,6 +737,19 @@ final class _ThrowingSpeechAudioCache implements SpeechAudioCache {
 
   @override
   Future<File> obtain(SpeechSegment segment, VoiceProfile profile) async {
+    throw error;
+  }
+}
+
+/// An engine whose native load always fails — stands in for just_audio raising a
+/// [PlatformException] from setAudioSource while the app is backgrounded.
+final class _ThrowingAudioPlaybackEngine extends FakeAudioPlaybackEngine {
+  _ThrowingAudioPlaybackEngine(this.error);
+
+  final Object error;
+
+  @override
+  Future<void> setFilePath(String path) async {
     throw error;
   }
 }

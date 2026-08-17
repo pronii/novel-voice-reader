@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:just_audio/just_audio.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
@@ -244,13 +245,23 @@ final class CachedAudioSpeechProvider
         return;
       }
       // Preserve a classified cloud failure as-is; otherwise the underlying
-      // exception (e.g. a just_audio load error vs a network/IO error) is what
-      // we still can't see on a locked screen. Surface only its runtime type —
-      // never its message — so the diagnostic names the failing subsystem
-      // without leaking the cloud URL or key that a raw toString() would carry.
-      final failure = error is AppFailure
-          ? error
-          : AppFailure('云端语音播放准备失败 (${error.runtimeType})');
+      // exception is what we still can't see on a locked screen. A
+      // PlatformException here is a just_audio native load failure: its code
+      // (and message) name the AVFoundation reason and reference only the LOCAL
+      // cache file — never the cloud URL or key — so they are safe to surface.
+      // Any other error type is reported by runtime type ONLY, so a raw
+      // toString() can't leak the cloud URL or API key.
+      final AppFailure failure;
+      if (error is AppFailure) {
+        failure = error;
+      } else if (error is PlatformException) {
+        final detail = error.message == null
+            ? error.code
+            : '${error.code}: ${error.message}';
+        failure = AppFailure('云端语音播放准备失败 (PlatformException $detail)');
+      } else {
+        failure = AppFailure('云端语音播放准备失败 (${error.runtimeType})');
+      }
       _events.add(SpeechFailed(segmentId: segment.id, failure: failure));
       rethrow;
     }
