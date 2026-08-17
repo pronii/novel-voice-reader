@@ -15,6 +15,7 @@ import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/diagnostics/data/buffered_playback_telemetry.dart';
 import 'package:novel_voice_reader/features/diagnostics/data/diagnostics_settings_store.dart';
+import 'package:novel_voice_reader/features/diagnostics/diagnostics_defaults.dart';
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_path.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';
@@ -65,11 +66,7 @@ Future<void> main() async {
       if (saved != null && saved.isNotEmpty) {
         return saved;
       }
-      const builtIn = String.fromEnvironment(
-        'NVR_TELEMETRY_ENDPOINT',
-        defaultValue: 'http://45.136.28.241/nvr/collect',
-      );
-      return builtIn.isEmpty ? null : builtIn;
+      return kBuiltInTelemetryEndpoint.isEmpty ? null : kBuiltInTelemetryEndpoint;
     },
     uploader: DioTelemetryUploader(
       createSpeechDio(),
@@ -77,10 +74,7 @@ Future<void> main() async {
       // the telemetry sink (diagnostic metadata, no book text / no secrets); it
       // is not a credential to any paid or sensitive service, so shipping it in
       // the client is acceptable. Overridable at build time via --dart-define.
-      token: const String.fromEnvironment(
-        'NVR_TELEMETRY_TOKEN',
-        defaultValue: 'zBoaef6P9R9MQV39ZVE7Kolh6NaLuURo',
-      ),
+      token: kBuiltInTelemetryToken,
       session: <String, Object?>{
         'launchId': const Uuid().v4(),
         'platform': Platform.operatingSystem,

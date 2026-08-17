@@ -15,6 +15,7 @@ import 'package:novel_voice_reader/core/network/speech_http_client.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/diagnostics/data/diagnostics_settings_store.dart';
+import 'package:novel_voice_reader/features/diagnostics/diagnostics_defaults.dart';
 import 'package:novel_voice_reader/features/downloads/domain/download_policy.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_path.dart';
 import 'package:novel_voice_reader/features/downloads/presentation/cache_page.dart';
@@ -616,11 +617,19 @@ final _voiceSettingsInitialDataProvider =
         // Guard against the diagnostics store stalling (path_provider is
         // unmocked in widget tests and never answers). loadEndpoint already
         // swallows errors to null; the timeout covers a hang so the settings
-        // page always renders — the endpoint is baked in and this field is only
-        // an optional override.
-        diagnosticsEndpoint: await diagnosticsStore
-            .loadEndpoint()
-            .timeout(const Duration(seconds: 1), onTimeout: () => null),
+        // page always renders. Fall back to the built-in collector so the field
+        // shows the address the app actually uploads to rather than looking
+        // like the user must supply one.
+        diagnosticsEndpoint:
+            await diagnosticsStore
+                    .loadEndpoint()
+                    .timeout(
+                      const Duration(seconds: 1),
+                      onTimeout: () => null,
+                    ) ??
+                (kBuiltInTelemetryEndpoint.isEmpty
+                    ? null
+                    : kBuiltInTelemetryEndpoint),
       );
     });
 

@@ -178,7 +178,8 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       const SizedBox(height: 4),
       const Text(
         '锁屏播放诊断事件会先存在本机，回到前台时上传到下面的地址(任何能接收 '
-        'POST JSON 的服务/临时 webhook 都行)。留空则只本地保存。',
+        'POST JSON 的服务/临时 webhook 都行)。已内置默认上报地址,无需填写;'
+        '如需改到自己的服务器可覆盖此地址。',
         style: TextStyle(fontSize: 12),
       ),
       const SizedBox(height: 12),
