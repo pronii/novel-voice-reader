@@ -513,6 +513,36 @@ void main() {
     await provider.dispose();
     await directory.delete(recursive: true);
   });
+
+  test('surfaces the underlying exception type on a prepare failure', () async {
+    final engine = FakeAudioPlaybackEngine();
+    final provider = CachedAudioSpeechProvider(
+      cache: _ThrowingSpeechAudioCache(_TransportGlitch()),
+      engine: engine,
+    );
+    final events = <SpeechEvent>[];
+    final subscription = provider.events.listen(events.add);
+    const segment = SpeechSegment(
+      id: '9:0',
+      paragraphId: 9,
+      text: '正文',
+      partIndex: 0,
+    );
+
+    await expectLater(
+      provider.prepare(segment, _cloudProfile()),
+      throwsA(isA<_TransportGlitch>()),
+    );
+
+    final failure = events.whereType<SpeechFailed>().single;
+    expect(failure.segmentId, '9:0');
+    // The message names the failing subsystem via its runtime type so a
+    // locked-screen diagnostic is not left with the generic fallback alone.
+    expect(failure.failure.message, contains('_TransportGlitch'));
+
+    await subscription.cancel();
+    await provider.dispose();
+  });
 }
 
 final class _MockAudioPlayer extends Mock implements AudioPlayer {}
@@ -653,5 +683,22 @@ final class QueuedFakeAudioPlaybackEngine extends FakeAudioPlaybackEngine
     if (finished != null) {
       _completed.add(finished);
     }
+  }
+}
+
+/// An unclassified, non-[AppFailure] error — stands in for the kind of raw
+/// just_audio load / network-IO exception whose type the prepare() fallback
+/// must surface (by runtime type only) instead of masking behind a generic
+/// message.
+final class _TransportGlitch implements Exception {}
+
+final class _ThrowingSpeechAudioCache implements SpeechAudioCache {
+  _ThrowingSpeechAudioCache(this.error);
+
+  final Object error;
+
+  @override
+  Future<File> obtain(SpeechSegment segment, VoiceProfile profile) async {
+    throw error;
   }
 }

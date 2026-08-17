@@ -243,9 +243,14 @@ final class CachedAudioSpeechProvider
       if (generation != _prepareGeneration) {
         return;
       }
+      // Preserve a classified cloud failure as-is; otherwise the underlying
+      // exception (e.g. a just_audio load error vs a network/IO error) is what
+      // we still can't see on a locked screen. Surface only its runtime type —
+      // never its message — so the diagnostic names the failing subsystem
+      // without leaking the cloud URL or key that a raw toString() would carry.
       final failure = error is AppFailure
           ? error
-          : const AppFailure('云端语音播放准备失败');
+          : AppFailure('云端语音播放准备失败 (${error.runtimeType})');
       _events.add(SpeechFailed(segmentId: segment.id, failure: failure));
       rethrow;
     }
