@@ -1,5 +1,10 @@
 import 'dart:async';
 
+// The private fields are initialized from public named parameters, which cannot
+// be `this._field` initializing formals (named params may not start with an
+// underscore); the pass-through assignments are intended.
+// ignore_for_file: prefer_initializing_formals
+
 /// Drives telemetry uploads around app foreground/background transitions.
 ///
 /// Lock-screen playback keeps producing diagnostics events, but iOS can suspend
