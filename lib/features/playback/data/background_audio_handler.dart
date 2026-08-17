@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
@@ -75,9 +76,11 @@ final class PlaybackRuntime {
   PlaybackRuntime({
     required this.controller,
     required this.handler,
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
     void Function(Object error, StackTrace stackTrace)?
     onCoordinatorDisposeError,
-  }) : _onCoordinatorDisposeError =
+  }) : _telemetry = telemetry,
+       _onCoordinatorDisposeError =
            onCoordinatorDisposeError ?? _reportCoordinatorDisposeError {
     _playbackStateSubscription = handler.playbackState.listen((state) {
       if (state.processingState == AudioProcessingState.idle) {
@@ -90,6 +93,7 @@ final class PlaybackRuntime {
 
   final AttachablePlaybackController controller;
   final NovelAudioHandler handler;
+  final PlaybackTelemetry _telemetry;
   final void Function(Object error, StackTrace stackTrace)
   _onCoordinatorDisposeError;
   final StreamController<PlaybackCursor?> _cursorChanges =
@@ -218,6 +222,11 @@ final class PlaybackRuntime {
           !identical(_coordinator, next)) {
         return;
       }
+      // The single most useful diagnostic for the lock-screen bug: it names the
+      // exact reason `playing` flips (a real synth/playback failure, a natural
+      // completion, or a pause) instead of leaving the sustainer to infer it
+      // from the aggregate playing flag alone.
+      _telemetry.record('playback.activity', {'kind': activity.name});
       switch (activity) {
         case PlaybackActivity.playing:
           handler.markPlaying();

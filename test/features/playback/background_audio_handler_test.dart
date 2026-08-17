@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
@@ -253,6 +254,37 @@ void main() {
     expect(handler.playbackState.value.playing, isFalse);
     expect(handler.currentTimeline, PlaybackTimeline.zero);
     expect(failures, hasLength(1));
+    await runtime.dispose();
+  });
+
+  test('records the activity transition that flips the playing state', () async {
+    final provider = RuntimeSpeechProvider();
+    final telemetry = _RecordingTelemetry();
+    final controller = AttachablePlaybackController();
+    final handler = NovelAudioHandler(controller);
+    final runtime = PlaybackRuntime(
+      controller: controller,
+      handler: handler,
+      telemetry: telemetry,
+    );
+    await runtime.replaceAndPlayFrom(
+      createCoordinator(provider),
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      token: runtime.beginReplacement(),
+    );
+
+    // Starting playback names the reason the playing flag went true...
+    expect(telemetry.activityKinds, contains('playing'));
+
+    // ...and an exhausted failure names why it goes back to false, which is the
+    // signal the lock-screen diagnosis was blind to.
+    for (var attempt = 0; attempt < 3; attempt++) {
+      provider.fail(provider.prepared.last.id);
+      await pumpEventQueue();
+    }
+
+    expect(telemetry.activityKinds, contains('failed'));
+    expect(handler.playbackState.value.playing, isFalse);
     await runtime.dispose();
   });
 
@@ -633,6 +665,20 @@ PlaybackCoordinator createCoordinator(
     onFailure: onFailure,
     retryDelay: (_) async {},
   );
+}
+
+final class _RecordingTelemetry implements PlaybackTelemetry {
+  final List<String> activityKinds = [];
+
+  @override
+  void record(String name, [Map<String, Object?> fields = const {}]) {
+    if (name == 'playback.activity') {
+      activityKinds.add(fields['kind'] as String);
+    }
+  }
+
+  @override
+  Future<void> flush() async {}
 }
 
 final class DelayedCompletionParagraphSource

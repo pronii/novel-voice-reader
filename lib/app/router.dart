@@ -440,6 +440,12 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
   }
 
   void _showSpeechFailure(AppFailure failure) {
+    // Record why synthesis/playback ultimately gave up (after retries) so the
+    // collector shows the concrete cause behind a `playback.activity: failed`
+    // — the un-instrumented reason the lock-screen session went quiet.
+    ref
+        .read(playbackTelemetryProvider)
+        .record('playback.failure', {'message': failure.message});
     if (!mounted) {
       return;
     }

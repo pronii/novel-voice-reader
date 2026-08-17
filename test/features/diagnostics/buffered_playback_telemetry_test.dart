@@ -21,6 +21,39 @@ void main() {
         .toList();
   }
 
+  test('stamps each event with the launch id it belongs to', () async {
+    final directory = await tempDir();
+    final telemetry = BufferedPlaybackTelemetry(
+      supportDirectory: () async => directory,
+      endpointLoader: () async => null,
+      uploader: _RecordingUploader(),
+      launchId: 'launch-abc',
+    );
+
+    telemetry.record('first');
+    telemetry.record('second');
+
+    final file = await telemetry.currentLogFile();
+    final lines = readLines(file!);
+    // Every event carries its own launch id so buffered events uploaded by a
+    // later launch stay attributed to the run that produced them.
+    expect(lines.every((line) => line['lid'] == 'launch-abc'), isTrue);
+  });
+
+  test('omits the launch id field when none is configured', () async {
+    final directory = await tempDir();
+    final telemetry = BufferedPlaybackTelemetry(
+      supportDirectory: () async => directory,
+      endpointLoader: () async => null,
+      uploader: _RecordingUploader(),
+    );
+
+    telemetry.record('first');
+
+    final file = await telemetry.currentLogFile();
+    expect(readLines(file!).single.containsKey('lid'), isFalse);
+  });
+
   test('appends events as ordered JSONL lines', () async {
     final directory = await tempDir();
     final uploader = _RecordingUploader();

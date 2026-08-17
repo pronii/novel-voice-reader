@@ -13,6 +13,7 @@ final class PlaybackTelemetryEvent {
     required this.monotonicMicros,
     required this.wallClock,
     required this.name,
+    this.launchId,
     this.fields = const <String, Object?>{},
   });
 
@@ -33,6 +34,14 @@ final class PlaybackTelemetryEvent {
   /// Short, stable event identifier, e.g. `keepalive.recover.begin`.
   final String name;
 
+  /// Identifies the app launch (process run) that produced this event, stamped
+  /// at capture time. Buffered events survive across launches, and the batch is
+  /// tagged with the *uploading* launch — so without a per-event launch id, an
+  /// old launch's leftover events get misattributed to the launch that shipped
+  /// them, colliding [seq] values and merging distinct runs. Grouping by this
+  /// keeps each run's [seq]/[monotonicMicros] sequence intact.
+  final String? launchId;
+
   /// Event-specific structured payload. Must contain only diagnostic metadata —
   /// never book text, TTS input, or secrets.
   final Map<String, Object?> fields;
@@ -41,6 +50,7 @@ final class PlaybackTelemetryEvent {
     'seq': seq,
     'mono_us': monotonicMicros,
     'ts': wallClock.toIso8601String(),
+    if (launchId != null) 'lid': launchId,
     'name': name,
     if (fields.isNotEmpty) 'fields': fields,
   };

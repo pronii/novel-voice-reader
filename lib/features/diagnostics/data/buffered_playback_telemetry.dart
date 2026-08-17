@@ -80,6 +80,7 @@ final class BufferedPlaybackTelemetry implements PlaybackTelemetry {
     required Future<Directory> Function() supportDirectory,
     required Future<String?> Function() endpointLoader,
     required TelemetryUploader uploader,
+    String? launchId,
     Future<bool> Function()? isOnline,
     int Function()? monotonicMicros,
     DateTime Function()? now,
@@ -88,6 +89,7 @@ final class BufferedPlaybackTelemetry implements PlaybackTelemetry {
   }) : _supportDirectory = supportDirectory,
        _endpointLoader = endpointLoader,
        _uploader = uploader,
+       _launchId = launchId,
        _isOnline = isOnline,
        _now = now ?? (() => DateTime.now().toUtc()),
        _maxBufferedEvents = maxBufferedEvents,
@@ -97,6 +99,7 @@ final class BufferedPlaybackTelemetry implements PlaybackTelemetry {
   final Future<Directory> Function() _supportDirectory;
   final Future<String?> Function() _endpointLoader;
   final TelemetryUploader _uploader;
+  final String? _launchId;
   final Future<bool> Function()? _isOnline;
   final DateTime Function() _now;
   final int Function() _monotonic;
@@ -121,6 +124,7 @@ final class BufferedPlaybackTelemetry implements PlaybackTelemetry {
       monotonicMicros: _monotonic(),
       wallClock: _now(),
       name: name,
+      launchId: _launchId,
       fields: fields,
     );
     // Fire-and-forget: append happens on the write queue, off this turn.

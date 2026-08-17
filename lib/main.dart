@@ -56,8 +56,13 @@ Future<void> main() async {
   final diagnosticsSettings = DiagnosticsSettingsStore(
     supportDirectory: getApplicationSupportDirectory,
   );
+  // One id per process run. Stamped onto every event (so buffered events from a
+  // previous launch keep their own identity even when a later launch uploads
+  // them) and also sent as the batch's session context.
+  final launchId = const Uuid().v4();
   final telemetry = BufferedPlaybackTelemetry(
     supportDirectory: getApplicationSupportDirectory,
+    launchId: launchId,
     // Default to the built-in collector so uploads work out of the box with no
     // manual setup; a value saved in Settings still overrides it. Overridable at
     // build time via --dart-define=NVR_TELEMETRY_ENDPOINT=...
@@ -76,7 +81,7 @@ Future<void> main() async {
       // the client is acceptable. Overridable at build time via --dart-define.
       token: kBuiltInTelemetryToken,
       session: <String, Object?>{
-        'launchId': const Uuid().v4(),
+        'launchId': launchId,
         'platform': Platform.operatingSystem,
         'osVersion': Platform.operatingSystemVersion,
         'debug': kDebugMode,
@@ -119,6 +124,7 @@ Future<void> main() async {
       playbackRuntime: PlaybackRuntime(
         controller: controller,
         handler: handler,
+        telemetry: telemetry,
       ),
       audioCacheRuntime: audioCacheRuntime,
       telemetry: telemetry,
