@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:audio_session/audio_session.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 
 /// A normalised audio-session interruption signal, decoupled from the plugin so
 /// the sustaining logic can be exercised without a platform channel.
@@ -33,17 +34,22 @@ abstract interface class AudioSessionDelegate {
 final class BackgroundAudioSession {
   const BackgroundAudioSession(
     this._delegate,
-    this._activateOnInitialize,
-  );
+    this._activateOnInitialize, {
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
+  }) : _telemetry = telemetry;
 
   final AudioSessionDelegate _delegate;
   final bool _activateOnInitialize;
+  final PlaybackTelemetry _telemetry;
 
-  static Future<BackgroundAudioSession> system() async {
+  static Future<BackgroundAudioSession> system({
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
+  }) async {
     final session = await AudioSession.instance;
     return BackgroundAudioSession(
       _PluginAudioSessionDelegate(session),
       Platform.isIOS,
+      telemetry: telemetry,
     );
   }
 
@@ -75,9 +81,17 @@ final class BackgroundAudioSession {
   Future<bool> ensureActive() async {
     for (var attempt = 0; attempt < _activationAttempts; attempt++) {
       if (await _delegate.setActive(true)) {
+        _telemetry.record('session.ensureActive', {
+          'active': true,
+          'attempts': attempt + 1,
+        });
         return true;
       }
     }
+    _telemetry.record('session.ensureActive', {
+      'active': false,
+      'attempts': _activationAttempts,
+    });
     return false;
   }
 

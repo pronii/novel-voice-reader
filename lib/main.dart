@@ -1,14 +1,21 @@
+import 'dart:io';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 import 'package:novel_voice_reader/app/app.dart';
 import 'package:novel_voice_reader/app/providers.dart';
 import 'package:novel_voice_reader/core/network/speech_http_client.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
+import 'package:novel_voice_reader/features/diagnostics/data/buffered_playback_telemetry.dart';
+import 'package:novel_voice_reader/features/diagnostics/data/diagnostics_settings_store.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_path.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';
@@ -41,8 +48,55 @@ Future<void> main() async {
     connectivityChanges: Connectivity().onConnectivityChanged,
   );
   await audioCacheRuntime.start();
+  // Diagnostics: buffer background-playback events locally and upload them to a
+  // user-configured collector when the app is alive (launch / foreground). The
+  // lock-screen failure suspends the isolate, so live per-event upload would
+  // lose exactly the events around the death; local-first + deferred upload
+  // preserves them, and the monotonic-time gap pinpoints the suspension.
+  final diagnosticsSettings = DiagnosticsSettingsStore(
+    supportDirectory: getApplicationSupportDirectory,
+  );
+  final telemetry = BufferedPlaybackTelemetry(
+    supportDirectory: getApplicationSupportDirectory,
+    // Default to the built-in collector so uploads work out of the box with no
+    // manual setup; a value saved in Settings still overrides it. Overridable at
+    // build time via --dart-define=NVR_TELEMETRY_ENDPOINT=...
+    endpointLoader: () async {
+      final saved = await diagnosticsSettings.loadEndpoint();
+      if (saved != null && saved.isNotEmpty) {
+        return saved;
+      }
+      const builtIn = String.fromEnvironment(
+        'NVR_TELEMETRY_ENDPOINT',
+        defaultValue: 'http://45.136.28.241/nvr/collect',
+      );
+      return builtIn.isEmpty ? null : builtIn;
+    },
+    uploader: DioTelemetryUploader(
+      createSpeechDio(),
+      // Shared secret guarding the public diagnostics collector. This only gates
+      // the telemetry sink (diagnostic metadata, no book text / no secrets); it
+      // is not a credential to any paid or sensitive service, so shipping it in
+      // the client is acceptable. Overridable at build time via --dart-define.
+      token: const String.fromEnvironment(
+        'NVR_TELEMETRY_TOKEN',
+        defaultValue: 'zBoaef6P9R9MQV39ZVE7Kolh6NaLuURo',
+      ),
+      session: <String, Object?>{
+        'launchId': const Uuid().v4(),
+        'platform': Platform.operatingSystem,
+        'osVersion': Platform.operatingSystemVersion,
+        'debug': kDebugMode,
+      },
+    ),
+    isOnline: () async {
+      final results = await Connectivity().checkConnectivity();
+      return results.any((result) => result != ConnectivityResult.none);
+    },
+  );
+  telemetry.record('session.start');
   final controller = AttachablePlaybackController();
-  final audioSession = await BackgroundAudioSession.system();
+  final audioSession = await BackgroundAudioSession.system(telemetry: telemetry);
   final handler = await initializePlaybackServices(
     initializeAudioSession: audioSession.initialize,
     initializeAudioService: () => AudioService.init(
@@ -61,8 +115,10 @@ Future<void> main() async {
     session: audioSession,
     keepAlive: SilentKeepAlivePlayer(
       supportDirectory: getApplicationSupportDirectory,
+      telemetry: telemetry,
     ),
     handler: handler,
+    telemetry: telemetry,
   );
   runApp(
     NovelVoiceReaderApp(
@@ -72,6 +128,7 @@ Future<void> main() async {
         handler: handler,
       ),
       audioCacheRuntime: audioCacheRuntime,
+      telemetry: telemetry,
     ),
   );
 }

@@ -21,6 +21,10 @@ final class VoiceSettingsPage extends StatefulWidget {
     this.hasSavedMiMoApiKey = false,
     this.onTestConnection,
     this.onSave,
+    this.initialDiagnosticsEndpoint,
+    this.onSaveDiagnosticsEndpoint,
+    this.onUploadDiagnostics,
+    this.onExportDiagnostics,
   });
 
   final VoiceProfile? initialProfile;
@@ -29,6 +33,20 @@ final class VoiceSettingsPage extends StatefulWidget {
   final Future<void> Function(VoiceSettingsSubmission submission)?
   onTestConnection;
   final Future<void> Function(VoiceSettingsSubmission submission)? onSave;
+
+  /// Currently configured diagnostics upload URL, shown in the field.
+  final String? initialDiagnosticsEndpoint;
+
+  /// Persists a new diagnostics upload URL (empty clears it). When null, the
+  /// whole diagnostics section is hidden.
+  final Future<void> Function(String endpoint)? onSaveDiagnosticsEndpoint;
+
+  /// Triggers an immediate upload of buffered diagnostics.
+  final Future<void> Function()? onUploadDiagnostics;
+
+  /// Exports the buffered diagnostics (e.g. copies them to the clipboard) for
+  /// when no collector is configured. Returns a human-readable result summary.
+  final Future<String> Function()? onExportDiagnostics;
 
   @override
   State<VoiceSettingsPage> createState() => _VoiceSettingsPageState();
@@ -41,12 +59,14 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   final _apiKey = TextEditingController();
   final _mimoApiKey = TextEditingController();
   final _mimoStyle = TextEditingController();
+  final _diagnosticsEndpoint = TextEditingController();
 
   SpeechProviderType _provider = SpeechProviderType.cloud;
   String _mimoVoice = VoiceProfile.defaultMiMoVoice;
   double _speed = 1;
   bool _saving = false;
   bool _testingConnection = false;
+  bool _diagnosticsBusy = false;
 
   static const _mimoVoiceLabels = <String, String>{
     '冰糖': '冰糖（中文女声）',
@@ -62,6 +82,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   @override
   void initState() {
     super.initState();
+    _diagnosticsEndpoint.text = widget.initialDiagnosticsEndpoint ?? '';
     final profile = widget.initialProfile;
     if (profile == null) return;
     _provider = profile.providerType;
@@ -89,6 +110,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     _apiKey.dispose();
     _mimoApiKey.dispose();
     _mimoStyle.dispose();
+    _diagnosticsEndpoint.dispose();
     super.dispose();
   }
 
@@ -141,9 +163,61 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
             icon: const Icon(Icons.save_outlined),
             label: Text(_saving ? '保存中' : '保存'),
           ),
+          if (widget.onSaveDiagnosticsEndpoint != null) ..._diagnosticsFields(),
         ],
       ),
     );
+  }
+
+  List<Widget> _diagnosticsFields() {
+    return [
+      const SizedBox(height: 24),
+      const Divider(),
+      const SizedBox(height: 8),
+      Text('诊断上报', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 4),
+      const Text(
+        '锁屏播放诊断事件会先存在本机，回到前台时上传到下面的地址(任何能接收 '
+        'POST JSON 的服务/临时 webhook 都行)。留空则只本地保存。',
+        style: TextStyle(fontSize: 12),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        key: const Key('diagnostics-endpoint-field'),
+        controller: _diagnosticsEndpoint,
+        keyboardType: TextInputType.url,
+        enableSuggestions: false,
+        autocorrect: false,
+        decoration: const InputDecoration(
+          labelText: '诊断上报地址',
+          hintText: 'https://example.com/collect',
+        ),
+      ),
+      const SizedBox(height: 12),
+      Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: _diagnosticsBusy ? null : _saveDiagnosticsEndpoint,
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('保存地址'),
+          ),
+          if (widget.onUploadDiagnostics != null)
+            OutlinedButton.icon(
+              onPressed: _diagnosticsBusy ? null : _uploadDiagnostics,
+              icon: const Icon(Icons.cloud_upload_outlined),
+              label: const Text('立即上传'),
+            ),
+          if (widget.onExportDiagnostics != null)
+            OutlinedButton.icon(
+              onPressed: _diagnosticsBusy ? null : _exportDiagnostics,
+              icon: const Icon(Icons.ios_share),
+              label: const Text('导出'),
+            ),
+        ],
+      ),
+    ];
   }
 
   List<Widget> _cloudFields() {
@@ -323,6 +397,48 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       );
     }
     return saved;
+  }
+
+  Future<void> _saveDiagnosticsEndpoint() async {
+    final save = widget.onSaveDiagnosticsEndpoint;
+    if (save == null || _diagnosticsBusy) return;
+    setState(() => _diagnosticsBusy = true);
+    try {
+      await save(_diagnosticsEndpoint.text.trim());
+      _showMessage('诊断上报地址已保存');
+    } catch (_) {
+      _showMessage('诊断上报地址保存失败');
+    } finally {
+      if (mounted) setState(() => _diagnosticsBusy = false);
+    }
+  }
+
+  Future<void> _uploadDiagnostics() async {
+    final upload = widget.onUploadDiagnostics;
+    if (upload == null || _diagnosticsBusy) return;
+    setState(() => _diagnosticsBusy = true);
+    try {
+      await upload();
+      _showMessage('已尝试上传诊断日志');
+    } catch (_) {
+      _showMessage('诊断日志上传失败');
+    } finally {
+      if (mounted) setState(() => _diagnosticsBusy = false);
+    }
+  }
+
+  Future<void> _exportDiagnostics() async {
+    final export = widget.onExportDiagnostics;
+    if (export == null || _diagnosticsBusy) return;
+    setState(() => _diagnosticsBusy = true);
+    try {
+      final summary = await export();
+      _showMessage(summary);
+    } catch (_) {
+      _showMessage('诊断日志导出失败');
+    } finally {
+      if (mounted) setState(() => _diagnosticsBusy = false);
+    }
   }
 
   void _showMessage(String message) {

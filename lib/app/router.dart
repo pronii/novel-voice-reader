@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
@@ -13,6 +14,7 @@ import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/network/speech_http_client.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
+import 'package:novel_voice_reader/features/diagnostics/data/diagnostics_settings_store.dart';
 import 'package:novel_voice_reader/features/downloads/domain/download_policy.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_path.dart';
 import 'package:novel_voice_reader/features/downloads/presentation/cache_page.dart';
@@ -544,11 +546,41 @@ final class _VoiceSettingsInitialData {
     required this.profile,
     required this.hasSavedCloudApiKey,
     required this.hasSavedMiMoApiKey,
+    required this.diagnosticsEndpoint,
   });
 
   final VoiceProfile? profile;
   final bool hasSavedCloudApiKey;
   final bool hasSavedMiMoApiKey;
+  final String? diagnosticsEndpoint;
+}
+
+final _diagnosticsSettingsStoreProvider =
+    Provider.autoDispose<DiagnosticsSettingsStore>(
+      (ref) => DiagnosticsSettingsStore(
+        supportDirectory: getApplicationSupportDirectory,
+      ),
+    );
+
+/// Copies the buffered diagnostics JSONL to the clipboard as a fallback for
+/// when no collector URL is configured, returning a summary for the snackbar.
+Future<String> _exportDiagnosticsToClipboard() async {
+  try {
+    final directory = await getApplicationSupportDirectory();
+    final file = File('${directory.path}/diagnostics/playback_events.jsonl');
+    if (!file.existsSync()) {
+      return '暂无诊断日志';
+    }
+    final content = await file.readAsString();
+    final lines = content.split('\n').where((l) => l.trim().isNotEmpty).length;
+    if (lines == 0) {
+      return '暂无诊断日志';
+    }
+    await Clipboard.setData(ClipboardData(text: content));
+    return '已复制 $lines 条诊断事件到剪贴板';
+  } catch (_) {
+    return '诊断日志导出失败';
+  }
 }
 
 final _secureCredentialsProvider = Provider.autoDispose<SecureCredentials>(
@@ -561,6 +593,7 @@ final _voiceSettingsInitialDataProvider =
     FutureProvider.autoDispose<_VoiceSettingsInitialData>((ref) async {
       final database = ref.watch(databaseProvider);
       final credentials = ref.watch(_secureCredentialsProvider);
+      final diagnosticsStore = ref.watch(_diagnosticsSettingsStoreProvider);
       final profile = database == null
           ? null
           : await loadActiveVoiceProfile(database);
@@ -580,6 +613,7 @@ final _voiceSettingsInitialDataProvider =
         profile: profile,
         hasSavedCloudApiKey: cloudApiKey?.trim().isNotEmpty ?? false,
         hasSavedMiMoApiKey: mimoApiKey?.trim().isNotEmpty ?? false,
+        diagnosticsEndpoint: await diagnosticsStore.loadEndpoint(),
       );
     });
 
@@ -590,6 +624,8 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final database = ref.watch(databaseProvider);
     final credentials = ref.watch(_secureCredentialsProvider);
+    final diagnosticsStore = ref.watch(_diagnosticsSettingsStoreProvider);
+    final telemetry = ref.watch(playbackTelemetryProvider);
     final initialData = ref.watch(_voiceSettingsInitialDataProvider);
     return initialData.when(
       loading: () =>
@@ -599,6 +635,13 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
         initialProfile: initial.profile,
         hasSavedCloudApiKey: initial.hasSavedCloudApiKey,
         hasSavedMiMoApiKey: initial.hasSavedMiMoApiKey,
+        initialDiagnosticsEndpoint: initial.diagnosticsEndpoint,
+        onSaveDiagnosticsEndpoint: (endpoint) async {
+          await diagnosticsStore.saveEndpoint(endpoint);
+          ref.invalidate(_voiceSettingsInitialDataProvider);
+        },
+        onUploadDiagnostics: telemetry.flush,
+        onExportDiagnostics: () => _exportDiagnosticsToClipboard(),
         onTestConnection: (submission) async {
           final profile = submission.profile;
           switch (profile.providerType) {

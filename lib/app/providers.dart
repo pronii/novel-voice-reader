@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/playback/application/sleep_timer_controller.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
@@ -11,6 +12,13 @@ import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 final databaseProvider = Provider<AppDatabase?>((ref) => null);
 final playbackRuntimeProvider = Provider<PlaybackRuntime?>((ref) => null);
 final audioCacheRuntimeProvider = Provider<AudioCacheRuntime?>((ref) => null);
+
+/// Background-playback diagnostics sink. Overridden in [NovelVoiceReaderApp]
+/// with the real buffered/uploading implementation; a no-op by default so
+/// widgets and tests never depend on it being wired.
+final playbackTelemetryProvider = Provider<PlaybackTelemetry>(
+  (ref) => const NoopPlaybackTelemetry(),
+);
 
 /// Sleep timer shared across the reader and player pages. Stopping playback on
 /// expiry dismisses the media notification via [NovelAudioHandler.stop].
