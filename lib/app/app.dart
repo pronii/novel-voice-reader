@@ -7,6 +7,7 @@ import 'package:novel_voice_reader/app/providers.dart';
 import 'package:novel_voice_reader/app/router.dart';
 import 'package:novel_voice_reader/app/theme.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
+import 'package:novel_voice_reader/features/diagnostics/application/background_flush_scheduler.dart';
 import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
@@ -35,16 +36,16 @@ final class _NovelVoiceReaderAppState extends State<NovelVoiceReaderApp>
 
   // While backgrounded (e.g. locked-screen playback) the app keeps producing
   // diagnostics events but iOS may suspend the isolate at any moment, after
-  // which nothing can be uploaded. Flush on the way into the background and then
-  // periodically so as many lock-screen events as possible reach the collector
-  // before a suspension, rather than waiting for the next foreground.
-  Timer? _backgroundFlushTimer;
-  static const Duration _backgroundFlushInterval = Duration(seconds: 20);
+  // which nothing can be uploaded. This flushes on the way into the background
+  // and then periodically so as many lock-screen events as possible reach the
+  // collector before a suspension.
+  late final BackgroundFlushScheduler _flushScheduler;
 
   @override
   void initState() {
     super.initState();
     _router = createAppRouter();
+    _flushScheduler = BackgroundFlushScheduler(flush: widget.telemetry.flush);
     WidgetsBinding.instance.addObserver(this);
     // Seed the current lifecycle state so a runtime created while the app is
     // already backgrounded starts in cache-first mode.
@@ -66,37 +67,19 @@ final class _NovelVoiceReaderAppState extends State<NovelVoiceReaderApp>
     // without forbidding TTS synthesis needed to sustain background playback.
     widget.playbackRuntime?.setForeground(state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) {
-      // Back in the foreground: stop the background pump and upload whatever was
-      // buffered while backgrounded.
-      _stopBackgroundFlush();
-      unawaited(widget.telemetry.flush());
+      _flushScheduler.onForeground();
     } else {
-      // Entering the background / lock screen while (likely) still executing:
-      // push buffered events out now and keep pushing on a timer so events
-      // produced during locked-screen playback reach the collector before iOS
-      // suspends us. The events after a suspension are unrecoverable in-process;
-      // the monotonic-time gap before the next event marks that suspension.
-      unawaited(widget.telemetry.flush());
-      _startBackgroundFlush();
+      // Entering the background / lock screen while (likely) still executing.
+      // Events produced after a subsequent suspension are unrecoverable
+      // in-process; the monotonic-time gap before the next event marks it.
+      _flushScheduler.onBackground();
     }
-  }
-
-  void _startBackgroundFlush() {
-    _backgroundFlushTimer ??= Timer.periodic(
-      _backgroundFlushInterval,
-      (_) => unawaited(widget.telemetry.flush()),
-    );
-  }
-
-  void _stopBackgroundFlush() {
-    _backgroundFlushTimer?.cancel();
-    _backgroundFlushTimer = null;
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _stopBackgroundFlush();
+    _flushScheduler.dispose();
     _router.dispose();
     final playbackRuntime = widget.playbackRuntime;
     final audioCacheRuntime = widget.audioCacheRuntime;
