@@ -15,7 +15,6 @@ import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/diagnostics/data/buffered_playback_telemetry.dart';
 import 'package:novel_voice_reader/features/diagnostics/data/diagnostics_settings_store.dart';
-import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_path.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';

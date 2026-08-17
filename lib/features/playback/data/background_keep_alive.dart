@@ -6,6 +6,10 @@ import 'dart:typed_data';
 import 'package:just_audio/just_audio.dart';
 import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 
+// `_telemetry` is initialized from a public named parameter and so cannot be a
+// `this._field` initializing formal (named params may not start with `_`).
+// ignore_for_file: prefer_initializing_formals
+
 /// Keeps the platform audio session continuously producing output while
 /// playback is active.
 ///
@@ -92,7 +96,6 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
     PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
   }) : _output = output ?? JustAudioKeepAliveOutput(),
        _telemetry = telemetry,
-       // ignore: prefer_initializing_formals
        _supportDirectory = supportDirectory {
     _errorSubscription = _output.errors.listen((error) {
       // The running loop failed (typically the backing file was purged while

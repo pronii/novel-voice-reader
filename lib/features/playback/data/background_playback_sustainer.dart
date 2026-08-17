@@ -6,6 +6,10 @@ import 'package:novel_voice_reader/features/playback/data/background_audio_sessi
 import 'package:novel_voice_reader/features/playback/data/background_keep_alive.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 
+// `_telemetry` is initialized from a public named parameter and so cannot be a
+// `this._field` initializing formal (named params may not start with `_`).
+// ignore_for_file: prefer_initializing_formals
+
 /// Bridges the audio session, the keep-alive loop, and the media handler so
 /// background playback survives inter-segment gaps and audio interruptions.
 ///
@@ -21,7 +25,6 @@ final class BackgroundPlaybackSustainer {
     required NovelAudioHandler handler,
     PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
   }) : _session = session,
-       // ignore: prefer_initializing_formals
        _keepAlive = keepAlive,
        _handler = handler,
        _telemetry = telemetry {

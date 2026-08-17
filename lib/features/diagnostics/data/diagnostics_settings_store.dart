@@ -2,6 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+// The private field is initialized from a public named parameter, which cannot
+// be a `this._field` initializing formal (named params may not be private).
+// ignore_for_file: prefer_initializing_formals
+
 /// Persists the diagnostics upload endpoint independently of the Drift database
 /// so no schema migration / code generation is required to add it.
 ///

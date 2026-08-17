@@ -3,6 +3,10 @@ import 'dart:io';
 import 'package:audio_session/audio_session.dart';
 import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 
+// `_telemetry` is initialized from a public named parameter and so cannot be a
+// `this._field` initializing formal (named params may not start with `_`).
+// ignore_for_file: prefer_initializing_formals
+
 /// A normalised audio-session interruption signal, decoupled from the plugin so
 /// the sustaining logic can be exercised without a platform channel.
 enum AudioInterruption {

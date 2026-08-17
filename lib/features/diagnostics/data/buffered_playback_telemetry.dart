@@ -5,6 +5,11 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 
+// Fields are private but the constructor params are public named parameters, so
+// they cannot be expressed as `this._field` initializing formals (named params
+// may not start with an underscore); the pass-through assignments are intended.
+// ignore_for_file: prefer_initializing_formals
+
 /// Ships a batch of events to a collector. Abstracted so the buffering and
 /// rotation logic can be tested without real HTTP.
 abstract interface class TelemetryUploader {
