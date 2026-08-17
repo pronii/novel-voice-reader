@@ -613,7 +613,14 @@ final _voiceSettingsInitialDataProvider =
         profile: profile,
         hasSavedCloudApiKey: cloudApiKey?.trim().isNotEmpty ?? false,
         hasSavedMiMoApiKey: mimoApiKey?.trim().isNotEmpty ?? false,
-        diagnosticsEndpoint: await diagnosticsStore.loadEndpoint(),
+        // Guard against the diagnostics store stalling (path_provider is
+        // unmocked in widget tests and never answers). loadEndpoint already
+        // swallows errors to null; the timeout covers a hang so the settings
+        // page always renders — the endpoint is baked in and this field is only
+        // an optional override.
+        diagnosticsEndpoint: await diagnosticsStore
+            .loadEndpoint()
+            .timeout(const Duration(seconds: 1), onTimeout: () => null),
       );
     });
 
