@@ -7,6 +7,11 @@ import 'package:novel_voice_reader/features/playback/domain/playback_coordinator
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 
+// `_telemetry` in PlaybackRuntime is initialized from a public `telemetry` named
+// parameter, which cannot be a `this._field` initializing formal (named params
+// may not start with an underscore); the pass-through assignment is intended.
+// ignore_for_file: prefer_initializing_formals
+
 final class AttachablePlaybackController implements PlaybackController {
   PlaybackController? _delegate;
   Future<void> _updates = Future<void>.value();
