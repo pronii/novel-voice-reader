@@ -428,9 +428,9 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         }
       }
     } catch (error) {
-      if (error is! AppFailure) {
-        _showSpeechFailure(const AppFailure('朗读启动失败'));
-      }
+      _showSpeechFailure(
+        error is AppFailure ? error : const AppFailure('朗读启动失败'),
+      );
     } finally {
       _pendingPlaybackRuntime = null;
       _pendingPlaybackReplacement = null;

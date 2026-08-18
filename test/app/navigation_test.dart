@@ -623,10 +623,7 @@ Future<void> _openMiMoSettings(WidgetTester tester) async {
   await _selectVoiceProvider(tester, 'MiMo');
 }
 
-Future<void> _selectVoiceProvider(
-  WidgetTester tester,
-  String label,
-) async {
+Future<void> _selectVoiceProvider(WidgetTester tester, String label) async {
   final dropdown = find.byKey(const Key('tts-provider-dropdown'));
   await _pumpUntilFound(tester, dropdown);
   await tester.tap(dropdown);
