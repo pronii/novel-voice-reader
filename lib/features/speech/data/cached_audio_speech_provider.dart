@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' show min;
 
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:just_audio/just_audio.dart';
@@ -171,6 +172,7 @@ final class CachedAudioSpeechProvider
         DisposableSpeechProvider,
         AdjustableSpeechProvider,
         PrefetchingSpeechProvider,
+        BatchPrefetchingSpeechProvider,
         PlaylistSpeechProvider,
         CacheOnlySpeechProvider,
         PlaybackStatusSpeechProvider,
@@ -329,6 +331,46 @@ final class CachedAudioSpeechProvider
       await queuedEngine.queueNextFilePath(file.path);
       _queued.add(_PlaylistItem(segment: segment, path: file.path));
     });
+  }
+
+  @override
+  Future<void> prefetchBatch(
+    List<SpeechSegment> segments,
+    VoiceProfile profile,
+  ) async {
+    final generation = _prepareGeneration;
+    const maxConcurrentSyntheses = 2;
+    for (var start = 0; start < segments.length; start += maxConcurrentSyntheses) {
+      final end = min(start + maxConcurrentSyntheses, segments.length);
+      final batch = segments.sublist(start, end);
+      final files = await Future.wait([
+        for (final segment in batch) _obtain(segment, profile),
+      ]);
+      if (generation != _prepareGeneration) {
+        return;
+      }
+      final playbackEngine = engine;
+      if (_current == null || playbackEngine is! QueuedAudioPlaybackEngine) {
+        continue;
+      }
+      final queuedEngine = playbackEngine as QueuedAudioPlaybackEngine;
+      await _enqueueSourceUpdate(() async {
+        if (generation != _prepareGeneration || _current == null) {
+          return;
+        }
+        for (var index = 0; index < batch.length; index++) {
+          final segment = batch[index];
+          if (_current!.segment.id == segment.id ||
+              _queued.any((item) => item.segment.id == segment.id)) {
+            continue;
+          }
+          final file = files[index];
+          _rememberSegment(file.path, segment);
+          await queuedEngine.queueNextFilePath(file.path);
+          _queued.add(_PlaylistItem(segment: segment, path: file.path));
+        }
+      });
+    }
   }
 
   @override

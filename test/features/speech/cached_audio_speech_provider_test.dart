@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
+import 'package:novel_voice_reader/features/downloads/domain/cache_key.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
@@ -285,6 +286,48 @@ void main() {
     // A duplicate prefetch of an already-queued segment must not re-append it.
     await prefetching.prefetch(second, profile);
     expect(engine.queuedPaths, hasLength(3));
+
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
+
+  test('batch prefetch synthesizes two at a time and queues in order', () async {
+    final directory = await Directory.systemTemp.createTemp('cached-batch-');
+    final engine = QueuedFakeAudioPlaybackEngine();
+    final synthesizer = ControllableCloudSpeechSynthesizer();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(directory: directory, synthesizer: synthesizer),
+      engine: engine,
+    );
+    const current = SpeechSegment(id: '70:0', paragraphId: 70, text: '当前', partIndex: 0);
+    const first = SpeechSegment(id: '71:0', paragraphId: 71, text: '第一项', partIndex: 0);
+    const second = SpeechSegment(id: '72:0', paragraphId: 72, text: '第二项', partIndex: 0);
+    const third = SpeechSegment(id: '73:0', paragraphId: 73, text: '第三项', partIndex: 0);
+    final profile = _cloudProfile();
+
+    final prepare = provider.prepare(current, profile);
+    await synthesizer.waitForRequests(1);
+    synthesizer.complete(0);
+    await prepare;
+
+    final prefetch = (provider as BatchPrefetchingSpeechProvider).prefetchBatch(
+      const [first, second, third],
+      profile,
+    );
+    await synthesizer.waitForRequests(3);
+    synthesizer.complete(2);
+    await pumpEventQueue();
+    expect(engine.queuedPaths, isEmpty);
+    synthesizer.complete(1);
+    await synthesizer.waitForRequests(4);
+    expect(engine.queuedPaths, hasLength(2));
+    synthesizer.complete(3);
+    await prefetch;
+
+    expect(engine.queuedPaths, hasLength(3));
+    expect(engine.queuedPaths[0], contains(CacheKey.forSegment(first, profile)));
+    expect(engine.queuedPaths[1], contains(CacheKey.forSegment(second, profile)));
+    expect(engine.queuedPaths[2], contains(CacheKey.forSegment(third, profile)));
 
     await provider.dispose();
     await directory.delete(recursive: true);

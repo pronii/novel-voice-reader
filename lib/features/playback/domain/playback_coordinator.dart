@@ -437,10 +437,9 @@ final class PlaybackCoordinator implements PlaybackController {
     _acceptTimeline = false;
     _timelineChanges.add(_enrichTimeline(PlaybackTimeline.zero));
 
-    // Prefer an already-generated file while backgrounded. A miss must fall
-    // through to normal prepare(): iOS permits network work supporting active
-    // background audio, and stopping here would make a finite cache the hard
-    // playback limit whenever the screen is locked.
+    // Prefer an already-generated file while backgrounded. A miss still falls
+    // through to synthesis: rolling batch prefetch normally keeps the native
+    // queue ahead, while this remains the last-resort fallback.
     if (!_foreground && provider is CacheOnlySpeechProvider) {
       final ready = await (provider as CacheOnlySpeechProvider).prepareCached(
         segment,
@@ -751,6 +750,7 @@ final class PlaybackCoordinator implements PlaybackController {
       const microsPerCharacter = 240000;
       final targetCharacters = prefetchTarget.inMicroseconds ~/ microsPerCharacter;
       var plannedCharacters = 0;
+      final plannedSegments = <SpeechSegment>[];
       var cursor = _cursor;
       var segments = _segments.skip(_segmentIndex + 1).toList();
 
@@ -760,30 +760,24 @@ final class PlaybackCoordinator implements PlaybackController {
           if (!_ownsContinuation(continuationEpoch)) {
             return;
           }
-          // Prefetch happens while the current segment is still playing, so the
-          // audio session and network are still alive even on a locked screen.
-          // Retrying a failed synth here (rather than swallowing it) is what
-          // warms the cache before the segment is needed; if it still fails
-          // after backoff, stop this pass — a later advance/retry reschedules
-          // prefetch — and let prepare() remain the authoritative fallback.
-          if (!await _prefetchSegmentWithRetry(
-            provider,
-            segment,
-            continuationEpoch,
-          )) {
-            return;
-          }
+          plannedSegments.add(segment);
           plannedCharacters += segment.text.runes.length;
           if (plannedCharacters >= targetCharacters) {
-            return;
+            break;
           }
         }
+        if (plannedCharacters >= targetCharacters) {
+          break;
+        }
         if (cursor == null) {
-          return;
+          break;
         }
         final next = await _paragraphs.nextAfter(cursor);
-        if (next == null || !_ownsContinuation(continuationEpoch)) {
+        if (!_ownsContinuation(continuationEpoch)) {
           return;
+        }
+        if (next == null) {
+          break;
         }
         cursor = next.cursor;
         segments = _segmenter.split(
@@ -792,8 +786,46 @@ final class PlaybackCoordinator implements PlaybackController {
           maxCharacters: _voiceProfile.maxSegmentCharacters,
         );
       }
+      if (!_ownsContinuation(continuationEpoch) || plannedSegments.isEmpty) {
+        return;
+      }
+      if (provider is BatchPrefetchingSpeechProvider) {
+        await _prefetchBatchWithRetry(provider, plannedSegments, continuationEpoch);
+        return;
+      }
+      for (final segment in plannedSegments) {
+        if (!await _prefetchSegmentWithRetry(
+          provider,
+          segment,
+          continuationEpoch,
+        )) {
+          return;
+        }
+      }
     } catch (_) {
       // Normal prepare remains the authoritative fallback and error path.
+    }
+  }
+
+  Future<bool> _prefetchBatchWithRetry(
+    BatchPrefetchingSpeechProvider provider,
+    List<SpeechSegment> segments,
+    int continuationEpoch,
+  ) async {
+    const maxAttempts = 4;
+    for (var attempt = 1; ; attempt++) {
+      if (_disposing || !_ownsContinuation(continuationEpoch)) {
+        return false;
+      }
+      try {
+        await provider.prefetchBatch(segments, _voiceProfile);
+        return true;
+      } catch (_) {
+        if (attempt >= maxAttempts) {
+          return false;
+        }
+        await _retryDelay(_retryBackoff(attempt));
+      }
     }
   }
 
