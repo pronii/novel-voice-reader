@@ -34,6 +34,7 @@ import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
 import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
+import 'package:novel_voice_reader/features/speech/data/server_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:novel_voice_reader/features/speech/presentation/voice_settings_page.dart';
 
@@ -443,9 +444,9 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     // Record why synthesis/playback ultimately gave up (after retries) so the
     // collector shows the concrete cause behind a `playback.activity: failed`
     // — the un-instrumented reason the lock-screen session went quiet.
-    ref
-        .read(playbackTelemetryProvider)
-        .record('playback.failure', {'message': failure.message});
+    ref.read(playbackTelemetryProvider).record('playback.failure', {
+      'message': failure.message,
+    });
     if (!mounted) {
       return;
     }
@@ -627,15 +628,13 @@ final _voiceSettingsInitialDataProvider =
         // shows the address the app actually uploads to rather than looking
         // like the user must supply one.
         diagnosticsEndpoint:
-            await diagnosticsStore
-                    .loadEndpoint()
-                    .timeout(
-                      const Duration(seconds: 1),
-                      onTimeout: () => null,
-                    ) ??
-                (kBuiltInTelemetryEndpoint.isEmpty
-                    ? null
-                    : kBuiltInTelemetryEndpoint),
+            await diagnosticsStore.loadEndpoint().timeout(
+              const Duration(seconds: 1),
+              onTimeout: () => null,
+            ) ??
+            (kBuiltInTelemetryEndpoint.isEmpty
+                ? null
+                : kBuiltInTelemetryEndpoint),
       );
     });
 
@@ -683,6 +682,16 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
               }
             case SpeechProviderType.cloud:
               throw const AppFailure('当前语音服务不支持连接测试');
+            case SpeechProviderType.server:
+              final dio = createSpeechDio();
+              try {
+                await ServerTtsClient(
+                  dio: dio,
+                  credentials: credentials,
+                ).testConnection(profile.normalizedBaseUrl);
+              } finally {
+                dio.close(force: true);
+              }
           }
         },
         onSave: (submission) async {
@@ -707,7 +716,8 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
             });
           }
 
-          if (profile.providerType == SpeechProviderType.mimo) {
+          if (profile.providerType == SpeechProviderType.mimo ||
+              profile.providerType == SpeechProviderType.server) {
             await credentials.runWithMiMoApiKeyUpdate(
               apiKey: submission.credentials.normalizedApiKey,
               commit: persistProfile,

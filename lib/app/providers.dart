@@ -63,6 +63,17 @@ VoiceProfile? voiceProfileFromRecord(VoiceProfileRecord? record) {
           speed: record.speed,
           outputFormat: record.outputFormat ?? 'mp3',
         ),
+      'server'
+          when record.baseUrl != null &&
+              record.model != null &&
+              record.voice != null =>
+        VoiceProfile.server(
+          baseUrl: record.baseUrl!,
+          model: record.model!,
+          voice: record.voice!,
+          speed: record.speed,
+          outputFormat: record.outputFormat ?? 'wav',
+        ),
       'mimo' => VoiceProfile.mimo(
         voice: record.voice ?? VoiceProfile.defaultMiMoVoice,
         style: record.style,

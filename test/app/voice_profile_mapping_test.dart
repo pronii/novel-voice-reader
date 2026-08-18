@@ -66,6 +66,23 @@ void main() {
     expect(profile?.speed, 1.1);
   });
 
+  test('maps a stored server profile', () {
+    const record = VoiceProfileRecord(
+      id: 5,
+      providerType: 'server',
+      baseUrl: 'https://tts.ll.993209.xyz:888',
+      model: 'gpt-4o-mini-tts',
+      voice: 'alloy',
+      speed: 1,
+      outputFormat: 'mp3',
+    );
+
+    final profile = voiceProfileFromRecord(record);
+
+    expect(profile?.providerType, SpeechProviderType.server);
+    expect(profile?.normalizedBaseUrl, record.baseUrl);
+  });
+
   test('ignores an unknown provider type', () {
     const record = VoiceProfileRecord(
       id: 6,

@@ -289,6 +289,34 @@ void main() {
     expect(find.text('请输入云端语音 API Key'), findsOneWidget);
   });
 
+  testWidgets('uses the deployed URL for the self-hosted provider', (
+    tester,
+  ) async {
+    VoiceSettingsSubmission? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VoiceSettingsPage(
+          onSave: (submission) async => saved = submission,
+        ),
+      ),
+    );
+
+    await _selectVoiceProvider(tester, '自建服务端');
+    final keyField = find.widgetWithText(TextField, 'MiMo API Key');
+    final saveButton = find.byType(FilledButton).first;
+    await tester.enterText(keyField, 'secret');
+    await tester.ensureVisible(saveButton);
+    await tester.pumpAndSettle();
+    await tester.tap(saveButton);
+    await tester.pumpAndSettle();
+
+    expect(saved?.profile.providerType, SpeechProviderType.server);
+    expect(saved?.profile.normalizedBaseUrl, 'https://tts.ll.993209.xyz:888');
+    expect(saved?.profile.model, VoiceProfile.mimoModel);
+    expect(saved?.profile.voice, VoiceProfile.defaultMiMoVoice);
+    expect(saved?.profile.outputFormat, 'wav');
+  });
+
   testWidgets('keeps an existing cloud key when the input is blank', (
     tester,
   ) async {

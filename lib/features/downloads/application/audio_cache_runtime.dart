@@ -15,6 +15,7 @@ import 'package:novel_voice_reader/features/downloads/domain/cache_key.dart';
 import 'package:novel_voice_reader/features/downloads/domain/download_policy.dart';
 import 'package:novel_voice_reader/features/speech/data/cloud_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
+import 'package:novel_voice_reader/features/speech/data/server_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
@@ -312,6 +313,10 @@ final class AudioCacheRuntime {
   CloudSpeechSynthesizer _synthesizer(VoiceProfile profile) {
     return switch (profile.providerType) {
       SpeechProviderType.cloud => CloudTtsClient(
+        dio: _dio,
+        credentials: _credentials,
+      ),
+      SpeechProviderType.server => ServerTtsClient(
         dio: _dio,
         credentials: _credentials,
       ),

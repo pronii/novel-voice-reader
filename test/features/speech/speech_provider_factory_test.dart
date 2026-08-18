@@ -7,6 +7,7 @@ import 'package:novel_voice_reader/features/downloads/data/audio_cache_repositor
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/data/cloud_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
+import 'package:novel_voice_reader/features/speech/data/server_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
@@ -67,6 +68,27 @@ void main() {
     expect(
       (cached.cache as AudioCacheRepository).synthesizer,
       isA<MiMoTtsClient>(),
+    );
+    await cached.dispose();
+  });
+
+  test('creates cached server playback for a server profile', () async {
+    final directory = await createTempCacheDirectory();
+    final factory = buildFactory(directory);
+
+    final provider = factory.create(
+      VoiceProfile.server(
+        baseUrl: 'https://tts.example.com',
+        model: 'tts-1',
+        voice: 'alloy',
+        speed: 1,
+      ),
+    );
+
+    final cached = provider as CachedAudioSpeechProvider;
+    expect(
+      (cached.cache as AudioCacheRepository).synthesizer,
+      isA<ServerTtsClient>(),
     );
     await cached.dispose();
   });
