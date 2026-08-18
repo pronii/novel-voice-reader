@@ -287,6 +287,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       const SizedBox(height: 12),
       DropdownButtonFormField<String>(
         initialValue: _mimoVoice,
+        isExpanded: true,
         decoration: const InputDecoration(labelText: '音色'),
         items: [
           for (final voice in VoiceProfile.mimoVoices)
@@ -507,7 +508,11 @@ final class _ProviderOption extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      children: [Icon(icon, size: 20), const SizedBox(width: 12), Text(label)],
+      children: [
+        Icon(icon, size: 20),
+        const SizedBox(width: 12),
+        Expanded(child: Text(label, maxLines: 1, softWrap: false)),
+      ],
     );
   }
 }
