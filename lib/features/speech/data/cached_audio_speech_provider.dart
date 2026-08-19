@@ -270,7 +270,10 @@ final class CachedAudioSpeechProvider
   }
 
   @override
-  Future<bool> prepareCached(SpeechSegment segment, VoiceProfile profile) async {
+  Future<bool> prepareCached(
+    SpeechSegment segment,
+    VoiceProfile profile,
+  ) async {
     final audioCache = cache;
     if (audioCache is! LookupSpeechAudioCache) {
       // The active cache can't answer a lookup without synthesizing, so treat
@@ -340,7 +343,11 @@ final class CachedAudioSpeechProvider
   ) async {
     final generation = _prepareGeneration;
     const maxConcurrentSyntheses = 2;
-    for (var start = 0; start < segments.length; start += maxConcurrentSyntheses) {
+    for (
+      var start = 0;
+      start < segments.length;
+      start += maxConcurrentSyntheses
+    ) {
       final end = min(start + maxConcurrentSyntheses, segments.length);
       final batch = segments.sublist(start, end);
       final files = await Future.wait([
@@ -466,14 +473,20 @@ final class CachedAudioSpeechProvider
   Future<void> _playEngine() async {
     try {
       await engine.play();
-    } catch (_) {
+    } catch (error) {
       final current = _current;
       if (current != null) {
+        final AppFailure failure;
+        if (error is PlatformException) {
+          final detail = error.message == null
+              ? error.code
+              : '${error.code}: ${error.message}';
+          failure = AppFailure('云端音频播放失败 (PlatformException $detail)');
+        } else {
+          failure = AppFailure('云端音频播放失败 (${error.runtimeType})');
+        }
         _events.add(
-          SpeechFailed(
-            segmentId: current.segment.id,
-            failure: const AppFailure('云端音频播放失败'),
-          ),
+          SpeechFailed(segmentId: current.segment.id, failure: failure),
         );
       }
     }

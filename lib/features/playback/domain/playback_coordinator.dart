@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
@@ -22,7 +23,6 @@ typedef PlaybackRetryDelay = Future<void> Function(Duration duration);
 
 Future<void> _defaultRetryDelay(Duration duration) =>
     Future<void>.delayed(duration);
-
 
 abstract interface class PlaybackController {
   PlaybackCursor? get cursor;
@@ -76,6 +76,7 @@ final class PlaybackCoordinator implements PlaybackController {
     required VoiceProfile voiceProfile,
     SpeechSegmenter segmenter = const SpeechSegmenter(),
     void Function(AppFailure failure)? onFailure,
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
     Duration watchdogGrace = const Duration(seconds: 15),
     int maxSegmentRetries = 2,
     WatchdogTimerFactory scheduleWatchdog = _defaultScheduleWatchdog,
@@ -88,6 +89,7 @@ final class PlaybackCoordinator implements PlaybackController {
       voiceProfile,
       segmenter,
       onFailure,
+      telemetry,
       watchdogGrace,
       maxSegmentRetries,
       scheduleWatchdog,
@@ -102,6 +104,7 @@ final class PlaybackCoordinator implements PlaybackController {
     this._voiceProfile,
     this._segmenter,
     this._onFailure,
+    this._telemetry,
     this._watchdogGrace,
     this._maxSegmentRetries,
     this._scheduleWatchdog,
@@ -132,6 +135,7 @@ final class PlaybackCoordinator implements PlaybackController {
   final VoiceProfile _voiceProfile;
   final SpeechSegmenter _segmenter;
   final void Function(AppFailure failure)? _onFailure;
+  final PlaybackTelemetry _telemetry;
   final Duration _watchdogGrace;
   final int _maxSegmentRetries;
   final WatchdogTimerFactory _scheduleWatchdog;
@@ -197,6 +201,10 @@ final class PlaybackCoordinator implements PlaybackController {
 
   @override
   Future<void> playFrom(PlaybackCursor cursor) async {
+    _record('playback.start.begin', {
+      'chapter_id': cursor.chapterId,
+      'paragraph_index': cursor.paragraphIndex,
+    });
     _paused = false;
     final generation = ++_playbackGeneration;
     final paragraph = await _paragraphs.at(cursor);
@@ -204,8 +212,10 @@ final class PlaybackCoordinator implements PlaybackController {
       return;
     }
     if (paragraph == null) {
+      _record('playback.start.failure', {'reason': 'paragraph_not_found'});
       throw StateError('Playback cursor does not point to a paragraph.');
     }
+    _record('playback.paragraph.loaded', {'paragraph_id': paragraph.id});
     await _startParagraph(paragraph, generation: generation);
   }
 
@@ -415,6 +425,11 @@ final class PlaybackCoordinator implements PlaybackController {
     }
     _cancelWatchdog();
     final provider = _provider;
+    final startedAt = Stopwatch()..start();
+    _record('playback.segment.prepare.begin', {
+      'segment_id': segment.id,
+      'continuation': continuation,
+    });
 
     // Native auto-advance: the player already moved into this segment from its
     // look-ahead queue while the screen was locked. Do NOT prepare()/play()
@@ -453,7 +468,16 @@ final class PlaybackCoordinator implements PlaybackController {
       }
     }
 
-    await _provider.prepare(segment, _voiceProfile);
+    try {
+      await _provider.prepare(segment, _voiceProfile);
+    } catch (error) {
+      _record('playback.segment.prepare.failure', {
+        'segment_id': segment.id,
+        'error_type': error.runtimeType.toString(),
+        'elapsed_ms': startedAt.elapsedMilliseconds,
+      });
+      rethrow;
+    }
     if (!_ownsContinuation(continuationEpoch)) {
       return false;
     }
@@ -475,9 +499,19 @@ final class PlaybackCoordinator implements PlaybackController {
         return false;
       }
     }
-    await _provider.play();
+    _record('playback.audio.play.begin', {'segment_id': segment.id});
+    try {
+      await _provider.play();
+    } catch (error) {
+      _record('playback.audio.play.failure', {
+        'segment_id': segment.id,
+        'error_type': error.runtimeType.toString(),
+      });
+      rethrow;
+    }
     final current = _ownsContinuation(continuationEpoch);
     if (current) {
+      _record('playback.audio.play.success', {'segment_id': segment.id});
       _publishActivity(PlaybackActivity.playing);
       _armWatchdog(continuationEpoch, segment);
     }
@@ -500,11 +534,15 @@ final class PlaybackCoordinator implements PlaybackController {
 
   Future<void> _handleSpeechEvent(SpeechEvent event) async {
     final continuationEpoch = _activeContinuationEpoch;
-    if (continuationEpoch == null ||
-        !_ownsContinuation(continuationEpoch)) {
+    if (continuationEpoch == null || !_ownsContinuation(continuationEpoch)) {
       return;
     }
     if (event is SpeechFailed) {
+      _record('playback.speech.failure', {
+        'segment_id': event.segmentId,
+        'message': event.failure.message,
+        'retry': _segmentRetries,
+      });
       if (_segments.isEmpty || event.segmentId != _segments[_segmentIndex].id) {
         return;
       }
@@ -660,7 +698,10 @@ final class PlaybackCoordinator implements PlaybackController {
     });
   }
 
-  Future<void> _onWatchdogTimeout(int continuationEpoch, int segmentIndex) async {
+  Future<void> _onWatchdogTimeout(
+    int continuationEpoch,
+    int segmentIndex,
+  ) async {
     if (_paused ||
         _disposing ||
         _segments.isEmpty ||
@@ -748,7 +789,8 @@ final class PlaybackCoordinator implements PlaybackController {
       // per character estimate, five minutes is roughly 1250 characters.
       const prefetchTarget = Duration(minutes: 5);
       const microsPerCharacter = 240000;
-      final targetCharacters = prefetchTarget.inMicroseconds ~/ microsPerCharacter;
+      final targetCharacters =
+          prefetchTarget.inMicroseconds ~/ microsPerCharacter;
       var plannedCharacters = 0;
       final plannedSegments = <SpeechSegment>[];
       var cursor = _cursor;
@@ -790,7 +832,11 @@ final class PlaybackCoordinator implements PlaybackController {
         return;
       }
       if (provider is BatchPrefetchingSpeechProvider) {
-        await _prefetchBatchWithRetry(provider, plannedSegments, continuationEpoch);
+        await _prefetchBatchWithRetry(
+          provider,
+          plannedSegments,
+          continuationEpoch,
+        );
         return;
       }
       for (final segment in plannedSegments) {
@@ -866,6 +912,10 @@ final class PlaybackCoordinator implements PlaybackController {
     }
   }
 
+  void _record(String name, [Map<String, Object?> fields = const {}]) {
+    _telemetry.record(name, fields);
+  }
+
   PlaybackTimeline _enrichTimeline(PlaybackTimeline timeline) {
     final chapterCharacters = _chapterCharacters;
     if (chapterCharacters == null || _segments.isEmpty) {
@@ -897,7 +947,8 @@ final class PlaybackCoordinator implements PlaybackController {
       microseconds:
           completedCharacters * microsPerCharacter + position.inMicroseconds,
     );
-    final chapterRemaining = currentRemaining +
+    final chapterRemaining =
+        currentRemaining +
         Duration(microseconds: laterCharacters * microsPerCharacter);
     return PlaybackTimeline(
       position: position,

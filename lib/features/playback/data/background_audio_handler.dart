@@ -147,7 +147,12 @@ final class PlaybackRuntime {
     required PlaybackReplacementToken token,
   }) {
     return _enqueue(() async {
+      _telemetry.record('playback.runtime.replace.begin', {
+        'chapter_id': cursor.chapterId,
+        'paragraph_index': cursor.paragraphIndex,
+      });
       if (!_isCurrent(token)) {
+        _telemetry.record('playback.runtime.replace.cancelled');
         await _dispose(next);
         return false;
       }
@@ -158,14 +163,19 @@ final class PlaybackRuntime {
       }
       try {
         await next.playFrom(cursor);
-      } catch (_) {
+      } catch (error) {
+        _telemetry.record('playback.runtime.replace.failure', {
+          'error_type': error.runtimeType.toString(),
+        });
         await _removeCurrent(next);
         rethrow;
       }
       if (!_isCurrent(token)) {
+        _telemetry.record('playback.runtime.replace.cancelled');
         await _removeCurrent(next);
         return false;
       }
+      _telemetry.record('playback.runtime.replace.success');
       return true;
     });
   }

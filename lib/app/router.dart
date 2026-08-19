@@ -379,6 +379,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         paragraphs: DriftPlaybackParagraphSource(database),
         voiceProfile: profile,
         onFailure: _showSpeechFailure,
+        telemetry: ref.read(playbackTelemetryProvider),
       );
       final started = await runtime.replaceAndPlayFrom(
         coordinator,
