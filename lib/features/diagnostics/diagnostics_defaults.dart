@@ -6,7 +6,7 @@
 /// never book text, TTS input, or secrets.
 const String kBuiltInTelemetryEndpoint = String.fromEnvironment(
   'NVR_TELEMETRY_ENDPOINT',
-  defaultValue: 'http://45.136.28.241/nvr/collect',
+  defaultValue: 'https://tts.ll.993209.xyz:888/nvr/collect',
 );
 
 /// Shared secret gating the public collector. Not a credential to any paid or

@@ -27,6 +27,16 @@ DB = os.path.join(DATA, 'jobs.sqlite3')
 # per use so the key can be rotated by editing the file, no restart needed).
 UPSTREAM_KEY_ENV = os.environ.get('TTS_UPSTREAM_KEY', '').strip()
 UPSTREAM_KEY_FILE = os.path.join(DATA, 'upstream_key')
+# Diagnostics collector: the app POSTs buffered playback telemetry to
+# /nvr/collect so locked-screen playback failures can be inspected server-side.
+# Gated by a shared token matching the client's built-in default. Diagnostic
+# metadata only (playback state, error types, timestamps) — never book text or
+# secrets — so the token is not sensitive. Overridable via TTS_TELEMETRY_TOKEN.
+TELEMETRY_TOKEN = os.environ.get(
+    'TTS_TELEMETRY_TOKEN', 'zBoaef6P9R9MQV39ZVE7Kolh6NaLuURo').strip()
+DIAG_DIR = os.path.join(DATA, 'diagnostics')
+DIAG_LOG = os.path.join(DIAG_DIR, 'events.jsonl')
+DIAG_LOCK = threading.Lock()
 WORK = queue.Queue()
 STOP = object()
 
@@ -37,6 +47,7 @@ def db():
 
 def init_db():
     os.makedirs(DATA, exist_ok=True)
+    os.makedirs(DIAG_DIR, exist_ok=True)
     with db() as c:
         c.execute('''CREATE TABLE IF NOT EXISTS jobs (
             id TEXT PRIMARY KEY, status TEXT NOT NULL, total INTEGER NOT NULL,
@@ -54,6 +65,10 @@ def stored_upstream_key():
             return f.read().strip()
     except OSError:
         return ''
+
+def telemetry_ok(provided):
+    # Constant-time compare; an empty configured token disables the collector.
+    return bool(TELEMETRY_TOKEN) and bool(provided) and secrets.compare_digest(provided, TELEMETRY_TOKEN)
 
 def split_text(text, limit):
     endings = '。！？!?；;'
@@ -165,6 +180,8 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get('Content-Length', '0')); return json.loads(self.rfile.read(n) or b'{}')
     def do_GET(self):
         if self.path == '/healthz': return self.send_json(200, {'ok': True})
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == '/nvr/diagnostics/tail': return self.tail_diagnostics(parsed)
         m = re.fullmatch(r'/v1/jobs/([a-f0-9]{24})', self.path)
         if m:
             with db() as c:
@@ -180,6 +197,7 @@ class Handler(BaseHTTPRequestHandler):
             data = open(path, 'rb').read(); self.send_response(200); self.send_header('Content-Type', {'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'opus': 'audio/ogg', 'aac': 'audio/aac'}.get(row['fmt'], 'application/octet-stream')); self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data); return
         self.send_json(404, {'error': 'not found'})
     def do_POST(self):
+        if self.path == '/nvr/collect': return self.collect_diagnostics()
         if self.path != '/v1/jobs': return self.send_json(404, {'error': 'not found'})
         try: p = self.body(); text = str(p.get('text', '')).strip(); limit = max(10, min(1000, int(p.get('max_characters', 360))))
         except Exception: return self.send_json(400, {'error': 'invalid JSON'})
@@ -201,6 +219,45 @@ class Handler(BaseHTTPRequestHandler):
             c.executemany('INSERT INTO segments(job_id,idx,text,status) VALUES(?,?,?,?)', [(jid, i, s, 'queued') for i, s in enumerate(segs)])
         for i in range(len(segs)): WORK.put((jid, i, token))
         self.send_json(202, {'id': jid, 'status': 'running', 'total': len(segs), 'url': f'/v1/jobs/{jid}'})
+
+    def collect_diagnostics(self):
+        if not telemetry_ok(self.headers.get('X-Telemetry-Token', '')):
+            return self.send_json(401, {'error': 'unauthorized'})
+        try: n = int(self.headers.get('Content-Length', '0'))
+        except ValueError: return self.send_json(400, {'error': 'invalid length'})
+        if n > 2000000: return self.send_json(413, {'error': 'payload too large'})
+        try: payload = json.loads(self.rfile.read(n) or b'{}')
+        except Exception: return self.send_json(400, {'error': 'invalid JSON'})
+        if not isinstance(payload, dict): payload = {}
+        events = payload.get('events')
+        record = {
+            'received': int(time.time()),
+            'ip': self.client_address[0] if self.client_address else None,
+            'session': payload.get('session'),
+            'events': events if isinstance(events, list) else [],
+        }
+        line = json.dumps(record, ensure_ascii=False)
+        with DIAG_LOCK:
+            os.makedirs(DIAG_DIR, exist_ok=True)
+            with open(DIAG_LOG, 'a') as f: f.write(line + '\n')
+        self.send_json(200, {'ok': True, 'stored': len(record['events'])})
+
+    def tail_diagnostics(self, parsed):
+        params = urllib.parse.parse_qs(parsed.query)
+        token = self.headers.get('X-Telemetry-Token', '') or params.get('token', [''])[0]
+        if not telemetry_ok(token): return self.send_json(401, {'error': 'unauthorized'})
+        try: limit = max(1, min(500, int(params.get('n', ['50'])[0])))
+        except ValueError: limit = 50
+        try:
+            with open(DIAG_LOG, 'r') as f: lines = f.readlines()
+        except OSError: lines = []
+        records = []
+        for ln in lines[-limit:]:
+            ln = ln.strip()
+            if not ln: continue
+            try: records.append(json.loads(ln))
+            except Exception: records.append({'raw': ln})
+        self.send_json(200, {'count': len(records), 'total': len(lines), 'records': records})
 
 if __name__ == '__main__':
     init_db()
