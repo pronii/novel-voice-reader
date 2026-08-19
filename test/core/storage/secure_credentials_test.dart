@@ -94,6 +94,42 @@ void main() {
 
     expect(await credentials.readApiKey(), 'old-secret');
   });
+
+  test('upgradeKeychainAccessibility re-persists stored keys', () async {
+    final store = RecordingSecureKeyValueStore();
+    final credentials = SecureCredentials(store);
+    await credentials.writeApiKey('cloud-secret');
+    await credentials.writeMiMoApiKey('mimo-secret');
+    store.writes.clear();
+
+    await credentials.upgradeKeychainAccessibility();
+
+    expect(store.writes, {
+      'cloud_tts_api_key': 'cloud-secret',
+      'mimo_tts_api_key': 'mimo-secret',
+    });
+  });
+
+  test('upgradeKeychainAccessibility skips unset keys', () async {
+    final store = RecordingSecureKeyValueStore();
+    final credentials = SecureCredentials(store);
+    await credentials.writeMiMoApiKey('mimo-secret');
+    store.writes.clear();
+
+    await credentials.upgradeKeychainAccessibility();
+
+    expect(store.writes, {'mimo_tts_api_key': 'mimo-secret'});
+  });
+
+  test('upgradeKeychainAccessibility tolerates a locked Keychain', () async {
+    final store = RecordingSecureKeyValueStore()..failReads = true;
+    final credentials = SecureCredentials(store);
+
+    await expectLater(
+      credentials.upgradeKeychainAccessibility(),
+      completes,
+    );
+  });
 }
 
 final class FakeSecureKeyValueStore implements SecureKeyValueStore {
@@ -110,5 +146,30 @@ final class FakeSecureKeyValueStore implements SecureKeyValueStore {
   @override
   Future<void> write(String key, String value) async {
     values[key] = value;
+  }
+}
+
+/// Records the writes issued during a run so a test can assert exactly which
+/// keys were re-persisted, and can simulate a locked Keychain that fails reads.
+final class RecordingSecureKeyValueStore implements SecureKeyValueStore {
+  final Map<String, String> values = {};
+  final Map<String, String> writes = {};
+  bool failReads = false;
+
+  @override
+  Future<void> delete(String key) async {
+    values.remove(key);
+  }
+
+  @override
+  Future<String?> read(String key) async {
+    if (failReads) throw Exception('errSecInteractionNotAllowed');
+    return values[key];
+  }
+
+  @override
+  Future<void> write(String key, String value) async {
+    values[key] = value;
+    writes[key] = value;
   }
 }

@@ -5,7 +5,6 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:novel_voice_reader/app/app.dart';
@@ -35,9 +34,12 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final database = AppDatabase(driftDatabase(name: 'novel_voice_reader'));
   final supportDirectory = await getApplicationSupportDirectory();
-  final credentials = SecureCredentials(
-    FlutterSecureKeyValueStore(const FlutterSecureStorage()),
-  );
+  final credentials = SecureCredentials(FlutterSecureKeyValueStore());
+  // Re-persist any pre-existing keys with the current Keychain accessibility
+  // (afterFirstUnlock) so locked-screen background synthesis can read them
+  // without hitting errSecInteractionNotAllowed (-25308). Runs while the app is
+  // foregrounded and unlocked, so the read/write succeeds.
+  await credentials.upgradeKeychainAccessibility();
   final audioCacheRuntime = AudioCacheRuntime(
     database: database,
     cacheDirectoryForBook: (bookId) =>

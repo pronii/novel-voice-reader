@@ -6,7 +6,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:novel_voice_reader/app/providers.dart';
@@ -361,7 +360,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
           ? SpeechProviderFactory(
               dio: createSpeechDio(),
               credentials: SecureCredentials(
-                FlutterSecureKeyValueStore(const FlutterSecureStorage()),
+                FlutterSecureKeyValueStore(),
               ),
               cacheDirectory: cacheDirectory,
             )
@@ -594,7 +593,7 @@ Future<String> _exportDiagnosticsToClipboard() async {
 
 final _secureCredentialsProvider = Provider.autoDispose<SecureCredentials>(
   (ref) => SecureCredentials(
-    FlutterSecureKeyValueStore(const FlutterSecureStorage()),
+    FlutterSecureKeyValueStore(),
   ),
 );
 
