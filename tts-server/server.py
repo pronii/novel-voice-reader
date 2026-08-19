@@ -21,6 +21,12 @@ DEFAULT_BASE = os.environ.get('TTS_BASE_URL', 'https://api.xiaomimimo.com')
 DEFAULT_PROVIDER = os.environ.get('TTS_PROVIDER', 'mimo').strip().lower()
 DEFAULT_HOST = urllib.parse.urlsplit(DEFAULT_BASE).hostname
 DB = os.path.join(DATA, 'jobs.sqlite3')
+# Optional server-stored upstream key. When a client omits the Authorization
+# header, requests fall back to this key so callers need not carry one.
+# Precedence: env TTS_UPSTREAM_KEY, else the /data/upstream_key file (re-read
+# per use so the key can be rotated by editing the file, no restart needed).
+UPSTREAM_KEY_ENV = os.environ.get('TTS_UPSTREAM_KEY', '').strip()
+UPSTREAM_KEY_FILE = os.path.join(DATA, 'upstream_key')
 WORK = queue.Queue()
 STOP = object()
 
@@ -39,6 +45,15 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS segments (
             job_id TEXT NOT NULL, idx INTEGER NOT NULL, text TEXT NOT NULL,
             status TEXT NOT NULL, error TEXT, PRIMARY KEY(job_id, idx))''')
+
+def stored_upstream_key():
+    if UPSTREAM_KEY_ENV:
+        return UPSTREAM_KEY_ENV
+    try:
+        with open(UPSTREAM_KEY_FILE, 'r') as f:
+            return f.read().strip()
+    except OSError:
+        return ''
 
 def split_text(text, limit):
     endings = '。！？!?；;'
@@ -169,6 +184,7 @@ class Handler(BaseHTTPRequestHandler):
         try: p = self.body(); text = str(p.get('text', '')).strip(); limit = max(10, min(1000, int(p.get('max_characters', 360))))
         except Exception: return self.send_json(400, {'error': 'invalid JSON'})
         key = self.headers.get('Authorization', '')[7:].strip() if self.headers.get('Authorization', '').startswith('Bearer ') else ''
+        if not key: key = stored_upstream_key()
         if not key: return self.send_json(401, {'error': 'missing API key'})
         if not text: return self.send_json(400, {'error': 'text is required'})
         if len(text) > 200000: return self.send_json(413, {'error': 'text exceeds 200000 characters'})
