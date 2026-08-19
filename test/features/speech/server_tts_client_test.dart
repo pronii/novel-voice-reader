@@ -83,11 +83,39 @@ void main() {
       'speed': 1.1,
     });
   });
+
+  test('omits the Authorization header when no local key is configured', () async {
+    final adapter = _ServerAdapter();
+    final client = ServerTtsClient(
+      dio: Dio()..httpClientAdapter = adapter,
+      credentials: SecureCredentials(_Store(null)),
+      delay: (_) async {},
+    );
+    final profile = VoiceProfile.server(
+      baseUrl: 'https://tts.example.com',
+      model: 'tts-model',
+      voice: 'voice-a',
+      speed: 1,
+    );
+
+    final audio = await client.synthesize(
+      const SpeechSegment(
+        id: '1:0',
+        paragraphId: 1,
+        text: '正文',
+        partIndex: 0,
+      ),
+      profile,
+    );
+
+    expect(audio, [1, 2, 3]);
+    expect(adapter.authorization, isNull);
+  });
 }
 
 final class _Store implements SecureKeyValueStore {
   _Store(this.value);
-  final String value;
+  final String? value;
   @override
   Future<void> delete(String key) async {}
   @override

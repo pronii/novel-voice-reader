@@ -30,10 +30,10 @@ final class ServerTtsClient implements CloudSpeechSynthesizer {
     SpeechSegment segment,
     VoiceProfile profile,
   ) async {
-    final apiKey = await credentials.readMiMoApiKey();
-    if (apiKey == null || apiKey.trim().isEmpty) {
-      throw const AppFailure('尚未配置 MiMo API Key');
-    }
+    // The self-hosted server can hold the upstream key itself, so a local key
+    // is optional: send Authorization only when the user configured one, and
+    // otherwise let the server fall back to its stored key.
+    final apiKey = (await credentials.readMiMoApiKey())?.trim();
     final baseUrl = profile.normalizedBaseUrl;
     try {
       final created = await dio.post<Map<String, dynamic>>(
@@ -46,7 +46,9 @@ final class ServerTtsClient implements CloudSpeechSynthesizer {
           'format': profile.outputFormat,
           'speed': profile.speed,
         },
-        options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
+        options: (apiKey != null && apiKey.isNotEmpty)
+            ? Options(headers: {'Authorization': 'Bearer $apiKey'})
+            : null,
       );
       final jobId = created.data?['id'] as String?;
       if (jobId == null || jobId.isEmpty) {

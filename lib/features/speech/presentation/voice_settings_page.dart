@@ -267,12 +267,9 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
           labelText: _provider == SpeechProviderType.server
               ? 'MiMo API Key'
               : 'API Key',
-          helperText:
-              (_provider == SpeechProviderType.server
-                  ? widget.hasSavedMiMoApiKey
-                  : widget.hasSavedCloudApiKey)
-              ? '已保存，留空则保持不变'
-              : null,
+          helperText: _provider == SpeechProviderType.server
+              ? '留空则使用服务器内置密钥'
+              : (widget.hasSavedCloudApiKey ? '已保存，留空则保持不变' : null),
         ),
       ),
       if (_provider == SpeechProviderType.server) ...[
@@ -434,14 +431,15 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   bool _hasUsableCredential(VoiceSettingsSubmission submission) {
     if (submission.credentials.normalizedApiKey != null) return true;
     final saved = switch (_provider) {
+      // The self-hosted server can carry the upstream key itself, so it needs
+      // no local key.
+      SpeechProviderType.server => true,
       SpeechProviderType.cloud => widget.hasSavedCloudApiKey,
-      SpeechProviderType.server ||
       SpeechProviderType.mimo => widget.hasSavedMiMoApiKey,
     };
     if (!saved) {
       _showMessage(
-        _provider == SpeechProviderType.mimo ||
-                _provider == SpeechProviderType.server
+        _provider == SpeechProviderType.mimo
             ? '请输入 MiMo API Key'
             : '请输入云端语音 API Key',
       );
