@@ -66,7 +66,8 @@ final class ServerTtsClient implements CloudSpeechSynthesizer {
           return Uint8List.fromList(response.data ?? const []);
         }
         if (state == 'failed') {
-          throw const AppFailure('自建语音服务合成失败');
+          final reason = data?['error'] as String?;
+          throw AppFailure(_failureMessage(reason));
         }
         await _delay(pollInterval);
       }
@@ -101,5 +102,19 @@ final class ServerTtsClient implements CloudSpeechSynthesizer {
       return AppFailure('自建语音服务请求失败（HTTP $status）');
     }
     return const AppFailure('自建语音服务请求失败');
+  }
+
+  static String _failureMessage(String? reason) {
+    switch (reason) {
+      case 'upstream authentication failed':
+        return '自建语音服务的 MiMo API Key 无效或已过期，请重新配置';
+      case 'upstream rate limited the request':
+        return 'MiMo 语音服务请求过于频繁，请稍后重试';
+      case final value
+          when value != null && value.startsWith('upstream server error'):
+        return 'MiMo 语音服务暂时不可用，请稍后重试';
+      default:
+        return '自建语音服务合成失败';
+    }
   }
 }

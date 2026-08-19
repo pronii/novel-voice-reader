@@ -3,12 +3,48 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/speech/data/server_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
+  test('surfaces an invalid upstream MiMo key', () async {
+    final adapter = _ServerAdapter()
+      ..failedReason = 'upstream authentication failed';
+    final client = ServerTtsClient(
+      dio: Dio()..httpClientAdapter = adapter,
+      credentials: SecureCredentials(_Store('secret')),
+      delay: (_) async {},
+    );
+    final profile = VoiceProfile.server(
+      baseUrl: 'https://tts.example.com',
+      model: 'tts-model',
+      voice: 'voice-a',
+      speed: 1,
+    );
+
+    await expectLater(
+      client.synthesize(
+        const SpeechSegment(
+          id: '1:0',
+          paragraphId: 1,
+          text: '正文',
+          partIndex: 0,
+        ),
+        profile,
+      ),
+      throwsA(
+        isA<AppFailure>().having(
+          (failure) => failure.message,
+          'message',
+          contains('API Key 无效'),
+        ),
+      ),
+    );
+  });
+
   test('creates a server job, polls it, and downloads the audio', () async {
     final adapter = _ServerAdapter();
     final client = ServerTtsClient(
@@ -64,6 +100,7 @@ final class _ServerAdapter implements HttpClientAdapter {
   final paths = <String>[];
   String? authorization;
   Object? createdJob;
+  String? failedReason;
 
   @override
   Future<ResponseBody> fetch(
@@ -78,6 +115,13 @@ final class _ServerAdapter implements HttpClientAdapter {
       return _json({'id': 'job-1', 'status': 'running'});
     }
     if (options.path.endsWith('/job-1')) {
+      if (failedReason != null) {
+        return _json({
+          'id': 'job-1',
+          'status': 'failed',
+          'error': failedReason,
+        });
+      }
       return _json({'id': 'job-1', 'status': 'completed'});
     }
     return ResponseBody.fromBytes(

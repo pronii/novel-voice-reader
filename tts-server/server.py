@@ -10,6 +10,7 @@ import socket
 import sqlite3
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -114,6 +115,20 @@ def synth(job, idx, token):
             c.execute('UPDATE jobs SET completed=completed+1 WHERE id=?', (job,))
             if c.execute('SELECT completed FROM jobs WHERE id=?', (job,)).fetchone()[0] == row['total']:
                 c.execute('UPDATE jobs SET status="completed" WHERE id=?', (job,))
+    except urllib.error.HTTPError as e:
+        # Keep upstream failures actionable without exposing response bodies or
+        # credentials in the public job status.
+        if e.code in (401, 403):
+            message = 'upstream authentication failed'
+        elif e.code == 429:
+            message = 'upstream rate limited the request'
+        elif e.code >= 500:
+            message = f'upstream server error (HTTP {e.code})'
+        else:
+            message = f'upstream request failed (HTTP {e.code})'
+        with db() as c:
+            c.execute('UPDATE segments SET status="failed", error=? WHERE job_id=? AND idx=?', (message, job, idx))
+            c.execute('UPDATE jobs SET status="failed", error=? WHERE id=?', (message, job))
     except Exception as e:
         with db() as c:
             c.execute('UPDATE segments SET status="failed", error=? WHERE job_id=? AND idx=?', (str(e)[:500], job, idx))
