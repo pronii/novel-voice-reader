@@ -111,10 +111,10 @@ def synth(job, idx, token):
             data = base64.b64decode(response['choices'][0]['message']['audio']['data'], validate=True)
         with open(path, 'wb') as f: f.write(data)
         with db() as c:
-            c.execute('UPDATE segments SET status="done", error=NULL WHERE job_id=? AND idx=?', (job, idx))
+            c.execute("UPDATE segments SET status='done', error=NULL WHERE job_id=? AND idx=?", (job, idx))
             c.execute('UPDATE jobs SET completed=completed+1 WHERE id=?', (job,))
             if c.execute('SELECT completed FROM jobs WHERE id=?', (job,)).fetchone()[0] == row['total']:
-                c.execute('UPDATE jobs SET status="completed" WHERE id=?', (job,))
+                c.execute("UPDATE jobs SET status='completed' WHERE id=?", (job,))
     except urllib.error.HTTPError as e:
         # Keep upstream failures actionable without exposing response bodies or
         # credentials in the public job status.
@@ -127,12 +127,12 @@ def synth(job, idx, token):
         else:
             message = f'upstream request failed (HTTP {e.code})'
         with db() as c:
-            c.execute('UPDATE segments SET status="failed", error=? WHERE job_id=? AND idx=?', (message, job, idx))
-            c.execute('UPDATE jobs SET status="failed", error=? WHERE id=?', (message, job))
+            c.execute("UPDATE segments SET status='failed', error=? WHERE job_id=? AND idx=?", (message, job, idx))
+            c.execute("UPDATE jobs SET status='failed', error=? WHERE id=?", (message, job))
     except Exception as e:
         with db() as c:
-            c.execute('UPDATE segments SET status="failed", error=? WHERE job_id=? AND idx=?', (str(e)[:500], job, idx))
-            c.execute('UPDATE jobs SET status="failed", error=? WHERE id=?', (str(e)[:500], job))
+            c.execute("UPDATE segments SET status='failed', error=? WHERE job_id=? AND idx=?", (str(e)[:500], job, idx))
+            c.execute("UPDATE jobs SET status='failed', error=? WHERE id=?", (str(e)[:500], job))
 
 def worker():
     while True:
