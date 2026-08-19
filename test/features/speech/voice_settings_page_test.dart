@@ -292,6 +292,13 @@ void main() {
   testWidgets('uses the deployed URL for the self-hosted provider', (
     tester,
   ) async {
+    // The self-hosted form now shows a helper line under the key field, which
+    // pushes the save button past the default 600px viewport; give the test a
+    // taller surface so the (lazily built) button stays in the widget tree.
+    tester.view.physicalSize = const Size(400, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     VoiceSettingsSubmission? saved;
     await tester.pumpWidget(
       MaterialApp(
