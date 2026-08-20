@@ -57,6 +57,41 @@ def init_db():
             job_id TEXT NOT NULL, idx INTEGER NOT NULL, text TEXT NOT NULL,
             status TEXT NOT NULL, error TEXT, PRIMARY KEY(job_id, idx))''')
 
+# Completed jobs are retained on disk for a while (so recently-synthesized
+# segments can be re-fetched), then their audio files are purged to keep the
+# data volume from growing without bound. The SQLite rows are kept for history.
+JOB_RETENTION_SECONDS = int(os.environ.get('TTS_JOB_RETENTION', str(7 * 24 * 3600)))
+
+def cleanup_old_jobs():
+    """Removes audio files of completed jobs older than JOB_RETENTION_SECONDS.
+
+    Called opportunistically after each new job is created; cheap (a single
+    indexed query) and idempotent. Never touches in-flight jobs, and never
+    fails synthesis: any error is swallowed.
+    """
+    try:
+        cutoff = int(time.time()) - JOB_RETENTION_SECONDS
+        with db() as c:
+            stale = c.execute(
+                'SELECT id FROM jobs WHERE status=? AND created < ?',
+                ('completed', cutoff),
+            ).fetchall()
+        for row in stale:
+            path = os.path.join(DATA, 'jobs', row['id'])
+            if os.path.isdir(path):
+                for name in os.listdir(path):
+                    try:
+                        os.unlink(os.path.join(path, name))
+                    except OSError:
+                        pass
+                try:
+                    os.rmdir(path)
+                except OSError:
+                    pass
+    except Exception:
+        # Cleanup is best-effort; never let it break job creation or synthesis.
+        pass
+
 def stored_upstream_key():
     if UPSTREAM_KEY_ENV:
         return UPSTREAM_KEY_ENV
@@ -296,6 +331,9 @@ class Handler(BaseHTTPRequestHandler):
             c.execute('INSERT INTO jobs(id,status,total,created,model,voice,fmt,speed) VALUES(?,?,?,?,?,?,?,?)', (jid, 'running', len(segs), int(time.time()), p.get('model', default_model), p.get('voice', default_voice), fmt, float(p.get('speed', 1))))
             c.executemany('INSERT INTO segments(job_id,idx,text,status) VALUES(?,?,?,?)', [(jid, i, s, 'queued') for i, s in enumerate(segs)])
         for i in range(len(segs)): WORK.put((jid, i, token))
+        # Opportunistic sweep: purge audio files of jobs completed > 7 days ago
+        # so the data volume does not grow without bound (657 MB and counting).
+        cleanup_old_jobs()
         self.send_json(202, {'id': jid, 'status': 'running', 'total': len(segs), 'url': f'/v1/jobs/{jid}'})
 
     def collect_diagnostics(self):
