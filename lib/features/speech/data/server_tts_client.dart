@@ -5,6 +5,7 @@ import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
+import 'package:novel_voice_reader/features/speech/domain/speech_text_normalizer.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 typedef ServerTtsDelay = Future<void> Function(Duration duration);
@@ -39,7 +40,7 @@ final class ServerTtsClient implements CloudSpeechSynthesizer {
       final created = await dio.post<Map<String, dynamic>>(
         '$baseUrl/v1/jobs',
         data: {
-          'text': segment.text,
+          'text': const SpeechTextNormalizer().normalizeForTts(segment.text),
           'max_characters': profile.maxSegmentCharacters,
           'model': profile.model,
           'voice': profile.voice,

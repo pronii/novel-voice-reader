@@ -6,6 +6,7 @@ import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
+import 'package:novel_voice_reader/features/speech/domain/speech_text_normalizer.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 typedef MiMoTtsDelay = Future<void> Function(Duration duration);
@@ -21,7 +22,9 @@ final class MiMoTtsClient implements CloudSpeechSynthesizer {
        _delay = delay ?? Future<void>.delayed;
 
   static const defaultNarrationStyle =
-      '使用自然、沉稳、清晰的小说旁白语气朗读，根据正文情绪自然调整语速、停顿和语气，不要过度夸张。';
+      '使用自然、沉稳、清晰的小说旁白语气朗读，根据正文情绪自然调整语速、停顿和语气，不要过度夸张。'
+      '正文中的语气词和拟声词（如“啊、呀、哦、轰、砰、咚、啪”）请用平稳、克制的叙述语气带过，'
+      '不要夸张演绎、拉长音或突然变调。';
 
   final Dio dio;
   final SecureCredentials credentials;
@@ -94,7 +97,10 @@ final class MiMoTtsClient implements CloudSpeechSynthesizer {
         'model': profile.model,
         'messages': [
           {'role': 'user', 'content': profile.style ?? defaultNarrationStyle},
-          {'role': 'assistant', 'content': segment.text},
+          {
+            'role': 'assistant',
+            'content': const SpeechTextNormalizer().normalizeForTts(segment.text),
+          },
         ],
         'audio': {'format': profile.outputFormat, 'voice': profile.voice},
       },

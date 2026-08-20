@@ -5,6 +5,7 @@ import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
+import 'package:novel_voice_reader/features/speech/domain/speech_text_normalizer.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 typedef CloudTtsDelay = Future<void> Function(Duration duration);
@@ -45,7 +46,7 @@ final class CloudTtsClient implements CloudSpeechSynthesizer {
           data: {
             'model': profile.model,
             'voice': profile.voice,
-            'input': segment.text,
+            'input': const SpeechTextNormalizer().normalizeForTts(segment.text),
             'response_format': profile.outputFormat,
             'speed': profile.speed,
           },

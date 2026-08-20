@@ -87,6 +87,78 @@ def split_text(text, limit):
     if buf: out.append(buf)
     return out
 
+# ---- Chinese number normalization -------------------------------------------
+# TTS engines otherwise read ASCII digits with English pronunciation (e.g. 123
+# becomes "one hundred twenty-three"). Rewrite them as a Chinese narrator
+# would: 123 -> 一百二十三, 1990年 -> 一九九零年, 3.14 -> 三点一四, 50% -> 百分之五十.
+# Idempotent: the output contains no ASCII digits, so it is safe for a client
+# that already normalized the text to send it again.
+_CN_DIGITS = '零一二三四五六七八九'
+_CN_SMALL_UNITS = ('', '十', '百', '千')
+_CN_BIG_UNITS = ('', '万', '亿')
+
+def _cn_section(n):
+    """1-9999 block: 1 -> 一, 10 -> 十, 15 -> 十五, 101 -> 一百零一."""
+    if n < 10:
+        return _CN_DIGITS[n]
+    if n < 20:
+        return '十' if n == 10 else '十' + _CN_DIGITS[n % 10]
+    s = str(n)
+    out = []
+    for i, ch in enumerate(s):
+        d = int(ch)
+        place = len(s) - 1 - i
+        if d == 0:
+            if any(c != '0' for c in s[i + 1:]):
+                if not out or out[-1] != '零':
+                    out.append('零')
+        else:
+            out.append(_CN_DIGITS[d])
+            if place > 0:
+                out.append(_CN_SMALL_UNITS[place])
+    return ''.join(out)
+
+def _cn_int(value):
+    if value == 0:
+        return '零'
+    if value < 0:
+        return '负' + _cn_int(-value)
+    raw = str(value)
+    if len(raw) > 12:
+        return ''.join(_CN_DIGITS[int(c)] for c in raw)
+    sections = []
+    while value > 0:
+        sections.append(value % 10000)
+        value //= 10000
+    parts = []
+    for idx in range(len(sections) - 1, -1, -1):
+        section = sections[idx]
+        if section == 0:
+            if any(s != 0 for s in sections[:idx]) and parts and not parts[-1].endswith('零'):
+                parts.append('零')
+            continue
+        need_zero = bool(parts) and section < 1000 and not parts[-1].endswith('零')
+        parts.append(('零' if need_zero else '') + _cn_section(section) + _CN_BIG_UNITS[idx])
+    return ''.join(parts)
+
+def _cn_digits(digits):
+    return ''.join(_CN_DIGITS[int(c)] for c in digits)
+
+def _cn_number(value):
+    if '.' in value:
+        whole, frac = value.split('.', 1)
+        return _cn_int(int(whole)) + '点' + _cn_digits(frac)
+    return _cn_int(int(value))
+
+def normalize_cn_text(text):
+    if not text:
+        return text
+    text = re.sub(r'(\d+(?:\.\d+)?)%', lambda m: '百分之' + _cn_number(m.group(1)), text)
+    text = re.sub(r'\d+\.\d+', lambda m: _cn_number(m.group(0)), text)
+    text = re.sub(r'(\d{4})年', lambda m: _cn_digits(m.group(1)) + '年', text)
+    text = re.sub(r'-?\d+', lambda m: _cn_int(int(m.group(0))), text)
+    return text
+
 def validated_base(base):
     base = (base or DEFAULT_BASE).strip().rstrip('/')
     p = urllib.parse.urlsplit(base)
@@ -119,7 +191,7 @@ def synth(job, idx, token):
             payload = {
                 'model': row['model'],
                 'messages': [
-                    {'role': 'user', 'content': '使用自然、沉稳、清晰的小说旁白语气朗读，根据正文情绪自然调整语速、停顿和语气，不要过度夸张。'},
+                    {'role': 'user', 'content': '使用自然、沉稳、清晰的小说旁白语气朗读，根据正文情绪自然调整语速、停顿和语气，不要过度夸张。正文中的语气词和拟声词（如“啊、呀、哦、轰、砰、咚、啪”）请用平稳、克制的叙述语气带过，不要夸张演绎、拉长音或突然变调。'},
                     {'role': 'assistant', 'content': seg['text']},
                 ],
                 'audio': {'format': row['fmt'], 'voice': row['voice']},
@@ -201,6 +273,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != '/v1/jobs': return self.send_json(404, {'error': 'not found'})
         try: p = self.body(); text = str(p.get('text', '')).strip(); limit = max(10, min(1000, int(p.get('max_characters', 360))))
         except Exception: return self.send_json(400, {'error': 'invalid JSON'})
+        text = normalize_cn_text(text)
         key = self.headers.get('Authorization', '')[7:].strip() if self.headers.get('Authorization', '').startswith('Bearer ') else ''
         if not key: key = stored_upstream_key()
         if not key: return self.send_json(401, {'error': 'missing API key'})
