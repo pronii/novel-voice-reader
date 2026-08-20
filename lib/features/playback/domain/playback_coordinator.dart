@@ -532,6 +532,19 @@ final class PlaybackCoordinator implements PlaybackController {
     return result;
   }
 
+  /// True for failures that are transient (upstream rate limit, 5xx, timeout,
+  /// connection drop) and should be skipped past instead of stopping playback.
+  /// Persistent failures (auth, invalid config) keep the banner path.
+  bool _isRecoverableSpeechFailure(AppFailure failure) {
+    final message = failure.message;
+    return message.contains('请求过于频繁') ||
+        message.contains('暂时不可用') ||
+        message.contains('连接超时') ||
+        message.contains('无法连接') ||
+        message.contains('合成超时') ||
+        message.contains('请求失败');
+  }
+
   Future<void> _handleSpeechEvent(SpeechEvent event) async {
     final continuationEpoch = _activeContinuationEpoch;
     if (continuationEpoch == null || !_ownsContinuation(continuationEpoch)) {
@@ -567,6 +580,20 @@ final class PlaybackCoordinator implements PlaybackController {
         return;
       }
       _segmentRetries = 0;
+      if (_isRecoverableSpeechFailure(event.failure)) {
+        // A transient upstream hiccup (rate limit, 5xx, timeout, connection
+        // drop) after a long playback session should not stop the book dead.
+        // Skip the failed segment and keep moving: the user hears an
+        // occasional skipped sentence instead of a stall that needs a manual
+        // tap to resume. Persistent failures (auth etc.) still surface the
+        // banner below.
+        _record('playback.speech.skip', {
+          'segment_id': event.segmentId,
+          'message': event.failure.message,
+        });
+        await _advanceAfterSegmentCompleted(continuationEpoch);
+        return;
+      }
       _cancelWatchdog();
       _acceptTimeline = false;
       _timelineChanges.add(PlaybackTimeline.zero);
