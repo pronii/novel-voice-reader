@@ -36,6 +36,7 @@ final class ReaderPage extends StatefulWidget {
     this.onReadingPositionChanged,
     this.onPlayFrom,
     this.onOpenPlayer,
+    this.onStopPlayback,
     this.onLoadPrevious,
     this.onLoadNext,
     this.onPlaybackChapterNeeded,
@@ -57,6 +58,14 @@ final class ReaderPage extends StatefulWidget {
   final ValueChanged<ReaderParagraph>? onReadingPositionChanged;
   final ValueChanged<ReaderParagraph>? onPlayFrom;
   final VoidCallback? onOpenPlayer;
+
+  /// Stops the active listening session and dismisses it from the reader.
+  ///
+  /// Surfaced via the toolbar's play button (while listening) and the floating
+  /// exit-listening button so the reader never has to dig through the full
+  /// player page just to leave narration.
+  final VoidCallback? onStopPlayback;
+
   final ReaderEdgeLoadCallback? onLoadPrevious;
   final ReaderEdgeLoadCallback? onLoadNext;
   final ReaderPlaybackChapterCallback? onPlaybackChapterNeeded;
@@ -70,6 +79,7 @@ final class _ReaderPageState extends State<ReaderPage> {
   final ItemScrollController _itemScrollController = ItemScrollController();
   final ScrollOffsetController _scrollOffsetController =
       ScrollOffsetController();
+  final PageController _pageViewController = PageController();
   late final AutoScrollController _autoScroll = AutoScrollController(
     onAdvance: _advanceAutoScroll,
   );
@@ -87,6 +97,7 @@ final class _ReaderPageState extends State<ReaderPage> {
   int _scrollGeneration = 0;
   double _fontSize = 19;
   bool _toolbarVisible = false;
+  ReaderPageMode _pageMode = ReaderPageMode.scroll;
   // True when revealing the menu bar auto-paused a running crawl, so hiding the
   // menu can resume it — but only if the reader didn't stop/pause it meanwhile.
   bool _autoScrollPausedByToolbar = false;
@@ -156,6 +167,7 @@ final class _ReaderPageState extends State<ReaderPage> {
     // background after the page is gone.
     _autoScroll.removeListener(_onAutoScrollChanged);
     _autoScroll.dispose();
+    _pageViewController.dispose();
     final pendingParagraph = _pendingProgressParagraph;
     _progressDebounce?.cancel();
     _progressDebounce = null;
@@ -182,20 +194,7 @@ final class _ReaderPageState extends State<ReaderPage> {
               onPointerMove: _onBodyPointerMove,
               onPointerUp: _onBodyPointerUp,
               onPointerCancel: _onBodyPointerCancel,
-              child: items.isEmpty
-                  ? const Center(child: Text('图书没有可阅读内容'))
-                  : NotificationListener<ScrollNotification>(
-                      onNotification: _onScrollNotification,
-                      child: ScrollablePositionedList.builder(
-                        initialScrollIndex: _initialScrollIndex,
-                        itemScrollController: _itemScrollController,
-                        scrollOffsetController: _scrollOffsetController,
-                        itemPositionsListener: _itemPositions,
-                        itemCount: items.length,
-                        itemBuilder: (context, index) =>
-                            _buildItem(context, items[index]),
-                      ),
-                    ),
+              child: _buildBody(context, items),
             ),
             ClipRect(
               child: AnimatedSlide(
@@ -250,12 +249,19 @@ final class _ReaderPageState extends State<ReaderPage> {
                             onPressed: widget.onOpenPlayer,
                             icon: const Icon(Icons.graphic_eq),
                           ),
-                          IconButton(
-                            tooltip: '播放',
+                          IconButton.filledTonal(
+                            key: const Key('reader-play-button'),
+                            tooltip: widget.playbackActive ? '退出听书' : '听书',
                             onPressed: widget.playbackStarting
                                 ? null
-                                : _playActive,
-                            icon: const Icon(Icons.play_arrow),
+                                : (widget.playbackActive
+                                    ? widget.onStopPlayback
+                                    : _playActive),
+                            icon: Icon(
+                              widget.playbackActive
+                                  ? Icons.headphones_off
+                                  : Icons.headphones,
+                            ),
                           ),
                         ],
                       ),
@@ -265,7 +271,183 @@ final class _ReaderPageState extends State<ReaderPage> {
               ),
             ),
             _buildAutoScrollOverlay(context),
+            _buildExitPlaybackOverlay(context),
           ],
+        ),
+      ),
+    );
+  }
+
+  // Renders the reader body in the currently selected page mode. The default
+  // (scroll) keeps the long-form vertical list wired to [AutoScrollController]
+  // for the crawl. [horizontal] / [curl] paginate per chapter so the reader
+  // pages forward and back like a physical book, and disable auto-scroll
+  // (which is meaningless between discrete pages).
+  Widget _buildBody(BuildContext context, List<ReaderContentItem> items) {
+    if (items.isEmpty) {
+      return const Center(child: Text('图书没有可阅读内容'));
+    }
+    switch (_pageMode) {
+      case ReaderPageMode.horizontal:
+        return _buildPagedBody(items, curl: false);
+      case ReaderPageMode.curl:
+        return _buildPagedBody(items, curl: true);
+      case ReaderPageMode.scroll:
+        return NotificationListener<ScrollNotification>(
+          onNotification: _onScrollNotification,
+          child: ScrollablePositionedList.builder(
+            initialScrollIndex: _initialScrollIndex,
+            itemScrollController: _itemScrollController,
+            scrollOffsetController: _scrollOffsetController,
+            itemPositionsListener: _itemPositions,
+            itemCount: items.length,
+            itemBuilder: (context, index) => _buildItem(context, items[index]),
+          ),
+        );
+    }
+  }
+
+  // One PageView "page" per chapter so a horizontal swipe moves between
+  // chapters in lock-step — matching the broader expectation that paginated
+  // readers turn a chapter at a time. With [curl]=true we wrap the active
+  // page in a 3D rotation that simulates the page turning mid-swipe.
+  Widget _buildPagedBody(
+    List<ReaderContentItem> items, {
+    required bool curl,
+  }) {
+    final pages = _paginateItems(items);
+    if (pages.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final initialPage = _initialPageIndex(pages);
+    // Seed the controller to the chapter the reader was last on, but only
+    // after the PageView has been attached — early calls are dropped. A
+    // post-frame callback plays nicely with [_jumpToInitialPosition], which
+    // also runs after frame layout to land the user back on the right page
+    // when navigation generation changes.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_pageViewController.hasClients) {
+        return;
+      }
+      if (_pageViewController.page?.round() != initialPage) {
+        _pageViewController.jumpToPage(initialPage);
+      }
+    });
+    return PageView.builder(
+      key: const Key('reader-page-view'),
+      controller: _pageViewController,
+      onPageChanged: _onPageChanged,
+      itemCount: pages.length,
+      itemBuilder: (context, index) {
+        return _PagedPage(
+          key: ValueKey<int>(index),
+          items: pages[index],
+          curl: curl,
+          pageController: _pageViewController,
+          index: index,
+          fontSize: _fontSize,
+          activeParagraphId: _activeParagraphId,
+          playbackStarting: widget.playbackStarting,
+          onParagraphTap: _selectParagraph,
+          onParagraphPlayFrom: _play,
+          playingParagraphKeyBuilder: _playingParagraphKey,
+        );
+      },
+    );
+  }
+
+  int _initialPageIndex(List<List<ReaderContentItem>> pages) {
+    final cursor = widget.initialCursor;
+    final targetChapterId =
+        widget.currentChapterId ?? cursor?.chapterId ?? _visibleChapterId;
+    if (targetChapterId == null) return 0;
+    final index = pages.indexWhere(
+      (page) => page.any(
+        (item) =>
+            (item is ReaderChapterHeadingItem && item.chapter.id == targetChapterId) ||
+            (item is ReaderParagraphItem &&
+                item.paragraph.chapterId == targetChapterId),
+      ),
+    );
+    return index < 0 ? 0 : index;
+  }
+
+  void _onPageChanged(int index) {
+    if (!mounted) return;
+    final pages = _paginateItems(_items);
+    if (index < 0 || index >= pages.length) return;
+    final pageItems = pages[index];
+    if (pageItems.isEmpty) return;
+    final firstChapterId = pageItems.first.chapterId;
+    if (firstChapterId != _visibleChapterId) {
+      _visibleChapterId = firstChapterId;
+      widget.onVisibleChapterChanged?.call(firstChapterId);
+    }
+  }
+
+  // Splits [items] into one sub-list per chapter, preserving order so the
+  // pager can build pages with their heading followed by the chapter's
+  // paragraphs.
+  List<List<ReaderContentItem>> _paginateItems(List<ReaderContentItem> items) {
+    final result = <List<ReaderContentItem>>[];
+    final byChapter = <int, List<ReaderContentItem>>{};
+    for (final item in items) {
+      byChapter.putIfAbsent(item.chapterId, () => []).add(item);
+    }
+    for (final chapterId in [
+      for (final section in widget.sections) section.chapter.id,
+    ]) {
+      final pageItems = byChapter[chapterId];
+      if (pageItems != null && pageItems.isNotEmpty) {
+        result.add(pageItems);
+      }
+    }
+    return result;
+  }
+
+  // A floating "exit listening mode" pill that only appears while playback is
+  // active. Unlike the toolbar's play button it does NOT depend on toolbar
+  // visibility, so the reader can leave narration at any time even when the
+  // toolbar is hidden by a tap or auto-scroll crawl.
+  Widget _buildExitPlaybackOverlay(BuildContext context) {
+    if (!widget.playbackActive || widget.onStopPlayback == null) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    return Positioned(
+      right: 16,
+      bottom: 16,
+      child: SafeArea(
+        child: Material(
+          key: const Key('reader-exit-playback'),
+          color: theme.colorScheme.surfaceContainerHighest,
+          shape: const StadiumBorder(),
+          elevation: 6,
+          child: InkWell(
+            onTap: widget.onStopPlayback,
+            customBorder: const StadiumBorder(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 10,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.headphones_off,
+                    size: 20,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '退出听书',
+                    style: theme.textTheme.labelLarge,
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -584,7 +766,13 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   void _jumpToInitialPosition() {
-    if (_itemScrollController.isAttached && _items.isNotEmpty) {
+    if (_items.isEmpty || _pageMode != ReaderPageMode.scroll) {
+      // Horizontal/curl views reposition themselves through [_buildPagedBody]
+      // because the same logic is also needed on the very first frame, before
+      // [_itemScrollController] is attached.
+      return;
+    }
+    if (_itemScrollController.isAttached) {
       _itemScrollController.jumpTo(index: _initialScrollIndex);
     }
   }
@@ -780,6 +968,15 @@ final class _ReaderPageState extends State<ReaderPage> {
   void _selectParagraph(ReaderParagraph paragraph) {
     setState(() => _activeParagraphId = paragraph.id);
     _reportReadingPosition(paragraph);
+  }
+
+  // Computed by the paged renderer so each page can pick up the currently
+  // playing paragraph without restating the playback-cursor logic. Returning
+  // an empty string keeps [_PagedPage] aware that no paragraph is playing.
+  String? _playingParagraphKey() {
+    final cursor = widget.playbackCursor;
+    if (cursor == null || !widget.playbackActive) return null;
+    return 'playing-paragraph-${cursor.chapterId}-${cursor.paragraphIndex}';
   }
 
   void _reportReadingPosition(ReaderParagraph paragraph) {
@@ -1028,6 +1225,8 @@ final class _ReaderPageState extends State<ReaderPage> {
                 ),
                 const SizedBox(height: 8),
                 _buildAutoScrollSettings(context),
+                const SizedBox(height: 16),
+                _buildPageModeSettings(context),
               ],
             ),
           ),
@@ -1102,6 +1301,246 @@ final class _ReaderPageState extends State<ReaderPage> {
           ],
         );
       },
+    );
+  }
+
+  Widget _buildPageModeSettings(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('翻页模式', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        SegmentedButton<ReaderPageMode>(
+          key: const Key('reader-page-mode-segmented'),
+          segments: const [
+            ButtonSegment(
+              value: ReaderPageMode.scroll,
+              label: Text('滚动'),
+              icon: Icon(Icons.swap_vert),
+            ),
+            ButtonSegment(
+              value: ReaderPageMode.horizontal,
+              label: Text('左右翻页'),
+              icon: Icon(Icons.swap_horiz),
+            ),
+            ButtonSegment(
+              value: ReaderPageMode.curl,
+              label: Text('仿真翻页'),
+              icon: Icon(Icons.menu_book),
+            ),
+          ],
+          selected: {_pageMode},
+          onSelectionChanged: (selection) {
+            setState(() {
+              _pageMode = selection.first;
+              // The new pager needs a position pointed at the chapter the
+              // reader was last on; otherwise it always opens at page 0.
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  _jumpToInitialPosition();
+                }
+              });
+            });
+          },
+        ),
+      ],
+    );
+  }
+}
+
+// Renders a single "page" inside the paged reader mode (horizontal / curl).
+//
+// Each page is typically one chapter: the chapter heading sits at the top, and
+// every paragraph of that chapter stacks underneath inside a scroll view.
+// Keeping the inner content scrollable lets long chapters remain readable
+// without overflowing the page. [curl] applies a 3D rotation around the page's
+// left edge as the user drags the PageView, producing a flip-book feel.
+class _PagedPage extends StatelessWidget {
+  const _PagedPage({
+    super.key,
+    required this.items,
+    required this.curl,
+    required this.pageController,
+    required this.index,
+    required this.fontSize,
+    required this.activeParagraphId,
+    required this.onParagraphTap,
+    required this.onParagraphPlayFrom,
+    required this.playingParagraphKeyBuilder,
+    required this.playbackStarting,
+  });
+
+  final List<ReaderContentItem> items;
+  final bool curl;
+  final PageController pageController;
+  final int index;
+  final double fontSize;
+  final int? activeParagraphId;
+  final ValueChanged<ReaderParagraph> onParagraphTap;
+  final ValueChanged<ReaderParagraph> onParagraphPlayFrom;
+  final String? Function() playingParagraphKeyBuilder;
+  final bool playbackStarting;
+
+  // Borrowing the playing-paragraph key from the parent keeps the paged view
+  // in lock-step with the scroll view: the parent owns the playback cursor so
+  // the key has already been computed once. Empty string means "no playing
+  // paragraph", which [_ParagraphTile] reflects by skipping its highlight.
+  String _playingParagraphKey(ReaderParagraph paragraph) {
+    final direct = playingParagraphKeyBuilder();
+    if (direct == null) return '';
+    final cursorKey =
+        'playing-paragraph-${paragraph.chapterId}-${paragraph.index}';
+    return direct == cursorKey ? direct : '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final padding = EdgeInsets.fromLTRB(20, 16, 20, 32);
+    final page = ColoredBox(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: SingleChildScrollView(
+        padding: padding,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final item in items) ..._buildItem(context, item),
+          ],
+        ),
+      ),
+    );
+    if (!curl) return page;
+    // Drive a 3D Y-rotation off the PageController position so the active
+    // page appears to pivot around its left edge as the user swipes — the
+    // cheap-but-coherent approximation of a turning page without bringing in
+    // a heavy animation dependency.
+    return AnimatedBuilder(
+      animation: pageController,
+      builder: (context, child) {
+        double delta = pageController.page ?? index.toDouble();
+        delta -= index;
+        final rotation = -delta * 1.2;
+        final perspective = Matrix4.identity()
+          ..setEntry(3, 2, 0.0015)
+          ..rotateY(rotation.clamp(-1.4, 1.4));
+        final tapped = delta.abs() < 0.05;
+        return Transform(
+          alignment: Alignment.centerLeft,
+          transform: perspective,
+          child: tapped
+              ? child
+              : Opacity(
+                  opacity: 1 - (delta.abs() * 0.4).clamp(0.0, 0.4),
+                  child: child,
+                ),
+        );
+      },
+      child: page,
+    );
+  }
+
+  List<Widget> _buildItem(BuildContext context, ReaderContentItem item) {
+    return switch (item) {
+      ReaderChapterHeadingItem(:final chapter) => [
+          Padding(
+            key: ValueKey<String>('chapter-heading-${chapter.id}'),
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              chapter.title,
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+          ),
+        ],
+      ReaderParagraphItem(:final paragraph) => [
+          _ParagraphTile(
+            key: ValueKey<String>(
+              paragraph.id == activeParagraphId
+                  ? 'active-paragraph-${paragraph.id}'
+                  : 'paragraph-${paragraph.id}',
+            ),
+            playingKey: _playingParagraphKey(paragraph),
+            paragraph: paragraph,
+            fontSize: fontSize,
+            active: paragraph.id == activeParagraphId,
+            playbackStarting: playbackStarting,
+            onTap: () => onParagraphTap(paragraph),
+            onPlayFrom: () => onParagraphPlayFrom(paragraph),
+          ),
+        ],
+      ReaderBookEndItem() => [
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 36),
+            child: Center(child: Text('全书读完')),
+          ),
+        ],
+    };
+  }
+}
+
+class _ParagraphTile extends StatelessWidget {
+  const _ParagraphTile({
+    super.key,
+    required this.playingKey,
+    required this.paragraph,
+    required this.fontSize,
+    required this.active,
+    required this.onTap,
+    required this.onPlayFrom,
+    required this.playbackStarting,
+  });
+
+  final String playingKey;
+  final ReaderParagraph paragraph;
+  final double fontSize;
+  final bool active;
+  final VoidCallback onTap;
+  final VoidCallback onPlayFrom;
+  final bool playbackStarting;
+
+  @override
+  Widget build(BuildContext context) {
+    final playing = playingKey.isNotEmpty;
+    return KeyedSubtree(
+      key: playingKey.isNotEmpty ? ValueKey<String>(playingKey) : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+            decoration: BoxDecoration(
+              color: playing
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : active
+                      ? Theme.of(context).colorScheme.secondaryContainer
+                      : null,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  paragraph.text,
+                  style: TextStyle(fontSize: fontSize, height: 1.8),
+                ),
+                if (active)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: playbackStarting ? null : onPlayFrom,
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('从这里朗读'),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

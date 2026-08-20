@@ -263,6 +263,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
             unawaited(_persistReadingPosition(database, paragraph));
           },
           onOpenPlayer: () => context.push('/player/${widget.bookId}'),
+          onStopPlayback: _stopPlayback,
           onPlayFrom: (paragraph) => unawaited(_playFrom(data, paragraph)),
           onLoadPrevious: window.loadPrevious,
           onLoadNext: window.loadNext,
@@ -443,6 +444,20 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(failure.message)));
+  }
+
+  // Tears down the current listening session without navigating away from the
+  // reader. Surfaced via the reader's listening controls so the user can leave
+  // narration without first opening the full player page. The cursor is
+  // cleared optimistically; the runtime will follow with `handler.stop()` and
+  // publish a null cursor, which the existing stream listener will pick up.
+  void _stopPlayback() {
+    final runtime = ref.read(playbackRuntimeProvider);
+    if (runtime == null) {
+      return;
+    }
+    setState(() => _playbackCursor = null);
+    unawaited(runtime.handler.stop().then<void>((_) {}, onError: (_) {}));
   }
 
   void _backToLibrary() {

@@ -189,7 +189,7 @@ void main() {
     );
 
     final playButton = find.byWidgetPredicate(
-      (widget) => widget is IconButton && widget.tooltip == '播放',
+      (widget) => widget is IconButton && widget.tooltip == '听书',
     );
     expect(tester.widget<IconButton>(playButton).onPressed, isNull);
     expect(
@@ -587,7 +587,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
     final visibleParagraphId = reported?.id;
     await _showReaderToolbar(tester);
-    await tester.tap(find.byTooltip('播放'));
+    await tester.tap(find.byTooltip('听书'));
 
     expect(visibleParagraphId, isNotNull);
     expect(played?.id, visibleParagraphId);

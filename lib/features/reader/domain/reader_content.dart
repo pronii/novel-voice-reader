@@ -1,3 +1,13 @@
+/// Page rendering style for the reader.
+///
+/// * [scroll] keeps the existing long-form vertical list — the reader scrolls
+///   naturally and paragraphs flow continuously.
+/// * [horizontal] paginates per chapter so a horizontal swipe advances to the
+///   next chapter (or back) like turning a section.
+/// * [curl] keeps the same per-chapter pagination but applies a 3D rotation on
+///   the active page so the swipe feels like flipping a real page.
+enum ReaderPageMode { scroll, horizontal, curl }
+
 final class ReaderChapter {
   const ReaderChapter({
     required this.id,
