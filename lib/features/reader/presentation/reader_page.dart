@@ -622,9 +622,13 @@ final class _ReaderPageState extends State<ReaderPage> {
       if (scrollDelta != null && scrollDelta != 0) {
         _scrollMoved = true;
         _invalidatePendingProgressReport();
-        // Track the user's last manual interaction so the playback-follow
-        // heartbeat can stop re-centering while the user is actively reading.
-        _lastUserScrollAt = DateTime.now();
+        // Only a drag actually driven by the user counts as a manual
+        // interaction. Programmatic scrolls (the follow-heartbeat's
+        // scrollTo) must NOT refresh the timestamp, otherwise the heartbeat
+        // would think the user is engaged and stop re-centring.
+        if (notification.dragDetails != null) {
+          _lastUserScrollAt = DateTime.now();
+        }
       }
     } else if (notification is ScrollEndNotification) {
       // Let the crawl resume after the swipe (and any fling) has stopped.
@@ -937,9 +941,14 @@ final class _ReaderPageState extends State<ReaderPage> {
     final last = _lastUserScrollAt;
     final idle =
         last == null || DateTime.now().difference(last) > _followIdleThreshold;
-    if (autoScrollOn && !idle) {
-      // Auto-scroll is actively paging the screen and the user is engaged:
-      // leave well enough alone.
+    if (autoScrollOn) {
+      // Auto-scroll is actively paging the screen: it drives the viewport
+      // itself, so the heartbeat leaves it alone.
+      return;
+    }
+    if (!idle) {
+      // The user scrolled manually within the idle threshold: give them the
+      // screen. Only re-centre once they stop interacting for a while.
       return;
     }
 
