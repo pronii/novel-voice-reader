@@ -99,6 +99,18 @@ final class BackgroundAudioSession {
     return false;
   }
 
+  /// Deactivates the audio session after playback has been fully stopped
+  /// (e.g. the sleep timer expired and the user is done listening).
+  ///
+  /// While the session stays active iOS keeps the app in a running
+  /// background-audio state even after the keep-alive loop has been paused,
+  /// which wastes battery. Deactivating lets the OS suspend the app; the next
+  /// [ensureActive] on a fresh play request re-activates it.
+  Future<void> deactivate() async {
+    await _delegate.setActive(false);
+    _telemetry.record('session.deactivate');
+  }
+
   static const int _activationAttempts = 3;
 }
 

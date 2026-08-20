@@ -136,6 +136,7 @@ Future<void> main() async {
         telemetry: telemetry,
       ),
       audioCacheRuntime: audioCacheRuntime,
+      backgroundAudioSession: audioSession,
       telemetry: telemetry,
     ),
   );

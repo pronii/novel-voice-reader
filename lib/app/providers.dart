@@ -5,6 +5,7 @@ import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetr
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/playback/application/sleep_timer_controller.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
+import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/domain/reader_content.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
@@ -12,6 +13,13 @@ import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 final databaseProvider = Provider<AppDatabase?>((ref) => null);
 final playbackRuntimeProvider = Provider<PlaybackRuntime?>((ref) => null);
 final audioCacheRuntimeProvider = Provider<AudioCacheRuntime?>((ref) => null);
+
+/// The shared background audio session. Overridden in [NovelVoiceReaderApp]
+/// with the session created at startup; a no-op default keeps widgets and
+/// tests independent of platform audio.
+final backgroundAudioSessionProvider = Provider<BackgroundAudioSession?>(
+  (ref) => null,
+);
 
 /// Background-playback diagnostics sink. Overridden in [NovelVoiceReaderApp]
 /// with the real buffered/uploading implementation; a no-op by default so
@@ -30,6 +38,14 @@ final sleepTimerControllerProvider = Provider<SleepTimerController>((ref) {
   final controller = SleepTimerController(
     onExpire: () async {
       await runtime?.handler.stop();
+      // The sleep timer expiring means the user is done listening. The
+      // sustainer pauses the inaudible keep-alive loop on stop, but it keeps
+      // the audio session active by design (for a quick resume). On iOS an
+      // active session with no output keeps the app in the running
+      // background-audio state and drains the battery; deactivate it so the OS
+      // can suspend the app. The next play request re-activates via
+      // BackgroundPlaybackSustainer.ensureActive.
+      await ref.read(backgroundAudioSessionProvider)?.deactivate();
     },
     currentChapterId: () => runtime?.currentCursor?.chapterId,
     cursorChanges: () =>

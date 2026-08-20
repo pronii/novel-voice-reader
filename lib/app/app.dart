@@ -11,6 +11,7 @@ import 'package:novel_voice_reader/features/diagnostics/application/background_f
 import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
+import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';
 
 final class NovelVoiceReaderApp extends StatefulWidget {
   const NovelVoiceReaderApp({
@@ -18,12 +19,14 @@ final class NovelVoiceReaderApp extends StatefulWidget {
     this.database,
     this.playbackRuntime,
     this.audioCacheRuntime,
+    this.backgroundAudioSession,
     this.telemetry = const NoopPlaybackTelemetry(),
   });
 
   final AppDatabase? database;
   final PlaybackRuntime? playbackRuntime;
   final AudioCacheRuntime? audioCacheRuntime;
+  final BackgroundAudioSession? backgroundAudioSession;
   final PlaybackTelemetry telemetry;
 
   @override
@@ -99,6 +102,9 @@ final class _NovelVoiceReaderAppState extends State<NovelVoiceReaderApp>
         databaseProvider.overrideWithValue(widget.database),
         playbackRuntimeProvider.overrideWithValue(widget.playbackRuntime),
         audioCacheRuntimeProvider.overrideWithValue(widget.audioCacheRuntime),
+        backgroundAudioSessionProvider.overrideWithValue(
+          widget.backgroundAudioSession,
+        ),
         playbackTelemetryProvider.overrideWithValue(widget.telemetry),
       ],
       child: MaterialApp.router(
