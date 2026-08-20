@@ -514,11 +514,16 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   Widget _buildParagraph(BuildContext context, ReaderParagraph paragraph) {
-    final active = paragraph.id == _activeParagraphId;
+    // The "selected / read-from-here" highlight and its "从这里朗读" button
+    // are only meaningful before playback has started: once the user is
+    // listening, the playing-paragraph highlight and the playback controls
+    // take over, and the read-from-here affordance would just clutter the
+    // page. While listening, suppress the active style entirely.
     final playing =
         widget.playbackActive &&
         widget.playbackCursor?.chapterId == paragraph.chapterId &&
         widget.playbackCursor?.paragraphIndex == paragraph.index;
+    final active = !widget.playbackActive && paragraph.id == _activeParagraphId;
     return KeyedSubtree(
       key: playing
           ? ValueKey<String>(
