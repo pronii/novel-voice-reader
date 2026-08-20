@@ -24,3 +24,9 @@ outputs/
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Android signing secrets — never commit the keystore or its credentials
+/android/key.properties
+/android/app/key.properties
+*.keystore
+*.jks
