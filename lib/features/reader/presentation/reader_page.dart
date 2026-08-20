@@ -259,8 +259,8 @@ final class _ReaderPageState extends State<ReaderPage> {
                                     : _playActive),
                             icon: Icon(
                               widget.playbackActive
-                                  ? Icons.headphones_off
-                                  : Icons.headphones,
+                                  ? Icons.stop
+                                  : Icons.headset,
                             ),
                           ),
                         ],
@@ -435,7 +435,7 @@ final class _ReaderPageState extends State<ReaderPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    Icons.headphones_off,
+                    Icons.stop,
                     size: 20,
                     color: theme.colorScheme.onSurface,
                   ),
