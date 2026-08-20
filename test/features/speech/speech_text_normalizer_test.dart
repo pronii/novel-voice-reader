@@ -53,10 +53,12 @@ void main() {
       expect(normalizer.normalizeForTts('...'), '——');
       expect(normalizer.normalizeForTts('......'), '——');
       expect(normalizer.normalizeForTts('我......没事'), '我——没事');
-      // 2+ 个 U+2026 → 破折号
+      // 任意个 U+2026（含独立成行的省略号）→ 破折号
       expect(normalizer.normalizeForTts('他砰的一声……'), '他砰的一声——');
-      // 单 U+2026 保留(短停顿)
-      expect(normalizer.normalizeForTts('嗯…好吧'), '嗯…好吧');
+      expect(normalizer.normalizeForTts('嗯…好吧'), '嗯——好吧');
+      // 单独成行的省略号（常见段落分隔）→ 破折号
+      expect(normalizer.normalizeForTts('……'), '——');
+      expect(normalizer.normalizeForTts('…'), '——');
     });
 
     test('compresses 3+ repeated Chinese characters to two', () {

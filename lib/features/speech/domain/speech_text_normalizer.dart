@@ -12,7 +12,7 @@ final class SpeechTextNormalizer {
   static const _smallUnits = ['', '十', '百', '千'];
   static const _bigUnits = ['', '万', '亿'];
 
-  static final _ellipsisPattern = RegExp(r'\.{3,}|…{2,}');
+  static final _ellipsisPattern = RegExp(r'\.{3,}|…+');
   static final _repeatedCharPattern = RegExp(r'([\u4e00-\u9fa5])\1{2,}');
   static final _percentPattern = RegExp(r'(\d+(?:\.\d+)?)%');
   static final _decimalPattern = RegExp(r'\d+\.\d+');

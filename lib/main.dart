@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
@@ -39,7 +40,13 @@ Future<void> main() async {
   // (afterFirstUnlock) so locked-screen background synthesis can read them
   // without hitting errSecInteractionNotAllowed (-25308). Runs while the app is
   // foregrounded and unlocked, so the read/write succeeds.
-  await credentials.upgradeKeychainAccessibility();
+  //
+  // Run this in the background so it does not block cold start. Keychain work
+  // is per-key and can take hundreds of milliseconds; the upgrade is
+  // idempotent and only meaningful on the first launch after an install that
+  // used an older accessibility class, so it can safely happen after the UI
+  // is already visible.
+  unawaited(credentials.upgradeKeychainAccessibility());
   final audioCacheRuntime = AudioCacheRuntime(
     database: database,
     cacheDirectoryForBook: (bookId) =>
