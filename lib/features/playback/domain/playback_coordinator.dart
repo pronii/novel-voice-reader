@@ -78,7 +78,7 @@ final class PlaybackCoordinator implements PlaybackController {
     void Function(AppFailure failure)? onFailure,
     PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
     Duration watchdogGrace = const Duration(seconds: 15),
-    int maxSegmentRetries = 2,
+    int maxSegmentRetries = 1,
     WatchdogTimerFactory scheduleWatchdog = _defaultScheduleWatchdog,
     PlaybackRetryDelay retryDelay = _defaultRetryDelay,
   }) {
@@ -661,7 +661,14 @@ final class PlaybackCoordinator implements PlaybackController {
   }
 
   Duration _watchdogTimeoutFor(SpeechSegment segment) {
-    const microsPerCharacter = 240000;
+    // Conservative estimate (~2.5 chars/sec). Narration with tone words,
+    // pauses and punctuation runs slower than the naive 4 chars/sec, and on a
+    // locked iOS screen position events are throttled so the watchdog is not
+    // extended by live timeline updates. An over-eager timeout made the
+    // recovery path replay the current segment (up to 3 plays for one
+    // sentence) — the "repeats a sentence / talks gibberish" reports. Keep the
+    // margin wide so a real stall is required before the watchdog fires.
+    const microsPerCharacter = 400000;
     final characters = segment.text.runes.length;
     final speed = _speed <= 0 ? 1.0 : _speed;
     final estimate = Duration(

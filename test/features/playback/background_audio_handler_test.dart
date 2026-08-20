@@ -245,8 +245,8 @@ void main() {
 
     // Transient failures are retried; only once retries are exhausted does the
     // failure surface and reset the playing state. Fail the current segment
-    // enough times to exceed the retry budget (initial + 2 retries).
-    for (var attempt = 0; attempt < 3; attempt++) {
+    // enough times to exceed the retry budget (initial + 1 retry).
+    for (var attempt = 0; attempt < 2; attempt++) {
       provider.fail(provider.prepared.last.id);
       await pumpEventQueue();
     }
@@ -278,7 +278,7 @@ void main() {
 
     // ...and an exhausted failure names why it goes back to false, which is the
     // signal the lock-screen diagnosis was blind to.
-    for (var attempt = 0; attempt < 3; attempt++) {
+    for (var attempt = 0; attempt < 2; attempt++) {
       provider.fail(provider.prepared.last.id);
       await pumpEventQueue();
     }
