@@ -364,7 +364,7 @@ void main() {
     await tester.tap(find.text('第二章'));
     await _pumpUntilFound(
       tester,
-      find.byKey(ValueKey<String>('active-paragraph-$secondParagraphId')),
+      find.byKey(ValueKey<String>('paragraph-$secondParagraphId')),
     );
 
     await _showReaderToolbar(tester);
@@ -373,7 +373,7 @@ void main() {
     await tester.tap(find.text('切章测试书'));
     await _pumpUntilFound(
       tester,
-      find.byKey(ValueKey<String>('active-paragraph-$secondParagraphId')),
+      find.byKey(ValueKey<String>('paragraph-$secondParagraphId')),
     );
 
     await tester.pumpWidget(const SizedBox.shrink());

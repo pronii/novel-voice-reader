@@ -157,7 +157,10 @@ void main() {
   ) async {
     await tester.pumpWidget(
       MaterialApp(
-        home: _reader(paragraphs: _paragraphs(10, ['第一段。', '第二段。'])),
+        home: _reader(
+          paragraphs: _paragraphs(10, ['第一段。', '第二段。']),
+          playbackActive: true,
+        ),
       ),
     );
 
@@ -184,6 +187,7 @@ void main() {
         home: _reader(
           paragraphs: _paragraphs(10, ['第一段。']),
           playbackStarting: true,
+          playbackActive: true,
         ),
       ),
     );
@@ -204,7 +208,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(home: _reader(paragraphs: _paragraphs(10, ['第一段。', '第二段。']))),
+      MaterialApp(home: _reader(paragraphs: _paragraphs(10, ['第一段。', '第二段。']), playbackActive: true)),
     );
 
     await tester.tap(find.text('第二段。'));
@@ -219,6 +223,26 @@ void main() {
       find.byKey(const ValueKey<String>('active-paragraph-100')),
       findsNothing,
     );
+  });
+
+  testWidgets('tapping a paragraph before listening does not highlight it or show read-from-here', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: _reader(paragraphs: _paragraphs(10, ['第一段。', '第二段。']))),
+    );
+
+    await tester.tap(find.text('第二段。'));
+    await tester.pump();
+
+    // Before entering listen mode the page is pure text: no active
+    // highlight, and no "从这里朗读" button. The only way into listening is
+    // the dedicated 听小说 button.
+    expect(
+      find.byKey(const ValueKey<String>('active-paragraph-101')),
+      findsNothing,
+    );
+    expect(find.text('从这里朗读'), findsNothing);
   });
 
   testWidgets('highlights the currently playing paragraph independently', (
@@ -509,6 +533,7 @@ void main() {
         home: _reader(
           paragraphs: longParagraphs,
           initialCursor: const PlaybackCursor(chapterId: 10, paragraphIndex: 5),
+          playbackActive: true,
           onReadingPositionChanged: (paragraph) => reported.add(paragraph.id),
         ),
       ),
@@ -535,7 +560,7 @@ void main() {
   ) async {
     _useNarrowViewport(tester);
     await tester.pumpWidget(
-      MaterialApp(home: _reader(paragraphs: longParagraphs)),
+      MaterialApp(home: _reader(paragraphs: longParagraphs, playbackActive: true)),
     );
     await tester.pumpAndSettle();
 
@@ -624,6 +649,7 @@ void main() {
         home: _reader(
           paragraphs: longParagraphs,
           initialCursor: const PlaybackCursor(chapterId: 10, paragraphIndex: 5),
+          playbackActive: true,
           onReadingPositionChanged: (paragraph) => reported.add(paragraph.id),
         ),
       ),
@@ -697,6 +723,7 @@ void main() {
       MaterialApp(
         home: _reader(
           paragraphs: _paragraphs(10, ['第一段。']),
+          playbackActive: true,
           onReadingPositionChanged: (paragraph) => reported.add(paragraph.id),
         ),
       ),
@@ -733,6 +760,7 @@ ReaderPage _reader({
     paragraphIndex: 0,
   ),
   bool playbackStarting = false,
+  bool? playbackActive,
   PlaybackCursor? playbackCursor,
   ValueChanged<int>? onChapterSelected,
   ValueChanged<ReaderParagraph>? onReadingPositionChanged,
@@ -754,7 +782,7 @@ ReaderPage _reader({
     initialCursor: initialCursor,
     playbackStarting: playbackStarting,
     playbackCursor: playbackCursor,
-    playbackActive: playbackCursor != null,
+    playbackActive: playbackActive ?? playbackCursor != null,
     onChapterSelected: onChapterSelected,
     onReadingPositionChanged: onReadingPositionChanged,
     onPlayFrom: onPlayFrom,
