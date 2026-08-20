@@ -267,6 +267,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
           },
           onOpenPlayer: () => context.push('/player/${widget.bookId}'),
           onPlayFrom: (paragraph) => unawaited(_playFrom(data, paragraph)),
+          onListenFrom: (start) => unawaited(_listenFrom(data, start)),
           onLoadPrevious: window.loadPrevious,
           onLoadNext: window.loadNext,
           onPlaybackChapterNeeded: _ensurePlaybackChapter,
@@ -321,6 +322,37 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
       return;
     }
     await window.centerOn(chapterId: chapterId, resetNavigation: false);
+  }
+
+  /// Starts listening from the given cursor: ensures the target chapter is
+  /// loaded, resolves the paragraph, then kicks off playback via [_playFrom].
+  Future<void> _listenFrom(ReaderPageData data, PlaybackCursor start) async {
+    final window = _chapterWindow;
+    if (window == null) {
+      return;
+    }
+    if (!window.sections.any((section) => section.chapter.id == start.chapterId)) {
+      await window.centerOn(
+        chapterId: start.chapterId,
+        resetNavigation: false,
+      );
+    }
+    final section = _chapterWindow?.sections
+        .where((s) => s.chapter.id == start.chapterId)
+        .firstOrNull;
+    ReaderParagraph? paragraph;
+    if (section != null) {
+      for (final p in section.paragraphs) {
+        if (p.index == start.paragraphIndex) {
+          paragraph = p;
+          break;
+        }
+      }
+    }
+    if (paragraph == null) {
+      return;
+    }
+    await _playFrom(data, paragraph);
   }
 
   Future<void> _playFrom(ReaderPageData data, ReaderParagraph paragraph) async {

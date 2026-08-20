@@ -16,6 +16,7 @@ typedef ReaderEdgeLoadCallback =
     });
 
 typedef ReaderPlaybackChapterCallback = Future<void> Function(int chapterId);
+typedef ReaderListenCallback = void Function(PlaybackCursor start);
 
 final class ReaderPage extends StatefulWidget {
   const ReaderPage({
@@ -35,6 +36,7 @@ final class ReaderPage extends StatefulWidget {
     this.onVisibleChapterChanged,
     this.onReadingPositionChanged,
     this.onPlayFrom,
+    this.onListenFrom,
     this.onOpenPlayer,
     this.onLoadPrevious,
     this.onLoadNext,
@@ -56,6 +58,10 @@ final class ReaderPage extends StatefulWidget {
   final ValueChanged<int>? onVisibleChapterChanged;
   final ValueChanged<ReaderParagraph>? onReadingPositionChanged;
   final ValueChanged<ReaderParagraph>? onPlayFrom;
+  /// Starts listening from the given position. The reader page shows a
+  /// dedicated "listen" entry (instead of auto-entering playback) and lets
+  /// the user pick where to start; the actual playback is kicked off here.
+  final ReaderListenCallback? onListenFrom;
   final VoidCallback? onOpenPlayer;
   final ReaderEdgeLoadCallback? onLoadPrevious;
   final ReaderEdgeLoadCallback? onLoadNext;
@@ -191,6 +197,8 @@ final class _ReaderPageState extends State<ReaderPage> {
   Widget build(BuildContext context) {
     final items = _items;
     return Scaffold(
+      floatingActionButton: _buildListenButton(context),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       body: SafeArea(
         child: Stack(
           children: [
@@ -827,6 +835,76 @@ final class _ReaderPageState extends State<ReaderPage> {
     _progressDebounce?.cancel();
     _progressDebounce = null;
     _pendingProgressParagraph = null;
+  }
+
+  // A prominent "listen" entry point. Opening a book no longer drops the user
+  // straight into playback; they read the page and, when they want to listen,
+  // tap this button and pick a starting position.
+  Widget _buildListenButton(BuildContext context) {
+    if (widget.playbackActive) {
+      // Already listening — the toolbar play/pause controls take over.
+      return const SizedBox.shrink();
+    }
+    return FloatingActionButton.extended(
+      key: const Key('reader-listen-button'),
+      onPressed: _showListenStartSheet,
+      icon: const Icon(Icons.headphones),
+      label: const Text('听小说'),
+    );
+  }
+
+  Future<void> _showListenStartSheet() async {
+    final chapters = widget.chapters;
+    if (chapters.isEmpty) {
+      return;
+    }
+    final initial = widget.initialCursor;
+    final start = await showModalBottomSheet<PlaybackCursor>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                '从哪里开始听？',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.replay),
+              title: const Text('从头开始听'),
+              subtitle: const Text('从本书第一章第一段开始'),
+              onTap: () => Navigator.pop(
+                sheetContext,
+                PlaybackCursor(
+                  chapterId: chapters.first.id,
+                  paragraphIndex: 0,
+                ),
+              ),
+            ),
+            if (initial != null)
+              ListTile(
+                leading: const Icon(Icons.history),
+                title: const Text('从上次读到'),
+                subtitle:
+                    Text('第${initial.chapterId}章 · 第${initial.paragraphIndex + 1}段'),
+                onTap: () => Navigator.pop(sheetContext, initial),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (start != null && mounted) {
+      // Reset the manual-scroll timestamp so the follow heartbeat re-centres
+      // the playing paragraph right away.
+      _lastUserScrollAt = null;
+      _playbackFollow = true;
+      widget.onListenFrom?.call(start);
+    }
   }
 
   void _playActive() {
