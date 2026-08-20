@@ -86,7 +86,7 @@ void main() {
 
     expect(find.text('第一章'), findsWidgets);
     expect(find.byTooltip('返回书架'), findsOneWidget);
-    expect(find.byTooltip('播放'), findsOneWidget);
+    expect(find.byTooltip('听书'), findsOneWidget);
     expect(find.byTooltip('播放器'), findsOneWidget);
 
     await tester.tap(find.byTooltip('返回书架'));
