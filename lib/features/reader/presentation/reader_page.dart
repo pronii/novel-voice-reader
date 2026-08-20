@@ -631,6 +631,12 @@ final class _ReaderPageState extends State<ReaderPage> {
         }
       }
     } else if (notification is ScrollEndNotification) {
+      // The gesture is over. Re-arm the playback-follow heartbeat so it
+      // starts re-centring the playing paragraph again (it is suspended
+      // during a drag to avoid fighting the swipe). The comment in
+      // ScrollStart promised "picks back up on its own once the drag
+      // settles" - this is where that promise is kept.
+      _playbackFollow = true;
       // Let the crawl resume after the swipe (and any fling) has stopped.
       _autoScroll.notifyUserInteractionEnd();
       final scrollMoved = _scrollMoved;
@@ -970,9 +976,11 @@ final class _ReaderPageState extends State<ReaderPage> {
       );
       return;
     }
-    // Treat the central band of the viewport (≈ ±15% from the middle) as
-    // "already centred" so we don't fight tiny layout shifts or jitter.
-    const nearCenter = 0.15;
+    // Treat only a narrow band around the viewport middle (≈ ±5%) as
+    // "already centred" - the heartbeat should snap any meaningful drift
+    // back to the centre, not leave the paragraph sitting in the top
+    // quarter of the screen.
+    const nearCenter = 0.05;
     final leading = pos.itemLeadingEdge;
     final trailing = pos.itemTrailingEdge;
     if (leading > 0.5 - nearCenter && trailing < 0.5 + nearCenter) {

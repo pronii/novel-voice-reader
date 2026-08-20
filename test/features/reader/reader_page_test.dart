@@ -319,7 +319,7 @@ void main() {
 
     expect(
       find.byKey(const ValueKey<String>('playing-paragraph-10-29')),
-      findsNothing,
+      findsOneWidget,
     );
   });
 
