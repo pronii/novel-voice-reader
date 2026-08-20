@@ -90,6 +90,17 @@ final class _ReaderPageState extends State<ReaderPage> {
   // True when revealing the menu bar auto-paused a running crawl, so hiding the
   // menu can resume it — but only if the reader didn't stop/pause it meanwhile.
   bool _autoScrollPausedByToolbar = false;
+  // Wall-clock time of the most recent user-driven scroll. Null while the user
+  // has never scrolled in this page session; the follow timer treats null the
+  // same as "idle for a very long time" so a fresh reader page re-centres
+  // playback immediately when auto-scroll is off.
+  DateTime? _lastUserScrollAt;
+  // 1 Hz re-centering heartbeat. While auto-scroll is off, or the user has
+  // been idle for more than [_followIdleThreshold], the playing paragraph is
+  // recentred every tick if it drifts off-screen.
+  Timer? _followPlaybackTimer;
+  static const Duration _followTickInterval = Duration(seconds: 1);
+  static const Duration _followIdleThreshold = Duration(seconds: 10);
   int? _bodyPointerId;
   Offset? _bodyPointerDownPosition;
   bool _bodyPointerTapEligible = false;
@@ -116,6 +127,12 @@ final class _ReaderPageState extends State<ReaderPage> {
     _resetNavigationState();
     _itemPositions.itemPositions.addListener(_onItemPositionsChanged);
     _autoScroll.addListener(_onAutoScrollChanged);
+    _followPlaybackTimer = Timer.periodic(
+      _followTickInterval,
+      (_) {
+        _maybeFollowPlaybackCenter();
+      },
+    );
     if (widget.playbackCursor != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -156,6 +173,8 @@ final class _ReaderPageState extends State<ReaderPage> {
     // background after the page is gone.
     _autoScroll.removeListener(_onAutoScrollChanged);
     _autoScroll.dispose();
+    _followPlaybackTimer?.cancel();
+    _followPlaybackTimer = null;
     final pendingParagraph = _pendingProgressParagraph;
     _progressDebounce?.cancel();
     _progressDebounce = null;
@@ -603,6 +622,9 @@ final class _ReaderPageState extends State<ReaderPage> {
       if (scrollDelta != null && scrollDelta != 0) {
         _scrollMoved = true;
         _invalidatePendingProgressReport();
+        // Track the user's last manual interaction so the playback-follow
+        // heartbeat can stop re-centering while the user is actively reading.
+        _lastUserScrollAt = DateTime.now();
       }
     } else if (notification is ScrollEndNotification) {
       // Let the crawl resume after the swipe (and any fling) has stopped.
@@ -889,7 +911,67 @@ final class _ReaderPageState extends State<ReaderPage> {
     }
     await _itemScrollController.scrollTo(
       index: index,
-      alignment: 0.35,
+      alignment: 0.5,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOut,
+    );
+  }
+
+  /// Heartbeat invoked every [_followTickInterval] while the reader page is
+  /// alive. Re-centers the playing paragraph in the viewport whenever:
+  ///  - auto-scroll is off, or
+  ///  - the user has not scrolled manually for at least
+  ///    [_followIdleThreshold].
+  /// The check is cheap (one position lookup) and a no-op when the paragraph
+  /// is already inside the central band of the viewport, so the heartbeat is
+  /// safe to run on a 1 Hz interval without any visible "snapping".
+  Future<void> _maybeFollowPlaybackCenter() async {
+    if (!mounted) return;
+    if (!_playbackFollow) return;
+    final cursor = widget.playbackCursor;
+    if (cursor == null || !widget.playbackActive) return;
+    final index = _playingParagraphIndex(cursor);
+    if (index < 0 || !_itemScrollController.isAttached) return;
+
+    final autoScrollOn = _autoScroll.isRunning;
+    final last = _lastUserScrollAt;
+    final idle =
+        last == null || DateTime.now().difference(last) > _followIdleThreshold;
+    if (autoScrollOn && !idle) {
+      // Auto-scroll is actively paging the screen and the user is engaged:
+      // leave well enough alone.
+      return;
+    }
+
+    final visible = _visiblePositions();
+    ItemPosition? pos;
+    for (final p in visible) {
+      if (p.index == index) {
+        pos = p;
+        break;
+      }
+    }
+    if (pos == null) {
+      // Paragraph isn't even on screen — re-centre it.
+      await _itemScrollController.scrollTo(
+        index: index,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOut,
+      );
+      return;
+    }
+    // Treat the central band of the viewport (≈ ±15% from the middle) as
+    // "already centred" so we don't fight tiny layout shifts or jitter.
+    const nearCenter = 0.15;
+    final leading = pos.itemLeadingEdge;
+    final trailing = pos.itemTrailingEdge;
+    if (leading > 0.5 - nearCenter && trailing < 0.5 + nearCenter) {
+      return;
+    }
+    await _itemScrollController.scrollTo(
+      index: index,
+      alignment: 0.5,
       duration: const Duration(milliseconds: 240),
       curve: Curves.easeOut,
     );
