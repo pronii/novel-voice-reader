@@ -46,6 +46,12 @@ android {
         release {
             if (keystorePropertiesFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
+            } else {
+                // No keystore configured (e.g. CI): fall back to the debug
+                // key so a --release APK stays installable and can cover an
+                // existing debug install. Swap in a real keystore for store
+                // releases via key.properties.
+                signingConfig = signingConfigs.getByName("debug")
             }
         }
     }
