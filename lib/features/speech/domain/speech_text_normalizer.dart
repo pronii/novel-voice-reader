@@ -12,6 +12,8 @@ final class SpeechTextNormalizer {
   static const _smallUnits = ['', '十', '百', '千'];
   static const _bigUnits = ['', '万', '亿'];
 
+  static final _ellipsisPattern = RegExp(r'\.{3,}|…{2,}');
+  static final _repeatedCharPattern = RegExp(r'([\u4e00-\u9fa5])\1{2,}');
   static final _percentPattern = RegExp(r'(\d+(?:\.\d+)?)%');
   static final _decimalPattern = RegExp(r'\d+\.\d+');
   static final _yearPattern = RegExp(r'(\d{4})年');
@@ -20,6 +22,17 @@ final class SpeechTextNormalizer {
   String normalizeForTts(String text) {
     if (text.isEmpty) return text;
     var result = text;
+    // 省略号(……或 3+ 个点)统一为破折号——TTS 看到纯停顿符不会再发出拟声音
+    result = result.replaceAllMapped(
+      _ellipsisPattern,
+      (_) => '——',
+    );
+    // 叠字压缩:3+ 个连续同字(如嗖嗖嗖、啊啊啊、哈哈哈)→ 2 个,
+    // 避免 TTS 拉长或拟声化(读成"咻咻咻"之类)
+    result = result.replaceAllMapped(
+      _repeatedCharPattern,
+      (match) => '${match.group(1)}${match.group(1)}',
+    );
     // 50% → 百分之五十；12.5% → 百分之十二点五
     result = result.replaceAllMapped(
       _percentPattern,

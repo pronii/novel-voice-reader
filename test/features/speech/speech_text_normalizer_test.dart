@@ -48,6 +48,35 @@ void main() {
       expect(normalizer.normalizeForTts('他笑了笑，说道：“好。”'), '他笑了笑，说道：“好。”');
     });
 
+    test('collapses ellipsis into an em dash', () {
+      // ASCII 3+ dots → 破折号
+      expect(normalizer.normalizeForTts('...'), '——');
+      expect(normalizer.normalizeForTts('......'), '——');
+      expect(normalizer.normalizeForTts('我......没事'), '我——没事');
+      // 2+ 个 U+2026 → 破折号
+      expect(normalizer.normalizeForTts('他砰的一声……'), '他砰的一声——');
+      // 单 U+2026 保留(短停顿)
+      expect(normalizer.normalizeForTts('嗯…好吧'), '嗯…好吧');
+    });
+
+    test('compresses 3+ repeated Chinese characters to two', () {
+      expect(normalizer.normalizeForTts('嗖嗖嗖'), '嗖嗖');
+      expect(normalizer.normalizeForTts('啊啊啊'), '啊啊');
+      expect(normalizer.normalizeForTts('哈哈哈！'), '哈哈！');
+      expect(normalizer.normalizeForTts('砰砰砰三声'), '砰砰三声');
+      // 2 个不压缩
+      expect(normalizer.normalizeForTts('呵呵'), '呵呵');
+      // 不应破坏正常 2 字叠用
+      expect(normalizer.normalizeForTts('他独自自出发'), '他独自自出发');
+    });
+
+    test('applies tone-word rules in mixed context', () {
+      expect(
+        normalizer.normalizeForTts('嗖嗖嗖的风声……他嗖嗖嗖的跑过去'),
+        '嗖嗖的风声——他嗖嗖的跑过去',
+      );
+    });
+
     test('is idempotent', () {
       const input = '他生于1990年，身高180.5cm，体重72kg，达标率95%。';
       final once = normalizer.normalizeForTts(input);

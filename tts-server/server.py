@@ -153,6 +153,11 @@ def _cn_number(value):
 def normalize_cn_text(text):
     if not text:
         return text
+    # 省略号(……或 3+ 个点)统一为破折号——TTS 看到纯停顿符不会再发出拟声音
+    text = re.sub(r'\.{3,}|…{2,}', '——', text)
+    # 叠字压缩:3+ 个连续同字(如嗖嗖嗖、啊啊啊)→ 2 个,
+    # 避免 TTS 拉长或拟声化
+    text = re.sub(r'([\u4e00-\u9fa5])\1{2,}', lambda m: m.group(1) * 2, text)
     text = re.sub(r'(\d+(?:\.\d+)?)%', lambda m: '百分之' + _cn_number(m.group(1)), text)
     text = re.sub(r'\d+\.\d+', lambda m: _cn_number(m.group(0)), text)
     text = re.sub(r'(\d{4})年', lambda m: _cn_digits(m.group(1)) + '年', text)
@@ -191,7 +196,7 @@ def synth(job, idx, token):
             payload = {
                 'model': row['model'],
                 'messages': [
-                    {'role': 'user', 'content': '使用自然、沉稳、清晰的小说旁白语气朗读，根据正文情绪自然调整语速、停顿和语气，不要过度夸张。正文中的语气词和拟声词（如“啊、呀、哦、轰、砰、咚、啪”）请用平稳、克制的叙述语气带过，不要夸张演绎、拉长音或突然变调。'},
+                    {'role': 'user', 'content': '使用自然、沉稳、清晰的小说旁白语气朗读，根据正文情绪自然调整语速、停顿和语气，不要过度夸张。正文处理规则：1) 语气词（啊、呀、哦、嗯、唉、哎）和拟声词（轰、砰、咚、啪、嗖、嘶、咻、哧、鸣、呜）一律用平稳、克制的叙述语气带过，不要夸张演绎、拉长音或模拟音效；2) 叠字描写（如嗖嗖嗖、啊啊啊、哈哈哈、砰砰砰）按字逐个平稳读出，音长一致，禁止拟声化或拉长；3) 破折号"——"代表正常停顿（约 0.3 至 0.5 秒），不要发出任何音；4) 遇到长串标点或重复符号按自然停顿处理，不要发出异常噪音或拟声音效。'},
                     {'role': 'assistant', 'content': seg['text']},
                 ],
                 'audio': {'format': row['fmt'], 'voice': row['voice']},
