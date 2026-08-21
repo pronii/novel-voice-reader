@@ -844,8 +844,10 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   // A prominent "listen" entry point. Opening a book no longer drops the user
-  // straight into playback; they read the page and, when they want to listen,
-  // tap this button and pick a starting position.
+  // straight into playback; tapping 听小说 starts listening immediately,
+  // matching how mainstream novel apps (起点读书 / 番茄小说 / 微信读书) behave:
+  // no "where to start" picker — it resumes from where the user is currently
+  // reading, or from the last saved position, or from the top of the book.
   Widget _buildListenButton(BuildContext context) {
     if (widget.playbackActive) {
       // Already listening — the toolbar play/pause controls take over.
@@ -853,64 +855,43 @@ final class _ReaderPageState extends State<ReaderPage> {
     }
     return FloatingActionButton.extended(
       key: const Key('reader-listen-button'),
-      onPressed: _showListenStartSheet,
+      onPressed: _startListening,
       icon: const Icon(Icons.headphones),
       label: const Text('听小说'),
     );
   }
 
-  Future<void> _showListenStartSheet() async {
-    final chapters = widget.chapters;
-    if (chapters.isEmpty) {
+  /// Starts listening immediately without asking where to begin:
+  /// 1. the currently visible top paragraph (what the user is reading now), or
+  ///    the paragraph they last tapped if it is still on screen;
+  /// 2. otherwise the last saved position;
+  /// 3. otherwise the very start of the book.
+  void _startListening() {
+    if (widget.chapters.isEmpty) {
       return;
     }
-    final initial = widget.initialCursor;
-    final start = await showModalBottomSheet<PlaybackCursor>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                '从哪里开始听？',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.replay),
-              title: const Text('从头开始听'),
-              subtitle: const Text('从本书第一章第一段开始'),
-              onTap: () => Navigator.pop(
-                sheetContext,
-                PlaybackCursor(
-                  chapterId: chapters.first.id,
-                  paragraphIndex: 0,
-                ),
-              ),
-            ),
-            if (initial != null)
-              ListTile(
-                leading: const Icon(Icons.history),
-                title: const Text('从上次读到'),
-                subtitle:
-                    Text('第${initial.chapterId}章 · 第${initial.paragraphIndex + 1}段'),
-                onTap: () => Navigator.pop(sheetContext, initial),
-              ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (start != null && mounted) {
-      // Reset the manual-scroll timestamp so the follow heartbeat re-centres
-      // the playing paragraph right away.
-      _lastUserScrollAt = null;
-      _playbackFollow = true;
-      widget.onListenFrom?.call(start);
+    _lastUserScrollAt = null;
+    _playbackFollow = true;
+    final active = widget.sections
+        .expand((section) => section.paragraphs)
+        .where((paragraph) => paragraph.id == _activeParagraphId)
+        .firstOrNull;
+    final target = (active != null && _isParagraphVisible(active.id))
+        ? active
+        : _topVisibleParagraph();
+    if (target != null) {
+      _play(target);
+      return;
     }
+    // Nothing visible yet (still loading / empty window): fall back to the
+    // saved position, then the first paragraph of chapter one. onListenFrom
+    // resolves the chapter window if the target chapter is not loaded.
+    final start = widget.initialCursor ??
+        PlaybackCursor(
+          chapterId: widget.chapters.first.id,
+          paragraphIndex: 0,
+        );
+    widget.onListenFrom?.call(start);
   }
 
   void _playActive() {
