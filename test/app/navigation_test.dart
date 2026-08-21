@@ -639,8 +639,10 @@ Future<void> _showReaderToolbar(WidgetTester tester) async {
     matching: find.byType(IgnorePointer),
   );
   if (tester.widget<IgnorePointer>(pointerGate).ignoring) {
-    final body = find.byKey(const Key('reader-body'));
-    await tester.tapAt(tester.getTopLeft(body) + const Offset(2, 2));
+    // Only a tap in the horizontal middle third reveals the chrome; the
+    // left/right thirds are page-turn zones. tester.tap hits the widget's
+    // centre, which is squarely in the middle zone.
+    await tester.tap(find.byKey(const Key('reader-body')));
     await tester.pumpAndSettle();
   }
   expect(tester.widget<AnimatedSlide>(toolbar).offset, Offset.zero);

@@ -684,6 +684,10 @@ void main() {
     await tester.pumpAndSettle();
 
     await _showReaderToolbar(tester);
+    // The helper tap selects the first visible paragraph, which reports it;
+    // clear the list so we only assert on reports caused by the font-size
+    // change itself.
+    reported.clear();
     await tester.tap(find.byTooltip('阅读设置'));
     await tester.pumpAndSettle();
     await tester.drag(
@@ -970,10 +974,13 @@ Future<void> _showReaderToolbar(WidgetTester tester) async {
     matching: find.byType(IgnorePointer),
   );
   if (tester.widget<IgnorePointer>(pointerGate).ignoring) {
-    // Only a tap in the horizontal middle third reveals the chrome; the
-    // left/right thirds are page-turn zones. tester.tap hits the widget's
-    // centre, which is squarely in the middle zone.
-    await tester.tap(find.byKey(const Key('reader-body')));
+    // Only a tap in the horizontal middle third reveals the chrome. Tap at
+    // the top of the body so the first visible paragraph is selected, not
+    // the paragraph at the centre of the viewport. This keeps the active
+    // paragraph aligned with the expected "first visible" paragraph in
+    // tests like "top play follows the first visible paragraph".
+    final body = tester.getRect(find.byKey(const Key('reader-body')));
+    await tester.tapAt(Offset(body.center.dx, body.top + 1));
     await tester.pumpAndSettle();
   }
   expect(tester.widget<AnimatedSlide>(toolbar).offset, Offset.zero);
