@@ -28,6 +28,7 @@ import 'package:novel_voice_reader/features/playback/domain/playback_timeline.da
 import 'package:novel_voice_reader/features/playback/presentation/player_page.dart';
 import 'package:novel_voice_reader/features/playback/presentation/sleep_timer_button.dart';
 import 'package:novel_voice_reader/features/reader/application/reader_chapter_window_controller.dart';
+import 'package:novel_voice_reader/features/reader/data/reader_preferences_store.dart';
 import 'package:novel_voice_reader/features/reader/data/reading_progress_repository.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
@@ -190,6 +191,11 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
   PlaybackRuntime? _pendingPlaybackRuntime;
   PlaybackReplacementToken? _pendingPlaybackReplacement;
   bool _playbackStarting = false;
+  // The persisted page-turn mode, loaded once during window initialization so
+  // the reader opens directly in the saved mode (no scroll→curl flash). Kept in
+  // sync with disk on every user toggle so a later ReaderPage remount re-seeds
+  // from the right value.
+  ReaderPageMode _initialPageMode = ReaderPageMode.scroll;
 
   @override
   void dispose() {
@@ -229,6 +235,8 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         chapters: const [],
         sections: const [],
         onBackToLibrary: _backToLibrary,
+        initialPageMode: _initialPageMode,
+        onPageModeChanged: _persistPageMode,
       );
     }
     final initialization = _ensureChapterWindow(data, database);
@@ -280,6 +288,8 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
           onLoadPrevious: window.loadPrevious,
           onLoadNext: window.loadNext,
           onPlaybackChapterNeeded: _ensurePlaybackChapter,
+          initialPageMode: _initialPageMode,
+          onPageModeChanged: _persistPageMode,
         );
       },
     );
@@ -298,9 +308,25 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     );
     window.addListener(_onChapterWindowChanged);
     _chapterWindow = window;
-    return _chapterWindowInitialization = window.initialize(
+    // Load the saved page-turn mode concurrently with the first chapter so both
+    // are ready before ReaderPage is first built (the FutureBuilder gates on
+    // this future), avoiding an initial-mode flash. Bounded so a stalled
+    // preferences read can never hold the reader's first paint hostage: on
+    // timeout we open in the default mode and the user's next toggle re-persists.
+    final modeFuture = ref
+        .read(_readerPreferencesStoreProvider)
+        .loadMode()
+        .timeout(
+          const Duration(milliseconds: 800),
+          onTimeout: () => ReaderPageMode.scroll,
+        );
+    final initializeFuture = window.initialize(
       chapterId: data.savedCursor?.chapterId ?? data.chapters.first.id,
     );
+    return _chapterWindowInitialization = () async {
+      _initialPageMode = await modeFuture;
+      await initializeFuture;
+    }();
   }
 
   void _onChapterWindowChanged() {
@@ -548,6 +574,13 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
           ..where((book) => book.id.equals(widget.bookId)))
         .write(BooksCompanion(lastReadAt: Value(DateTime.now())));
   }
+
+  // Persists a page-turn mode picked in the reader's bottom bar. Updates the
+  // in-memory seed too so a ReaderPage remount reflects the latest choice.
+  void _persistPageMode(ReaderPageMode mode) {
+    _initialPageMode = mode;
+    unawaited(ref.read(_readerPreferencesStoreProvider).saveMode(mode));
+  }
 }
 
 final class _PlayerRoutePage extends ConsumerWidget {
@@ -607,6 +640,13 @@ final class _VoiceSettingsInitialData {
 final _diagnosticsSettingsStoreProvider =
     Provider.autoDispose<DiagnosticsSettingsStore>(
       (ref) => DiagnosticsSettingsStore(
+        supportDirectory: getApplicationSupportDirectory,
+      ),
+    );
+
+final _readerPreferencesStoreProvider =
+    Provider.autoDispose<ReaderPreferencesStore>(
+      (ref) => ReaderPreferencesStore(
         supportDirectory: getApplicationSupportDirectory,
       ),
     );

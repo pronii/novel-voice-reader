@@ -5,9 +5,12 @@ import 'package:novel_voice_reader/features/reader/application/auto_scroll_contr
 import 'package:novel_voice_reader/features/reader/application/reader_chapter_window_controller.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/domain/reader_content.dart';
+import 'package:novel_voice_reader/features/reader/domain/reader_page_mode.dart';
+import 'package:novel_voice_reader/features/reader/presentation/paginated_reader_view.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 export 'package:novel_voice_reader/features/reader/domain/reader_content.dart';
+export 'package:novel_voice_reader/features/reader/domain/reader_page_mode.dart';
 
 typedef ReaderEdgeLoadCallback =
     Future<ReaderWindowMutation> Function({
@@ -42,6 +45,8 @@ final class ReaderPage extends StatefulWidget {
     this.onLoadPrevious,
     this.onLoadNext,
     this.onPlaybackChapterNeeded,
+    this.initialPageMode = ReaderPageMode.scroll,
+    this.onPageModeChanged,
   });
 
   final int bookId;
@@ -72,6 +77,15 @@ final class ReaderPage extends StatefulWidget {
   final ReaderEdgeLoadCallback? onLoadNext;
   final ReaderPlaybackChapterCallback? onPlaybackChapterNeeded;
 
+  /// The page-turn mode the reader opens in. Seeds the internal mode state on
+  /// first build; later changes to this prop are ignored so the user's in-app
+  /// selection (via the bottom bar) stays authoritative.
+  final ReaderPageMode initialPageMode;
+
+  /// Invoked immediately when the user picks a different mode in the bottom
+  /// bar, so the caller can persist it. Not called for programmatic changes.
+  final ValueChanged<ReaderPageMode>? onPageModeChanged;
+
   @override
   State<ReaderPage> createState() => _ReaderPageState();
 }
@@ -98,6 +112,14 @@ final class _ReaderPageState extends State<ReaderPage> {
   int _scrollGeneration = 0;
   double _fontSize = 19;
   bool _toolbarVisible = false;
+  // The active page-turn mode. Seeded from [widget.initialPageMode] in
+  // initState; thereafter driven only by the bottom bar so an in-session pick
+  // is never overwritten by a prop rebuild.
+  ReaderPageMode _pageMode = ReaderPageMode.scroll;
+  // When returning to scroll mode from a paged mode, seeds the list's initial
+  // index to where the pager left off (so the place is kept without a jump).
+  // Null except across such a switch; cleared on navigation.
+  int? _scrollReentryIndex;
   // True when revealing the menu bar auto-paused a running crawl, so hiding the
   // menu can resume it — but only if the reader didn't stop/pause it meanwhile.
   bool _autoScrollPausedByToolbar = false;
@@ -135,6 +157,7 @@ final class _ReaderPageState extends State<ReaderPage> {
   @override
   void initState() {
     super.initState();
+    _pageMode = widget.initialPageMode;
     _resetNavigationState();
     _itemPositions.itemPositions.addListener(_onItemPositionsChanged);
     _autoScroll.addListener(_onAutoScrollChanged);
@@ -204,6 +227,7 @@ final class _ReaderPageState extends State<ReaderPage> {
     return Scaffold(
       floatingActionButton: _buildListenButton(context),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      bottomNavigationBar: _buildModeBar(context),
       body: SafeArea(
         child: Stack(
           children: [
@@ -216,7 +240,8 @@ final class _ReaderPageState extends State<ReaderPage> {
               onPointerCancel: _onBodyPointerCancel,
               child: items.isEmpty
                   ? const Center(child: Text('图书没有可阅读内容'))
-                  : NotificationListener<ScrollNotification>(
+                  : _pageMode == ReaderPageMode.scroll
+                  ? NotificationListener<ScrollNotification>(
                       onNotification: _onScrollNotification,
                       child: ScrollablePositionedList.builder(
                         initialScrollIndex: _initialScrollIndex,
@@ -227,6 +252,23 @@ final class _ReaderPageState extends State<ReaderPage> {
                         itemBuilder: (context, index) =>
                             _buildItem(context, items[index]),
                       ),
+                    )
+                  : PaginatedReaderView(
+                      // Keyed by mode so slide↔curl swaps the underlying pager
+                      // cleanly; content/window changes are handled in-place.
+                      key: ValueKey<ReaderPageMode>(_pageMode),
+                      mode: _pageMode,
+                      items: items,
+                      textStyle: TextStyle(fontSize: _fontSize, height: 1.8),
+                      headingStyle:
+                          Theme.of(context).textTheme.headlineSmall ??
+                          const TextStyle(fontSize: 24),
+                      initialCursor: _pagedInitialCursor,
+                      playbackCursor: widget.playbackCursor,
+                      playbackActive: widget.playbackActive,
+                      onReadingPositionChanged: _reportReadingPosition,
+                      onLoadPrevious: widget.onLoadPrevious,
+                      onLoadNext: widget.onLoadNext,
                     ),
             ),
             ClipRect(
@@ -261,17 +303,20 @@ final class _ReaderPageState extends State<ReaderPage> {
                                 : _showChapterList,
                             icon: const Icon(Icons.format_list_numbered),
                           ),
-                          IconButton(
-                            tooltip: _autoScroll.isRunning
-                                ? '暂停自动滚动'
-                                : '自动滚动',
-                            onPressed: _toggleAutoScroll,
-                            icon: Icon(
-                              _autoScroll.isRunning
-                                  ? Icons.pause
-                                  : Icons.keyboard_double_arrow_down,
+                          // Auto-scroll is a scroll-mode affordance; the paged
+                          // modes have no continuous crawl to drive.
+                          if (_pageMode == ReaderPageMode.scroll)
+                            IconButton(
+                              tooltip: _autoScroll.isRunning
+                                  ? '暂停自动滚动'
+                                  : '自动滚动',
+                              onPressed: _toggleAutoScroll,
+                              icon: Icon(
+                                _autoScroll.isRunning
+                                    ? Icons.pause
+                                    : Icons.keyboard_double_arrow_down,
+                              ),
                             ),
-                          ),
                           IconButton(
                             tooltip: '阅读设置',
                             onPressed: _showReadingSettings,
@@ -303,10 +348,87 @@ final class _ReaderPageState extends State<ReaderPage> {
     );
   }
 
+  // Height of the bottom page-turn control bar, per the design spec (52px of
+  // content; SafeArea adds any system-nav inset below it).
+  static const double _modeBarHeight = 52;
+
+  /// The persistent bottom control bar: a mutually-exclusive three-way toggle
+  /// between the scroll / slide / curl reading modes.
+  ///
+  /// The bar is always dark ("与APP深色阅读主题风格统一") regardless of the app
+  /// brightness, so in light mode it renders against a dark scheme derived from
+  /// the app's seed colour.
+  Widget _buildModeBar(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final barScheme = scheme.brightness == Brightness.dark
+        ? scheme
+        : ColorScheme.fromSeed(
+            seedColor: scheme.primary,
+            brightness: Brightness.dark,
+          );
+    return Material(
+      color: barScheme.surfaceContainerHighest,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: _modeBarHeight,
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Theme(
+                data: theme.copyWith(colorScheme: barScheme),
+                child: SegmentedButton<ReaderPageMode>(
+                  key: const Key('reader-mode-bar'),
+                  showSelectedIcon: false,
+                  segments: [
+                    for (final mode in ReaderPageMode.values)
+                      ButtonSegment<ReaderPageMode>(
+                        value: mode,
+                        label: Text(mode.label),
+                      ),
+                  ],
+                  selected: {_pageMode},
+                  onSelectionChanged: (selection) =>
+                      _onPageModeSelected(selection.single),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Applies a mode picked from the bottom bar. Switching takes effect
+  // immediately (no confirmation) and notifies the caller so it can persist.
+  void _onPageModeSelected(ReaderPageMode mode) {
+    if (mode == _pageMode) {
+      return;
+    }
+    // Preserve the reading place across the switch. Going to a paged mode, the
+    // pager opens on [_pagedInitialCursor] (current position). Coming back to
+    // scroll, seed the freshly-mounted list to the same paragraph so it opens
+    // there without a visible jump.
+    if (mode == ReaderPageMode.scroll) {
+      _scrollReentryIndex = _currentReadingItemIndex;
+    } else {
+      _scrollReentryIndex = null;
+      // Leaving scroll: stop the crawl so it can't keep running unseen behind
+      // the pager (its button is hidden in paged modes).
+      _autoScroll.stop();
+    }
+    setState(() => _pageMode = mode);
+    widget.onPageModeChanged?.call(mode);
+  }
+
   // A compact control bar for the crawl. It is not persistent: it rides with
   // the toolbar, appearing only while the toolbar is revealed (tap to show,
   // tap again to hide) so it never sits on top of the text while reading.
   Widget _buildAutoScrollOverlay(BuildContext context) {
+    if (_pageMode != ReaderPageMode.scroll) {
+      return const SizedBox.shrink();
+    }
     return Positioned(
       left: 0,
       right: 0,
@@ -583,6 +705,13 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   int get _initialScrollIndex {
+    // A pending re-entry index (set when switching back from a paged mode)
+    // takes precedence so the list opens where the pager left off.
+    final reentry = _scrollReentryIndex;
+    if (reentry != null) {
+      final maxIndex = _items.length - 1;
+      return reentry < 0 ? 0 : (reentry > maxIndex ? maxIndex : reentry);
+    }
     final items = _items;
     final cursor = widget.initialCursor;
     if (cursor != null) {
@@ -604,7 +733,57 @@ final class _ReaderPageState extends State<ReaderPage> {
     return headingIndex < 0 ? 0 : headingIndex;
   }
 
+  // The paragraph the reader is currently on (last reported position), resolved
+  // from the live content list. Drives cross-mode place-keeping.
+  ReaderParagraph? get _currentReadingParagraph {
+    final id = _lastReportedParagraphId;
+    if (id == null) {
+      return null;
+    }
+    for (final item in _items) {
+      if (item is ReaderParagraphItem && item.paragraph.id == id) {
+        return item.paragraph;
+      }
+    }
+    return null;
+  }
+
+  // Index of the current reading paragraph within [_items], or null if unknown.
+  int? get _currentReadingItemIndex {
+    final id = _lastReportedParagraphId;
+    if (id == null) {
+      return null;
+    }
+    final index = _items.indexWhere(
+      (item) => item is ReaderParagraphItem && item.paragraph.id == id,
+    );
+    return index >= 0 ? index : null;
+  }
+
+  // Where the paged view should open: the current reading position if the user
+  // has one, else the initial cursor, else the current chapter's start.
+  PlaybackCursor? get _pagedInitialCursor {
+    final paragraph = _currentReadingParagraph;
+    if (paragraph != null) {
+      return PlaybackCursor(
+        chapterId: paragraph.chapterId,
+        paragraphIndex: paragraph.index,
+      );
+    }
+    final cursor = widget.initialCursor;
+    if (cursor != null) {
+      return cursor;
+    }
+    final chapterId = widget.currentChapterId ?? _visibleChapterId;
+    if (chapterId != null) {
+      return PlaybackCursor(chapterId: chapterId, paragraphIndex: 0);
+    }
+    return null;
+  }
+
   void _resetNavigationState() {
+    // A navigation target overrides any pending paged-mode re-entry seed.
+    _scrollReentryIndex = null;
     final cursor = widget.initialCursor;
     _visibleChapterId = cursor?.chapterId ?? widget.currentChapterId;
     final paragraphs = widget.sections.expand((section) => section.paragraphs);
@@ -950,6 +1129,12 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   Future<void> _followPlayingParagraph() async {
+    // Scroll-follow only. In the paged modes, PaginatedReaderView flips to the
+    // playing page itself (via its playbackCursor), and the scrollTo machinery
+    // below (including the chapter-load side effect) does not apply.
+    if (_pageMode != ReaderPageMode.scroll) {
+      return;
+    }
     final cursor = widget.playbackCursor;
     final pendingTarget = _pendingPlaybackTarget;
     if (pendingTarget != null) {
@@ -1009,6 +1194,7 @@ final class _ReaderPageState extends State<ReaderPage> {
   /// safe to run on a 1 Hz interval without any visible "snapping".
   Future<void> _maybeFollowPlaybackCenter() async {
     if (!mounted) return;
+    if (_pageMode != ReaderPageMode.scroll) return;
     if (!_playbackFollow) return;
     final cursor = widget.playbackCursor;
     if (cursor == null || !widget.playbackActive) return;

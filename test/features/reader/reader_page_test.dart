@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
+import 'package:novel_voice_reader/features/reader/presentation/paginated_reader_view.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
@@ -736,7 +737,7 @@ void main() {
     expect(reported, [100]);
   });
 
-  testWidgets('uses the full screen without a fixed chapter footer', (
+  testWidgets('shows the 52px page-turn mode bar above the reading text', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -744,9 +745,68 @@ void main() {
     );
 
     final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
-    expect(find.byType(BottomNavigationBar), findsNothing);
-    expect(scaffold.bottomNavigationBar, isNull);
+    // The only bottom bar is the page-turn mode toggle (no chapter footer).
+    expect(scaffold.bottomNavigationBar, isNotNull);
+    final segmented = find.byType(SegmentedButton<ReaderPageMode>);
+    expect(segmented, findsOneWidget);
+    // All three mutually-exclusive modes are offered.
+    expect(find.text('滚动'), findsOneWidget);
+    expect(find.text('翻页'), findsOneWidget);
+    expect(find.text('3D翻页'), findsOneWidget);
+    // Reading text still fills the area above the bar.
     expect(find.textContaining('第1段'), findsOneWidget);
+  });
+
+  testWidgets(
+    'tapping the paged segments switches mode immediately without a dialog',
+    (tester) async {
+      final modes = <ReaderPageMode>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: _reader(paragraphs: longParagraphs, onPageModeChanged: modes.add),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Starts in scroll mode: the continuous list renders the text.
+      expect(find.byType(ScrollablePositionedList), findsOneWidget);
+      expect(find.byType(PaginatedReaderView), findsNothing);
+
+      // Segment 2 — 普通翻页 (slide): switches instantly, no confirmation.
+      await tester.tap(find.text('翻页'));
+      await tester.pumpAndSettle();
+      expect(modes, [ReaderPageMode.slide]);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(ScrollablePositionedList), findsNothing);
+      expect(find.byType(PaginatedReaderView), findsOneWidget);
+
+      // Segment 3 — 3D翻页 (curl): also immediate.
+      await tester.tap(find.text('3D翻页'));
+      await tester.pump();
+      expect(modes, [ReaderPageMode.slide, ReaderPageMode.curl]);
+      expect(find.byType(AlertDialog), findsNothing);
+
+      // Drain the flip view's image-capture timers.
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets('honours the initial page mode from persisted preferences', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: _reader(
+          paragraphs: longParagraphs,
+          initialPageMode: ReaderPageMode.slide,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Opens directly in the paged view, with no scrolling list mounted.
+    expect(find.byType(PaginatedReaderView), findsOneWidget);
+    expect(find.byType(ScrollablePositionedList), findsNothing);
   });
 }
 
@@ -765,6 +825,8 @@ ReaderPage _reader({
   ValueChanged<int>? onChapterSelected,
   ValueChanged<ReaderParagraph>? onReadingPositionChanged,
   ValueChanged<ReaderParagraph>? onPlayFrom,
+  ReaderPageMode initialPageMode = ReaderPageMode.scroll,
+  ValueChanged<ReaderPageMode>? onPageModeChanged,
 }) {
   return ReaderPage(
     bookId: 1,
@@ -786,6 +848,8 @@ ReaderPage _reader({
     onChapterSelected: onChapterSelected,
     onReadingPositionChanged: onReadingPositionChanged,
     onPlayFrom: onPlayFrom,
+    initialPageMode: initialPageMode,
+    onPageModeChanged: onPageModeChanged,
   );
 }
 
