@@ -268,6 +268,15 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
           onOpenPlayer: () => context.push('/player/${widget.bookId}'),
           onPlayFrom: (paragraph) => unawaited(_playFrom(data, paragraph)),
           onListenFrom: (start) => unawaited(_listenFrom(data, start)),
+          onStopPlayback: () {
+            // Tap the toolbar listen button again to leave listen mode: tear
+            // the runtime handler down so the cursor clears and the button
+            // flips back to its headphones icon.
+            final runtime = ref.read(playbackRuntimeProvider);
+            if (runtime != null) {
+              unawaited(runtime.handler.stop());
+            }
+          },
           onLoadPrevious: window.loadPrevious,
           onLoadNext: window.loadNext,
           onPlaybackChapterNeeded: _ensurePlaybackChapter,

@@ -37,6 +37,7 @@ final class ReaderPage extends StatefulWidget {
     this.onReadingPositionChanged,
     this.onPlayFrom,
     this.onListenFrom,
+    this.onStopPlayback,
     this.onOpenPlayer,
     this.onLoadPrevious,
     this.onLoadNext,
@@ -62,6 +63,10 @@ final class ReaderPage extends StatefulWidget {
   /// dedicated "listen" entry (instead of auto-entering playback) and lets
   /// the user pick where to start; the actual playback is kicked off here.
   final ReaderListenCallback? onListenFrom;
+  /// Stops the active listen session. The toolbar's circular listen/stop
+  /// button calls this when the user wants to leave listen mode; the
+  /// router is responsible for tearing the runtime down.
+  final VoidCallback? onStopPlayback;
   final VoidCallback? onOpenPlayer;
   final ReaderEdgeLoadCallback? onLoadPrevious;
   final ReaderEdgeLoadCallback? onLoadNext;
@@ -198,7 +203,7 @@ final class _ReaderPageState extends State<ReaderPage> {
     final items = _items;
     return Scaffold(
       floatingActionButton: _buildListenButton(context),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       body: SafeArea(
         child: Stack(
           children: [
@@ -843,21 +848,23 @@ final class _ReaderPageState extends State<ReaderPage> {
     _pendingProgressParagraph = null;
   }
 
-  // A prominent "listen" entry point. Opening a book no longer drops the user
-  // straight into playback; tapping 听小说 starts listening immediately,
-  // matching how mainstream novel apps (起点读书 / 番茄小说 / 微信读书) behave:
-  // no "where to start" picker — it resumes from where the user is currently
-  // reading, or from the last saved position, or from the top of the book.
+  // A circular icon button that follows the toolbar: it only appears while
+  // the toolbar is visible, sits in the bottom-right corner, and toggles
+  // between start (headphones) and stop (square) so the user can enter or
+  // leave listen mode with the same affordance.
   Widget _buildListenButton(BuildContext context) {
-    if (widget.playbackActive) {
-      // Already listening — the toolbar play/pause controls take over.
+    if (!_toolbarVisible) {
       return const SizedBox.shrink();
     }
-    return FloatingActionButton.extended(
+    final playing = widget.playbackActive;
+    return FloatingActionButton(
       key: const Key('reader-listen-button'),
-      onPressed: _startListening,
-      icon: const Icon(Icons.headphones),
-      label: const Text('听小说'),
+      mini: true,
+      onPressed: playing
+          ? (widget.onStopPlayback ?? () {})
+          : _startListening,
+      tooltip: playing ? '退出听书' : '听小说',
+      child: Icon(playing ? Icons.stop : Icons.headphones),
     );
   }
 
