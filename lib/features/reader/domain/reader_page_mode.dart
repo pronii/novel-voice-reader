@@ -15,11 +15,12 @@ enum ReaderPageMode {
   /// Left/right paged view with a simulated 3D book page-curl animation.
   curl;
 
-  /// Short, touch-friendly label shown on the bottom control bar.
-  String get label => switch (this) {
-    ReaderPageMode.scroll => '滚动',
-    ReaderPageMode.slide => '翻页',
-    ReaderPageMode.curl => '3D翻页',
+  /// Full label shown against each radio option in the page-mode picker
+  /// dialog (the bottom bar itself shows only a gear icon).
+  String get menuLabel => switch (this) {
+    ReaderPageMode.scroll => '滚动模式',
+    ReaderPageMode.slide => '翻页模式',
+    ReaderPageMode.curl => '3D翻页模式',
   };
 
   /// Whether this mode paginates the text (as opposed to scrolling it).

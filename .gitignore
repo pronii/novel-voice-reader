@@ -30,3 +30,6 @@ outputs/
 /android/app/key.properties
 *.keystore
 *.jks
+
+# Local build artifacts — never commit binaries
+/artifacts/

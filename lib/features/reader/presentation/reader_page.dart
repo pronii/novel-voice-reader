@@ -227,7 +227,6 @@ final class _ReaderPageState extends State<ReaderPage> {
     return Scaffold(
       floatingActionButton: _buildListenButton(context),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      bottomNavigationBar: _buildModeBar(context),
       body: SafeArea(
         child: Stack(
           children: [
@@ -342,61 +341,118 @@ final class _ReaderPageState extends State<ReaderPage> {
               ),
             ),
             _buildAutoScrollOverlay(context),
+            _buildModeBar(context),
           ],
         ),
       ),
     );
   }
 
-  // Height of the bottom page-turn control bar, per the design spec (52px of
-  // content; SafeArea adds any system-nav inset below it).
+  // Height of the bottom control bar, per the design spec (52px of content;
+  // it rides just inside the body SafeArea, so any system-nav inset sits below
+  // it).
   static const double _modeBarHeight = 52;
 
-  /// The persistent bottom control bar: a mutually-exclusive three-way toggle
-  /// between the scroll / slide / curl reading modes.
-  ///
-  /// The bar is always dark ("与APP深色阅读主题风格统一") regardless of the app
-  /// brightness, so in light mode it renders against a dark scheme derived from
-  /// the app's seed colour.
-  Widget _buildModeBar(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final barScheme = scheme.brightness == Brightness.dark
+  // The dark colour scheme the bottom bar and its dialog render against, so
+  // they stay unified with the dark reading theme even when the app itself is
+  // light ("弹窗样式适配深色阅读主题，和阅读器整体深色风格统一").
+  ColorScheme _readerBarScheme(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return scheme.brightness == Brightness.dark
         ? scheme
         : ColorScheme.fromSeed(
             seedColor: scheme.primary,
             brightness: Brightness.dark,
           );
-    return Material(
-      color: barScheme.surfaceContainerHighest,
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: _modeBarHeight,
-          child: Center(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Theme(
-                data: theme.copyWith(colorScheme: barScheme),
-                child: SegmentedButton<ReaderPageMode>(
-                  key: const Key('reader-mode-bar'),
-                  showSelectedIcon: false,
-                  segments: [
-                    for (final mode in ReaderPageMode.values)
-                      ButtonSegment<ReaderPageMode>(
-                        value: mode,
-                        label: Text(mode.label),
-                      ),
-                  ],
-                  selected: {_pageMode},
-                  onSelectionChanged: (selection) =>
-                      _onPageModeSelected(selection.single),
+  }
+
+  /// The bottom control bar. It is NOT persistent: it shares the top toolbar's
+  /// visibility (`_toolbarVisible`) and slides in/out together with it, so it
+  /// never sits over the text while reading. It holds a single gear button
+  /// that opens the page-mode picker dialog — the three-way mode choice now
+  /// lives in that dialog rather than on the bar itself.
+  Widget _buildModeBar(BuildContext context) {
+    final barScheme = _readerBarScheme(context);
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: ClipRect(
+        child: AnimatedSlide(
+          key: const Key('reader-mode-bar'),
+          offset: _toolbarVisible ? Offset.zero : const Offset(0, 1),
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          child: IgnorePointer(
+            ignoring: !_toolbarVisible,
+            child: ExcludeSemantics(
+              excluding: !_toolbarVisible,
+              child: Material(
+                color: barScheme.surfaceContainerHighest,
+                child: SizedBox(
+                  height: _modeBarHeight,
+                  child: Center(
+                    child: IconButton(
+                      key: const Key('reader-mode-gear'),
+                      tooltip: '翻页模式',
+                      color: barScheme.onSurface,
+                      onPressed: _showPageModeDialog,
+                      icon: const Icon(Icons.settings),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  /// Opens the modal page-mode picker: a dark-themed dialog titled 翻页模式
+  /// with one radio per [ReaderPageMode] (滚动模式 / 翻页模式 / 3D翻页模式),
+  /// bound to the currently-saved mode. Picking an option applies it
+  /// immediately — persisting via [_onPageModeSelected] — and closes the
+  /// dialog; no separate confirm step.
+  Future<void> _showPageModeDialog() async {
+    final theme = Theme.of(context);
+    final barScheme = _readerBarScheme(context);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Theme(
+          data: theme.copyWith(colorScheme: barScheme),
+          child: AlertDialog(
+            key: const Key('page-mode-dialog'),
+            backgroundColor: barScheme.surfaceContainerHigh,
+            title: const Text('翻页模式'),
+            contentPadding: const EdgeInsets.symmetric(vertical: 12),
+            content: RadioGroup<ReaderPageMode>(
+              groupValue: _pageMode,
+              onChanged: (selected) {
+                // `toggleable` means re-tapping the active option reports null;
+                // either way the pick is done, so close the dialog.
+                if (selected != null && selected != _pageMode) {
+                  _onPageModeSelected(selected);
+                }
+                Navigator.of(dialogContext).pop();
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final mode in ReaderPageMode.values)
+                    RadioListTile<ReaderPageMode>(
+                      key: ValueKey('page-mode-option-${mode.storageKey}'),
+                      value: mode,
+                      toggleable: true,
+                      title: Text(mode.menuLabel),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -443,7 +499,8 @@ final class _ReaderPageState extends State<ReaderPage> {
           final running = _autoScroll.isRunning;
           return SafeArea(
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              // Bottom inset clears the gear bar (they share visibility).
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12 + _modeBarHeight),
               child: Align(
                 alignment: Alignment.bottomCenter,
                 child: Material(
@@ -530,11 +587,33 @@ final class _ReaderPageState extends State<ReaderPage> {
     if (event.pointer != _bodyPointerId) {
       return;
     }
+    final tapPosition = event.position;
     final shouldToggle = _bodyPointerTapEligible;
     _clearBodyPointer();
-    if (shouldToggle) {
+    // Only a tap in the central column toggles the chrome. The left/right
+    // thirds are reserved as page-turn gesture zones, so a tap there is
+    // ignored here — it neither reveals nor hides the toolbar, avoiding
+    // mis-triggers while paging ("点击左右不会唤起工具栏，避免误触").
+    if (shouldToggle && _isMiddleZone(tapPosition)) {
       _setToolbarVisible(!_toolbarVisible);
     }
+  }
+
+  // Whether [globalPosition] falls in the reader's horizontal middle third
+  // (the "toggle UI" zone). The outer thirds are the page-turn gesture areas.
+  // Defaults to true when the body can't be measured yet, so an early tap
+  // still works rather than being silently swallowed.
+  bool _isMiddleZone(Offset globalPosition) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) {
+      return true;
+    }
+    final width = box.size.width;
+    if (width <= 0) {
+      return true;
+    }
+    final dx = box.globalToLocal(globalPosition).dx;
+    return dx >= width / 3 && dx <= width * 2 / 3;
   }
 
   void _onBodyPointerCancel(PointerCancelEvent event) {
@@ -810,6 +889,10 @@ final class _ReaderPageState extends State<ReaderPage> {
     if (notification is ScrollStartNotification &&
         notification.dragDetails != null) {
       _playbackFollow = false;
+      // A user swipe to read clears the chrome, matching mainstream readers:
+      // reveal by tapping the middle, hide by scrolling ("滑动滚动阅读内容，
+      // 自动隐藏顶部、底部工具栏").
+      _setToolbarVisible(false);
       // A manual swipe should not fight the crawl, so suspend it for the
       // gesture — but keep it armed. It picks back up on its own once the drag
       // settles, so a manual nudge no longer drops the reader out of auto
@@ -1036,14 +1119,17 @@ final class _ReaderPageState extends State<ReaderPage> {
       return const SizedBox.shrink();
     }
     final playing = widget.playbackActive;
-    return FloatingActionButton(
-      key: const Key('reader-listen-button'),
-      mini: true,
-      onPressed: playing
-          ? (widget.onStopPlayback ?? () {})
-          : _startListening,
-      tooltip: playing ? '退出听书' : '听小说',
-      child: Icon(playing ? Icons.stop : Icons.headphones),
+    return Padding(
+      // Lift the button clear of the bottom mode bar: both share the toolbar's
+      // visibility, so without this the FAB would sit on top of the gear bar.
+      padding: const EdgeInsets.only(bottom: _modeBarHeight),
+      child: FloatingActionButton(
+        key: const Key('reader-listen-button'),
+        mini: true,
+        onPressed: playing ? (widget.onStopPlayback ?? () {}) : _startListening,
+        tooltip: playing ? '退出听书' : '听小说',
+        child: Icon(playing ? Icons.stop : Icons.headphones),
+      ),
     );
   }
 

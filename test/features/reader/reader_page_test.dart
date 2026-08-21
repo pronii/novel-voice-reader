@@ -737,33 +737,50 @@ void main() {
     expect(reported, [100]);
   });
 
-  testWidgets('shows the 52px page-turn mode bar above the reading text', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(home: _reader(paragraphs: longParagraphs)),
-    );
+  testWidgets(
+    'the bottom bar is a hidden-by-default gear, not a persistent segmented control',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(home: _reader(paragraphs: longParagraphs)),
+      );
+      await tester.pumpAndSettle();
 
-    final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
-    // The only bottom bar is the page-turn mode toggle (no chapter footer).
-    expect(scaffold.bottomNavigationBar, isNotNull);
-    final segmented = find.byType(SegmentedButton<ReaderPageMode>);
-    expect(segmented, findsOneWidget);
-    // All three mutually-exclusive modes are offered.
-    expect(find.text('滚动'), findsOneWidget);
-    expect(find.text('翻页'), findsOneWidget);
-    expect(find.text('3D翻页'), findsOneWidget);
-    // Reading text still fills the area above the bar.
-    expect(find.textContaining('第1段'), findsOneWidget);
-  });
+      // No persistent bottom bar, and the old three-segment control is gone.
+      final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
+      expect(scaffold.bottomNavigationBar, isNull);
+      expect(find.byType(SegmentedButton<ReaderPageMode>), findsNothing);
+
+      // The mode bar rides with the toolbar: present but slid off the bottom
+      // edge while the chrome is hidden.
+      final bar = find.byKey(const Key('reader-mode-bar'));
+      expect(bar, findsOneWidget);
+      expect(tester.widget<AnimatedSlide>(bar).offset, const Offset(0, 1));
+
+      // Revealing the chrome slides the 52px bar in; it holds only a gear.
+      await _showReaderToolbar(tester);
+      expect(tester.widget<AnimatedSlide>(bar).offset, Offset.zero);
+      expect(tester.getSize(bar).height, 52);
+      expect(find.byKey(const Key('reader-mode-gear')), findsOneWidget);
+      expect(
+        find.descendant(of: bar, matching: find.byIcon(Icons.settings)),
+        findsOneWidget,
+      );
+
+      // Reading text still fills the area.
+      expect(find.textContaining('第1段'), findsOneWidget);
+    },
+  );
 
   testWidgets(
-    'tapping the paged segments switches mode immediately without a dialog',
+    'the gear opens a dialog whose radios switch mode immediately',
     (tester) async {
       final modes = <ReaderPageMode>[];
       await tester.pumpWidget(
         MaterialApp(
-          home: _reader(paragraphs: longParagraphs, onPageModeChanged: modes.add),
+          home: _reader(
+            paragraphs: longParagraphs,
+            onPageModeChanged: modes.add,
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -772,24 +789,92 @@ void main() {
       expect(find.byType(ScrollablePositionedList), findsOneWidget);
       expect(find.byType(PaginatedReaderView), findsNothing);
 
-      // Segment 2 — 普通翻页 (slide): switches instantly, no confirmation.
-      await tester.tap(find.text('翻页'));
+      // Reveal the chrome, then open the page-mode dialog from the gear.
+      await _showReaderToolbar(tester);
+      await tester.tap(find.byKey(const Key('reader-mode-gear')));
       await tester.pumpAndSettle();
+
+      // Dialog titled 翻页模式 offering all three modes as radios.
+      expect(find.byKey(const Key('page-mode-dialog')), findsOneWidget);
+      expect(find.byKey(const ValueKey('page-mode-option-scroll')), findsOneWidget);
+      expect(find.byKey(const ValueKey('page-mode-option-slide')), findsOneWidget);
+      expect(find.byKey(const ValueKey('page-mode-option-curl')), findsOneWidget);
+      expect(find.text('滚动模式'), findsOneWidget);
+      expect(find.text('3D翻页模式'), findsOneWidget);
+      // The title and the slide option share the text '翻页模式' (per spec).
+      expect(find.text('翻页模式'), findsNWidgets(2));
+
+      // Pick 普通翻页 (slide): applies instantly and closes the dialog.
+      await tester.tap(find.byKey(const ValueKey('page-mode-option-slide')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('page-mode-dialog')), findsNothing);
       expect(modes, [ReaderPageMode.slide]);
-      expect(find.byType(AlertDialog), findsNothing);
       expect(find.byType(ScrollablePositionedList), findsNothing);
       expect(find.byType(PaginatedReaderView), findsOneWidget);
 
-      // Segment 3 — 3D翻页 (curl): also immediate.
-      await tester.tap(find.text('3D翻页'));
-      await tester.pump();
-      expect(modes, [ReaderPageMode.slide, ReaderPageMode.curl]);
-      expect(find.byType(AlertDialog), findsNothing);
-
-      // Drain the flip view's image-capture timers.
+      // Open it again and pick 3D翻页 (curl): also immediate.
+      await tester.tap(find.byKey(const Key('reader-mode-gear')));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('page-mode-option-curl')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('page-mode-dialog')), findsNothing);
+      expect(modes, [ReaderPageMode.slide, ReaderPageMode.curl]);
     },
   );
+
+  testWidgets(
+    'taps in the left/right page-turn zones do not reveal the toolbar',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(home: _reader(paragraphs: longParagraphs)),
+      );
+      await tester.pumpAndSettle();
+
+      final bodyRect = tester.getRect(find.byKey(const Key('reader-body')));
+      final toolbar = find.byKey(const Key('reader-toolbar'));
+
+      // Far-left tap (page-turn zone): the toolbar stays hidden.
+      await tester.tapAt(Offset(bodyRect.left + 8, bodyRect.center.dy));
+      await tester.pumpAndSettle();
+      expect(tester.widget<AnimatedSlide>(toolbar).offset, const Offset(0, -1));
+
+      // Far-right tap (page-turn zone): still hidden.
+      await tester.tapAt(Offset(bodyRect.right - 8, bodyRect.center.dy));
+      await tester.pumpAndSettle();
+      expect(tester.widget<AnimatedSlide>(toolbar).offset, const Offset(0, -1));
+
+      // A middle tap does reveal it.
+      await tester.tapAt(bodyRect.center);
+      await tester.pumpAndSettle();
+      expect(tester.widget<AnimatedSlide>(toolbar).offset, Offset.zero);
+    },
+  );
+
+  testWidgets('scrolling the reading text auto-hides the chrome', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: _reader(paragraphs: longParagraphs)),
+    );
+    await tester.pumpAndSettle();
+
+    // Reveal the chrome first.
+    await _showReaderToolbar(tester);
+    final toolbar = find.byKey(const Key('reader-toolbar'));
+    final bar = find.byKey(const Key('reader-mode-bar'));
+    expect(tester.widget<AnimatedSlide>(toolbar).offset, Offset.zero);
+    expect(tester.widget<AnimatedSlide>(bar).offset, Offset.zero);
+
+    // A user drag to scroll the text hides both the top toolbar and the
+    // bottom mode bar together.
+    await tester.drag(
+      find.byKey(const Key('reader-body')),
+      const Offset(0, -200),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.widget<AnimatedSlide>(toolbar).offset, const Offset(0, -1));
+    expect(tester.widget<AnimatedSlide>(bar).offset, const Offset(0, 1));
+  });
 
   testWidgets('honours the initial page mode from persisted preferences', (
     tester,
@@ -885,8 +970,10 @@ Future<void> _showReaderToolbar(WidgetTester tester) async {
     matching: find.byType(IgnorePointer),
   );
   if (tester.widget<IgnorePointer>(pointerGate).ignoring) {
-    final body = find.byKey(const Key('reader-body'));
-    await tester.tapAt(tester.getTopLeft(body) + const Offset(2, 2));
+    // Only a tap in the horizontal middle third reveals the chrome; the
+    // left/right thirds are page-turn zones. tester.tap hits the widget's
+    // centre, which is squarely in the middle zone.
+    await tester.tap(find.byKey(const Key('reader-body')));
     await tester.pumpAndSettle();
   }
   expect(tester.widget<AnimatedSlide>(toolbar).offset, Offset.zero);
