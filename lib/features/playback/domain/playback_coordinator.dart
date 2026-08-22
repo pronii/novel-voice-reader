@@ -167,6 +167,18 @@ final class PlaybackCoordinator implements PlaybackController {
   Timer? _watchdog;
   int _segmentRetries = 0;
 
+  // Steady-state playback emits a position event several times a second for
+  // hours on a locked screen. These caches keep the per-event work O(1): the
+  // enrichment character counts only change when the segment list or active
+  // index changes, and the watchdog deadline only needs pushing out once the
+  // media position has advanced enough to matter. Both use timeline.position
+  // as the clock, so the throttling stays deterministic (no wall-clock reads).
+  List<SpeechSegment>? _enrichCacheSegments;
+  int _enrichCacheSegmentIndex = -1;
+  int _enrichCompletedCharacters = 0;
+  int _enrichCurrentCharacters = 0;
+  PlaybackTimeline? _lastWatchdogExtendTimeline;
+
   /// Whether the app is in the foreground. While backgrounded the coordinator
   /// checks the local cache first, but a miss still falls back to synthesis
   /// while the active audio session keeps the process running on iOS.
@@ -685,6 +697,7 @@ final class PlaybackCoordinator implements PlaybackController {
   void _cancelWatchdog() {
     _watchdog?.cancel();
     _watchdog = null;
+    _lastWatchdogExtendTimeline = null;
   }
 
   Duration _watchdogTimeoutFor(SpeechSegment segment) {
@@ -719,6 +732,23 @@ final class PlaybackCoordinator implements PlaybackController {
     if (duration == null || timeline.position >= duration) {
       return;
     }
+    // Re-arming the watchdog on every position event allocates and cancels a
+    // Timer several times a second for the whole segment. The armed timer
+    // already counts down toward completion, and skipping a re-arm only leaves
+    // an older (larger) remaining deadline in place — so it can never fire
+    // early, only slightly later. Skip until the media position has advanced
+    // by a meaningful step (or the segment duration changed), which keeps the
+    // deadline fresh during buffering/slow playback while cutting the steady-
+    // state churn by an order of magnitude. Deterministic: position is the
+    // clock, not wall time.
+    const reArmInterval = Duration(seconds: 5);
+    final last = _lastWatchdogExtendTimeline;
+    if (last != null &&
+        last.duration == duration &&
+        timeline.position >= last.position &&
+        timeline.position - last.position < reArmInterval) {
+      return;
+    }
     final remaining = duration - timeline.position + _watchdogGrace;
     final segmentIndex = _segmentIndex;
     _cancelWatchdog();
@@ -730,6 +760,7 @@ final class PlaybackCoordinator implements PlaybackController {
       );
       unawaited(_speechEventTransactions);
     });
+    _lastWatchdogExtendTimeline = timeline;
   }
 
   Future<void> _onWatchdogTimeout(
@@ -956,10 +987,17 @@ final class PlaybackCoordinator implements PlaybackController {
       return timeline;
     }
     const fallbackMicrosPerCharacter = 240000;
-    final completedCharacters = _segments
-        .take(_segmentIndex)
-        .fold<int>(0, (total, segment) => total + segment.text.runes.length);
-    final currentCharacters = _segments[_segmentIndex].text.runes.length;
+    if (!identical(_segments, _enrichCacheSegments) ||
+        _segmentIndex != _enrichCacheSegmentIndex) {
+      _enrichCompletedCharacters = _segments
+          .take(_segmentIndex)
+          .fold<int>(0, (total, segment) => total + segment.text.runes.length);
+      _enrichCurrentCharacters = _segments[_segmentIndex].text.runes.length;
+      _enrichCacheSegments = _segments;
+      _enrichCacheSegmentIndex = _segmentIndex;
+    }
+    final completedCharacters = _enrichCompletedCharacters;
+    final currentCharacters = _enrichCurrentCharacters;
     final laterCharacters = max(
       0,
       chapterCharacters - completedCharacters - currentCharacters,
