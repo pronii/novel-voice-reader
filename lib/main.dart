@@ -22,6 +22,7 @@ import 'package:novel_voice_reader/features/playback/data/background_audio_sessi
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/data/background_keep_alive.dart';
 import 'package:novel_voice_reader/features/playback/data/background_playback_sustainer.dart';
+import 'package:novel_voice_reader/features/settings/data/theme_mode_preference_store.dart';
 
 /// Retains the background playback sustainer for the whole process lifetime.
 ///
@@ -137,6 +138,9 @@ Future<void> main() async {
       ),
       audioCacheRuntime: audioCacheRuntime,
       backgroundAudioSession: audioSession,
+      themeModeStore: ThemeModePreferenceStore(
+        supportDirectory: getApplicationSupportDirectory,
+      ),
       telemetry: telemetry,
     ),
   );

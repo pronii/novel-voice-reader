@@ -88,21 +88,32 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
 
   @override
   Widget build(BuildContext context) {
+    final themeMode = ref.watch(themeModeControllerProvider);
+    void cycleTheme() => ref.read(themeModeControllerProvider.notifier).cycle();
     if (ref.watch(databaseProvider) == null) {
       return LibraryPage(
         books: const [],
         onImport: _importBook,
         onOpenVoiceSettings: () => context.push('/settings/voice'),
+        themeMode: themeMode,
+        onCycleThemeMode: cycleTheme,
       );
     }
     final books = ref.watch(libraryBooksProvider);
     return books.when(
-      loading: () =>
-          LibraryPage(books: const [], loading: true, onImport: _importBook),
+      loading: () => LibraryPage(
+        books: const [],
+        loading: true,
+        onImport: _importBook,
+        themeMode: themeMode,
+        onCycleThemeMode: cycleTheme,
+      ),
       error: (_, _) => LibraryPage(
         books: const [],
         errorMessage: '书架加载失败',
         onImport: _importBook,
+        themeMode: themeMode,
+        onCycleThemeMode: cycleTheme,
       ),
       data: (records) => LibraryPage(
         books: [
@@ -119,6 +130,8 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
         onOpenVoiceSettings: () => context.push('/settings/voice'),
         onOpenCacheSettings: (bookId) =>
             context.push('/settings/cache/$bookId'),
+        themeMode: themeMode,
+        onCycleThemeMode: cycleTheme,
       ),
     );
   }

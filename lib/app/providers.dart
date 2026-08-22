@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart';
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
@@ -8,11 +11,29 @@ import 'package:novel_voice_reader/features/playback/data/background_audio_handl
 import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/domain/reader_content.dart';
+import 'package:novel_voice_reader/features/settings/application/theme_mode_controller.dart';
+import 'package:novel_voice_reader/features/settings/data/theme_mode_preference_store.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 final databaseProvider = Provider<AppDatabase?>((ref) => null);
 final playbackRuntimeProvider = Provider<PlaybackRuntime?>((ref) => null);
 final audioCacheRuntimeProvider = Provider<AudioCacheRuntime?>((ref) => null);
+
+/// File-backed store for the light/dark preference. `null` by default so widget
+/// tests never touch `path_provider`; [NovelVoiceReaderApp] injects a real one.
+final themeModePreferenceStoreProvider = Provider<ThemeModePreferenceStore?>(
+  (ref) => null,
+);
+
+/// The current app-wide light/dark mode, persisted when a store is present.
+final themeModeControllerProvider =
+    StateNotifierProvider<ThemeModeController, ThemeMode>((ref) {
+      final controller = ThemeModeController(
+        ref.watch(themeModePreferenceStoreProvider),
+      );
+      unawaited(controller.load());
+      return controller;
+    });
 
 /// The shared background audio session. Overridden in [NovelVoiceReaderApp]
 /// with the session created at startup; a no-op default keeps widgets and

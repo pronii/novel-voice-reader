@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:novel_voice_reader/app/design/paper_tokens.dart';
+import 'package:novel_voice_reader/app/widgets/section_card.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/downloads/domain/download_policy.dart';
 
@@ -73,94 +75,144 @@ final class _CachePageState extends State<CachePage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('缓存设置')),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(
+          Insets.page,
+          Insets.page,
+          Insets.page,
+          Insets.xxl,
+        ),
         children: [
           if (widget.bookTitle case final title?) ...[
-            Text(title, style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 20),
+            Text(title, style: theme.textTheme.titleLarge),
+            const SizedBox(height: Insets.xl),
           ],
-          Text('下载范围', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('chaptersAhead'),
-            controller: _chaptersController,
-            enabled: !_wholeBook,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: '后续章节数',
-              helperText: '可选 0 - $_remainingChapters',
-              errorText: _errorText,
-            ),
-          ),
-          SwitchListTile(
-            key: const Key('wholeBook'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('缓存所有未读章节'),
-            value: _wholeBook,
-            onChanged: (value) => setState(() => _wholeBook = value),
-          ),
-          const Divider(height: 32),
-          Text('网络与容量', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          SectionCard(
+            title: '下载范围',
+            caption: '选择随身携带多少后续内容，离线也能听。',
             children: [
-              const Text('当前缓存'),
-              Text(
-                '${_formatBytes(widget.cachedBytes)} · '
-                '${widget.cachedSegmentCount} 段',
+              const SizedBox(height: Insets.sm),
+              TextField(
+                key: const Key('chaptersAhead'),
+                controller: _chaptersController,
+                enabled: !_wholeBook,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: '后续章节数',
+                  helperText: '可选 0 - $_remainingChapters',
+                  errorText: _errorText,
+                ),
+              ),
+              SwitchListTile(
+                key: const Key('wholeBook'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('缓存所有未读章节'),
+                value: _wholeBook,
+                onChanged: (value) => setState(() => _wholeBook = value),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(
-            value: min(1, widget.cachedBytes / _maxCacheBytes),
-            minHeight: 6,
-          ),
-          const SizedBox(height: 16),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('仅在 Wi-Fi 下下载'),
-            value: _wifiOnly,
-            onChanged: (value) => setState(() => _wifiOnly = value),
-          ),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<int>(
-            initialValue: _maxCacheBytes,
-            decoration: const InputDecoration(labelText: '缓存容量上限'),
-            items: const [
-              DropdownMenuItem(value: 256 * 1024 * 1024, child: Text('256 MB')),
-              DropdownMenuItem(value: 512 * 1024 * 1024, child: Text('512 MB')),
-              DropdownMenuItem(value: 1024 * 1024 * 1024, child: Text('1 GB')),
-              DropdownMenuItem(
-                value: 2 * 1024 * 1024 * 1024,
-                child: Text('2 GB'),
+          const SizedBox(height: Insets.xl),
+          SectionCard(
+            title: '网络与容量',
+            children: [
+              const SizedBox(height: Insets.sm),
+              _usageStat(theme),
+              const SizedBox(height: Insets.lg),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('仅在 Wi-Fi 下下载'),
+                value: _wifiOnly,
+                onChanged: (value) => setState(() => _wifiOnly = value),
+              ),
+              const SizedBox(height: Insets.md),
+              DropdownButtonFormField<int>(
+                initialValue: _maxCacheBytes,
+                decoration: const InputDecoration(labelText: '缓存容量上限'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 256 * 1024 * 1024,
+                    child: Text('256 MB'),
+                  ),
+                  DropdownMenuItem(
+                    value: 512 * 1024 * 1024,
+                    child: Text('512 MB'),
+                  ),
+                  DropdownMenuItem(
+                    value: 1024 * 1024 * 1024,
+                    child: Text('1 GB'),
+                  ),
+                  DropdownMenuItem(
+                    value: 2 * 1024 * 1024 * 1024,
+                    child: Text('2 GB'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _maxCacheBytes = value);
+                  }
+                },
               ),
             ],
-            onChanged: (value) {
-              if (value != null) {
-                setState(() => _maxCacheBytes = value);
-              }
-            },
-          ),
-          const SizedBox(height: 24),
-          Text(
-            _wholeBook
-                ? '将缓存所有未读章节'
-                : '将缓存当前章节及后续 ${_chaptersController.text} 章',
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _applying ? null : _apply,
-            icon: const Icon(Icons.check),
-            label: Text(_applying ? '应用中' : '应用'),
           ),
         ],
       ),
+      bottomNavigationBar: StickyActionBar(
+        summary: Text(
+          _wholeBook
+              ? '将缓存所有未读章节'
+              : '将缓存当前章节及后续 ${_chaptersController.text} 章',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        action: FilledButton.icon(
+          onPressed: _applying ? null : _apply,
+          icon: const Icon(Icons.check),
+          label: Text(_applying ? '应用中' : '应用'),
+        ),
+      ),
+    );
+  }
+
+  Widget _usageStat(ThemeData theme) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '当前缓存',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '${_formatBytes(widget.cachedBytes)} · '
+                '${widget.cachedSegmentCount} 段',
+                style: theme.textTheme.titleMedium,
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  value: min(1, widget.cachedBytes / _maxCacheBytes),
+                  minHeight: 6,
+                  color: context.paper.accent,
+                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

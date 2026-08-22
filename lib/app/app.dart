@@ -12,6 +12,7 @@ import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetr
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';
+import 'package:novel_voice_reader/features/settings/data/theme_mode_preference_store.dart';
 
 final class NovelVoiceReaderApp extends StatefulWidget {
   const NovelVoiceReaderApp({
@@ -20,6 +21,7 @@ final class NovelVoiceReaderApp extends StatefulWidget {
     this.playbackRuntime,
     this.audioCacheRuntime,
     this.backgroundAudioSession,
+    this.themeModeStore,
     this.telemetry = const NoopPlaybackTelemetry(),
   });
 
@@ -27,6 +29,7 @@ final class NovelVoiceReaderApp extends StatefulWidget {
   final PlaybackRuntime? playbackRuntime;
   final AudioCacheRuntime? audioCacheRuntime;
   final BackgroundAudioSession? backgroundAudioSession;
+  final ThemeModePreferenceStore? themeModeStore;
   final PlaybackTelemetry telemetry;
 
   @override
@@ -106,14 +109,22 @@ final class _NovelVoiceReaderAppState extends State<NovelVoiceReaderApp>
           widget.backgroundAudioSession,
         ),
         playbackTelemetryProvider.overrideWithValue(widget.telemetry),
+        themeModePreferenceStoreProvider.overrideWithValue(
+          widget.themeModeStore,
+        ),
       ],
-      child: MaterialApp.router(
-        debugShowCheckedModeBanner: false,
-        title: '声阅',
-        theme: AppTheme.light(),
-        darkTheme: AppTheme.dark(),
-        themeMode: ThemeMode.system,
-        routerConfig: _router,
+      child: Consumer(
+        builder: (context, ref, _) {
+          final themeMode = ref.watch(themeModeControllerProvider);
+          return MaterialApp.router(
+            debugShowCheckedModeBanner: false,
+            title: '声阅',
+            theme: AppTheme.light(),
+            darkTheme: AppTheme.dark(),
+            themeMode: themeMode,
+            routerConfig: _router,
+          );
+        },
       ),
     );
   }

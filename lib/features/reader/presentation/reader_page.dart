@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:novel_voice_reader/app/design/paper_tokens.dart';
+import 'package:novel_voice_reader/app/theme.dart';
 import 'package:novel_voice_reader/features/reader/application/auto_scroll_controller.dart';
 import 'package:novel_voice_reader/features/reader/application/reader_chapter_window_controller.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
@@ -277,7 +279,7 @@ final class _ReaderPageState extends State<ReaderPage> {
                       key: ValueKey<ReaderPageMode>(_pageMode),
                       mode: _pageMode,
                       items: items,
-                      textStyle: TextStyle(fontSize: _fontSize, height: 1.8),
+                      textStyle: _readingTextStyle(context),
                       headingStyle:
                           Theme.of(context).textTheme.headlineSmall ??
                           const TextStyle(fontSize: 24),
@@ -375,15 +377,14 @@ final class _ReaderPageState extends State<ReaderPage> {
 
   // The dark colour scheme the bottom bar and its dialog render against, so
   // they stay unified with the dark reading theme even when the app itself is
-  // light ("弹窗样式适配深色阅读主题，和阅读器整体深色风格统一").
+  // light ("弹窗样式适配深色阅读主题，和阅读器整体深色风格统一"). Uses the
+  // hand-authored warm-paper night palette rather than a seeded generic dark so
+  // the chrome matches the rest of the design system.
   ColorScheme _readerBarScheme(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return scheme.brightness == Brightness.dark
         ? scheme
-        : ColorScheme.fromSeed(
-            seedColor: scheme.primary,
-            brightness: Brightness.dark,
-          );
+        : AppTheme.darkColorScheme;
   }
 
   /// The bottom control bar. It is NOT persistent: it shares the top toolbar's
@@ -736,6 +737,16 @@ final class _ReaderPageState extends State<ReaderPage> {
     };
   }
 
+  // The base style for flowing reading text: the serif "book" face at the
+  // reader's chosen size. Shared by the scroll and paged views so the two
+  // reading modes stay visually identical.
+  TextStyle _readingTextStyle(BuildContext context) => TextStyle(
+    fontFamily: PaperFonts.serif,
+    fontSize: _fontSize,
+    height: 1.8,
+    color: Theme.of(context).colorScheme.onSurface,
+  );
+
   Widget _buildChapterHeading(BuildContext context, ReaderChapter chapter) {
     final section = widget.sections
         .where((candidate) => candidate.chapter.id == chapter.id)
@@ -769,6 +780,8 @@ final class _ReaderPageState extends State<ReaderPage> {
         widget.playbackCursor?.chapterId == paragraph.chapterId &&
         widget.playbackCursor?.paragraphIndex == paragraph.index;
     final active = widget.playbackActive && paragraph.id == _activeParagraphId;
+    final scheme = Theme.of(context).colorScheme;
+    final paper = context.paper;
     return KeyedSubtree(
       key: playing
           ? ValueKey<String>(
@@ -783,25 +796,24 @@ final class _ReaderPageState extends State<ReaderPage> {
                 ? 'active-paragraph-${paragraph.id}'
                 : 'paragraph-${paragraph.id}',
           ),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(8),
           onTap: () => _selectParagraph(paragraph),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
+              // The paragraph being narrated gets the warm "now-reading" wash;
+              // a paragraph merely tapped (selected) gets a quieter tint.
               color: playing
-                  ? Theme.of(context).colorScheme.primaryContainer
+                  ? paper.highlightWash
                   : active
-                  ? Theme.of(context).colorScheme.secondaryContainer
+                  ? scheme.surfaceContainerHigh
                   : null,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(8),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  paragraph.text,
-                  style: TextStyle(fontSize: _fontSize, height: 1.8),
-                ),
+                Text(paragraph.text, style: _readingTextStyle(context)),
                 if (active)
                   Align(
                     alignment: Alignment.centerRight,

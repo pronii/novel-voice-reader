@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:novel_voice_reader/app/widgets/section_card.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_credentials_input.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
@@ -169,14 +170,15 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
           ),
           if (cloud) ..._cloudFields(),
           if (mimo) ..._mimoFields(),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: _saving || _testingConnection ? null : _save,
-            icon: const Icon(Icons.save_outlined),
-            label: Text(_saving ? '保存中' : '保存'),
-          ),
           if (widget.onSaveDiagnosticsEndpoint != null) ..._diagnosticsFields(),
         ],
+      ),
+      bottomNavigationBar: StickyActionBar(
+        action: FilledButton.icon(
+          onPressed: _saving || _testingConnection ? null : _save,
+          icon: const Icon(Icons.save_outlined),
+          label: Text(_saving ? '保存中' : '保存'),
+        ),
       ),
     );
   }
