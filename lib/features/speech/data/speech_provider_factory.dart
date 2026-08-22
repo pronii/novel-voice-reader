@@ -6,6 +6,7 @@ import 'package:novel_voice_reader/features/downloads/data/audio_cache_repositor
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/data/cloud_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
+import 'package:novel_voice_reader/features/speech/data/server_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
@@ -28,6 +29,12 @@ final class SpeechProviderFactory {
     return switch (profile.providerType) {
       SpeechProviderType.cloud => _cached(
         () => CloudTtsClient(
+          dio: _requiredDio,
+          credentials: _requiredCredentials,
+        ),
+      ),
+      SpeechProviderType.server => _cached(
+        () => ServerTtsClient(
           dio: _requiredDio,
           credentials: _requiredCredentials,
         ),

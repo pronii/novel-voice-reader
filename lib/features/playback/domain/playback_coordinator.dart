@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
@@ -22,7 +23,6 @@ typedef PlaybackRetryDelay = Future<void> Function(Duration duration);
 
 Future<void> _defaultRetryDelay(Duration duration) =>
     Future<void>.delayed(duration);
-
 
 abstract interface class PlaybackController {
   PlaybackCursor? get cursor;
@@ -76,8 +76,9 @@ final class PlaybackCoordinator implements PlaybackController {
     required VoiceProfile voiceProfile,
     SpeechSegmenter segmenter = const SpeechSegmenter(),
     void Function(AppFailure failure)? onFailure,
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
     Duration watchdogGrace = const Duration(seconds: 15),
-    int maxSegmentRetries = 2,
+    int maxSegmentRetries = 1,
     WatchdogTimerFactory scheduleWatchdog = _defaultScheduleWatchdog,
     PlaybackRetryDelay retryDelay = _defaultRetryDelay,
   }) {
@@ -88,6 +89,7 @@ final class PlaybackCoordinator implements PlaybackController {
       voiceProfile,
       segmenter,
       onFailure,
+      telemetry,
       watchdogGrace,
       maxSegmentRetries,
       scheduleWatchdog,
@@ -102,6 +104,7 @@ final class PlaybackCoordinator implements PlaybackController {
     this._voiceProfile,
     this._segmenter,
     this._onFailure,
+    this._telemetry,
     this._watchdogGrace,
     this._maxSegmentRetries,
     this._scheduleWatchdog,
@@ -132,6 +135,7 @@ final class PlaybackCoordinator implements PlaybackController {
   final VoiceProfile _voiceProfile;
   final SpeechSegmenter _segmenter;
   final void Function(AppFailure failure)? _onFailure;
+  final PlaybackTelemetry _telemetry;
   final Duration _watchdogGrace;
   final int _maxSegmentRetries;
   final WatchdogTimerFactory _scheduleWatchdog;
@@ -162,6 +166,18 @@ final class PlaybackCoordinator implements PlaybackController {
   int? _chapterCharacters;
   Timer? _watchdog;
   int _segmentRetries = 0;
+
+  // Steady-state playback emits a position event several times a second for
+  // hours on a locked screen. These caches keep the per-event work O(1): the
+  // enrichment character counts only change when the segment list or active
+  // index changes, and the watchdog deadline only needs pushing out once the
+  // media position has advanced enough to matter. Both use timeline.position
+  // as the clock, so the throttling stays deterministic (no wall-clock reads).
+  List<SpeechSegment>? _enrichCacheSegments;
+  int _enrichCacheSegmentIndex = -1;
+  int _enrichCompletedCharacters = 0;
+  int _enrichCurrentCharacters = 0;
+  PlaybackTimeline? _lastWatchdogExtendTimeline;
 
   /// Whether the app is in the foreground. While backgrounded the coordinator
   /// checks the local cache first, but a miss still falls back to synthesis
@@ -197,6 +213,10 @@ final class PlaybackCoordinator implements PlaybackController {
 
   @override
   Future<void> playFrom(PlaybackCursor cursor) async {
+    _record('playback.start.begin', {
+      'chapter_id': cursor.chapterId,
+      'paragraph_index': cursor.paragraphIndex,
+    });
     _paused = false;
     final generation = ++_playbackGeneration;
     final paragraph = await _paragraphs.at(cursor);
@@ -204,8 +224,10 @@ final class PlaybackCoordinator implements PlaybackController {
       return;
     }
     if (paragraph == null) {
+      _record('playback.start.failure', {'reason': 'paragraph_not_found'});
       throw StateError('Playback cursor does not point to a paragraph.');
     }
+    _record('playback.paragraph.loaded', {'paragraph_id': paragraph.id});
     await _startParagraph(paragraph, generation: generation);
   }
 
@@ -415,6 +437,11 @@ final class PlaybackCoordinator implements PlaybackController {
     }
     _cancelWatchdog();
     final provider = _provider;
+    final startedAt = Stopwatch()..start();
+    _record('playback.segment.prepare.begin', {
+      'segment_id': segment.id,
+      'continuation': continuation,
+    });
 
     // Native auto-advance: the player already moved into this segment from its
     // look-ahead queue while the screen was locked. Do NOT prepare()/play()
@@ -437,10 +464,9 @@ final class PlaybackCoordinator implements PlaybackController {
     _acceptTimeline = false;
     _timelineChanges.add(_enrichTimeline(PlaybackTimeline.zero));
 
-    // Prefer an already-generated file while backgrounded. A miss must fall
-    // through to normal prepare(): iOS permits network work supporting active
-    // background audio, and stopping here would make a finite cache the hard
-    // playback limit whenever the screen is locked.
+    // Prefer an already-generated file while backgrounded. A miss still falls
+    // through to synthesis: rolling batch prefetch normally keeps the native
+    // queue ahead, while this remains the last-resort fallback.
     if (!_foreground && provider is CacheOnlySpeechProvider) {
       final ready = await (provider as CacheOnlySpeechProvider).prepareCached(
         segment,
@@ -454,7 +480,16 @@ final class PlaybackCoordinator implements PlaybackController {
       }
     }
 
-    await _provider.prepare(segment, _voiceProfile);
+    try {
+      await _provider.prepare(segment, _voiceProfile);
+    } catch (error) {
+      _record('playback.segment.prepare.failure', {
+        'segment_id': segment.id,
+        'error_type': error.runtimeType.toString(),
+        'elapsed_ms': startedAt.elapsedMilliseconds,
+      });
+      rethrow;
+    }
     if (!_ownsContinuation(continuationEpoch)) {
       return false;
     }
@@ -476,9 +511,19 @@ final class PlaybackCoordinator implements PlaybackController {
         return false;
       }
     }
-    await _provider.play();
+    _record('playback.audio.play.begin', {'segment_id': segment.id});
+    try {
+      await _provider.play();
+    } catch (error) {
+      _record('playback.audio.play.failure', {
+        'segment_id': segment.id,
+        'error_type': error.runtimeType.toString(),
+      });
+      rethrow;
+    }
     final current = _ownsContinuation(continuationEpoch);
     if (current) {
+      _record('playback.audio.play.success', {'segment_id': segment.id});
       _publishActivity(PlaybackActivity.playing);
       _armWatchdog(continuationEpoch, segment);
     }
@@ -499,13 +544,30 @@ final class PlaybackCoordinator implements PlaybackController {
     return result;
   }
 
+  /// True for failures that are transient (upstream rate limit, 5xx, timeout,
+  /// connection drop) and should be skipped past instead of stopping playback.
+  /// Persistent failures (auth, invalid config) keep the banner path.
+  bool _isRecoverableSpeechFailure(AppFailure failure) {
+    final message = failure.message;
+    return message.contains('请求过于频繁') ||
+        message.contains('暂时不可用') ||
+        message.contains('连接超时') ||
+        message.contains('无法连接') ||
+        message.contains('合成超时') ||
+        message.contains('请求失败');
+  }
+
   Future<void> _handleSpeechEvent(SpeechEvent event) async {
     final continuationEpoch = _activeContinuationEpoch;
-    if (continuationEpoch == null ||
-        !_ownsContinuation(continuationEpoch)) {
+    if (continuationEpoch == null || !_ownsContinuation(continuationEpoch)) {
       return;
     }
     if (event is SpeechFailed) {
+      _record('playback.speech.failure', {
+        'segment_id': event.segmentId,
+        'message': event.failure.message,
+        'retry': _segmentRetries,
+      });
       if (_segments.isEmpty || event.segmentId != _segments[_segmentIndex].id) {
         return;
       }
@@ -530,6 +592,20 @@ final class PlaybackCoordinator implements PlaybackController {
         return;
       }
       _segmentRetries = 0;
+      if (_isRecoverableSpeechFailure(event.failure)) {
+        // A transient upstream hiccup (rate limit, 5xx, timeout, connection
+        // drop) after a long playback session should not stop the book dead.
+        // Skip the failed segment and keep moving: the user hears an
+        // occasional skipped sentence instead of a stall that needs a manual
+        // tap to resume. Persistent failures (auth etc.) still surface the
+        // banner below.
+        _record('playback.speech.skip', {
+          'segment_id': event.segmentId,
+          'message': event.failure.message,
+        });
+        await _advanceAfterSegmentCompleted(continuationEpoch);
+        return;
+      }
       _cancelWatchdog();
       _acceptTimeline = false;
       _timelineChanges.add(PlaybackTimeline.zero);
@@ -621,10 +697,18 @@ final class PlaybackCoordinator implements PlaybackController {
   void _cancelWatchdog() {
     _watchdog?.cancel();
     _watchdog = null;
+    _lastWatchdogExtendTimeline = null;
   }
 
   Duration _watchdogTimeoutFor(SpeechSegment segment) {
-    const microsPerCharacter = 240000;
+    // Conservative estimate (~2.5 chars/sec). Narration with tone words,
+    // pauses and punctuation runs slower than the naive 4 chars/sec, and on a
+    // locked iOS screen position events are throttled so the watchdog is not
+    // extended by live timeline updates. An over-eager timeout made the
+    // recovery path replay the current segment (up to 3 plays for one
+    // sentence) — the "repeats a sentence / talks gibberish" reports. Keep the
+    // margin wide so a real stall is required before the watchdog fires.
+    const microsPerCharacter = 400000;
     final characters = segment.text.runes.length;
     final speed = _speed <= 0 ? 1.0 : _speed;
     final estimate = Duration(
@@ -648,6 +732,23 @@ final class PlaybackCoordinator implements PlaybackController {
     if (duration == null || timeline.position >= duration) {
       return;
     }
+    // Re-arming the watchdog on every position event allocates and cancels a
+    // Timer several times a second for the whole segment. The armed timer
+    // already counts down toward completion, and skipping a re-arm only leaves
+    // an older (larger) remaining deadline in place — so it can never fire
+    // early, only slightly later. Skip until the media position has advanced
+    // by a meaningful step (or the segment duration changed), which keeps the
+    // deadline fresh during buffering/slow playback while cutting the steady-
+    // state churn by an order of magnitude. Deterministic: position is the
+    // clock, not wall time.
+    const reArmInterval = Duration(seconds: 5);
+    final last = _lastWatchdogExtendTimeline;
+    if (last != null &&
+        last.duration == duration &&
+        timeline.position >= last.position &&
+        timeline.position - last.position < reArmInterval) {
+      return;
+    }
     final remaining = duration - timeline.position + _watchdogGrace;
     final segmentIndex = _segmentIndex;
     _cancelWatchdog();
@@ -659,9 +760,13 @@ final class PlaybackCoordinator implements PlaybackController {
       );
       unawaited(_speechEventTransactions);
     });
+    _lastWatchdogExtendTimeline = timeline;
   }
 
-  Future<void> _onWatchdogTimeout(int continuationEpoch, int segmentIndex) async {
+  Future<void> _onWatchdogTimeout(
+    int continuationEpoch,
+    int segmentIndex,
+  ) async {
     if (_paused ||
         _disposing ||
         _segments.isEmpty ||
@@ -749,8 +854,10 @@ final class PlaybackCoordinator implements PlaybackController {
       // per character estimate, five minutes is roughly 1250 characters.
       const prefetchTarget = Duration(minutes: 5);
       const microsPerCharacter = 240000;
-      final targetCharacters = prefetchTarget.inMicroseconds ~/ microsPerCharacter;
+      final targetCharacters =
+          prefetchTarget.inMicroseconds ~/ microsPerCharacter;
       var plannedCharacters = 0;
+      final plannedSegments = <SpeechSegment>[];
       var cursor = _cursor;
       var segments = _segments.skip(_segmentIndex + 1).toList();
 
@@ -760,30 +867,24 @@ final class PlaybackCoordinator implements PlaybackController {
           if (!_ownsContinuation(continuationEpoch)) {
             return;
           }
-          // Prefetch happens while the current segment is still playing, so the
-          // audio session and network are still alive even on a locked screen.
-          // Retrying a failed synth here (rather than swallowing it) is what
-          // warms the cache before the segment is needed; if it still fails
-          // after backoff, stop this pass — a later advance/retry reschedules
-          // prefetch — and let prepare() remain the authoritative fallback.
-          if (!await _prefetchSegmentWithRetry(
-            provider,
-            segment,
-            continuationEpoch,
-          )) {
-            return;
-          }
+          plannedSegments.add(segment);
           plannedCharacters += segment.text.runes.length;
           if (plannedCharacters >= targetCharacters) {
-            return;
+            break;
           }
         }
+        if (plannedCharacters >= targetCharacters) {
+          break;
+        }
         if (cursor == null) {
-          return;
+          break;
         }
         final next = await _paragraphs.nextAfter(cursor);
-        if (next == null || !_ownsContinuation(continuationEpoch)) {
+        if (!_ownsContinuation(continuationEpoch)) {
           return;
+        }
+        if (next == null) {
+          break;
         }
         cursor = next.cursor;
         segments = _segmenter.split(
@@ -792,8 +893,50 @@ final class PlaybackCoordinator implements PlaybackController {
           maxCharacters: _voiceProfile.maxSegmentCharacters,
         );
       }
+      if (!_ownsContinuation(continuationEpoch) || plannedSegments.isEmpty) {
+        return;
+      }
+      if (provider is BatchPrefetchingSpeechProvider) {
+        await _prefetchBatchWithRetry(
+          provider,
+          plannedSegments,
+          continuationEpoch,
+        );
+        return;
+      }
+      for (final segment in plannedSegments) {
+        if (!await _prefetchSegmentWithRetry(
+          provider,
+          segment,
+          continuationEpoch,
+        )) {
+          return;
+        }
+      }
     } catch (_) {
       // Normal prepare remains the authoritative fallback and error path.
+    }
+  }
+
+  Future<bool> _prefetchBatchWithRetry(
+    BatchPrefetchingSpeechProvider provider,
+    List<SpeechSegment> segments,
+    int continuationEpoch,
+  ) async {
+    const maxAttempts = 4;
+    for (var attempt = 1; ; attempt++) {
+      if (_disposing || !_ownsContinuation(continuationEpoch)) {
+        return false;
+      }
+      try {
+        await provider.prefetchBatch(segments, _voiceProfile);
+        return true;
+      } catch (_) {
+        if (attempt >= maxAttempts) {
+          return false;
+        }
+        await _retryDelay(_retryBackoff(attempt));
+      }
     }
   }
 
@@ -834,16 +977,27 @@ final class PlaybackCoordinator implements PlaybackController {
     }
   }
 
+  void _record(String name, [Map<String, Object?> fields = const {}]) {
+    _telemetry.record(name, fields);
+  }
+
   PlaybackTimeline _enrichTimeline(PlaybackTimeline timeline) {
     final chapterCharacters = _chapterCharacters;
     if (chapterCharacters == null || _segments.isEmpty) {
       return timeline;
     }
     const fallbackMicrosPerCharacter = 240000;
-    final completedCharacters = _segments
-        .take(_segmentIndex)
-        .fold<int>(0, (total, segment) => total + segment.text.runes.length);
-    final currentCharacters = _segments[_segmentIndex].text.runes.length;
+    if (!identical(_segments, _enrichCacheSegments) ||
+        _segmentIndex != _enrichCacheSegmentIndex) {
+      _enrichCompletedCharacters = _segments
+          .take(_segmentIndex)
+          .fold<int>(0, (total, segment) => total + segment.text.runes.length);
+      _enrichCurrentCharacters = _segments[_segmentIndex].text.runes.length;
+      _enrichCacheSegments = _segments;
+      _enrichCacheSegmentIndex = _segmentIndex;
+    }
+    final completedCharacters = _enrichCompletedCharacters;
+    final currentCharacters = _enrichCurrentCharacters;
     final laterCharacters = max(
       0,
       chapterCharacters - completedCharacters - currentCharacters,
@@ -865,7 +1019,8 @@ final class PlaybackCoordinator implements PlaybackController {
       microseconds:
           completedCharacters * microsPerCharacter + position.inMicroseconds,
     );
-    final chapterRemaining = currentRemaining +
+    final chapterRemaining =
+        currentRemaining +
         Duration(microseconds: laterCharacters * microsPerCharacter);
     return PlaybackTimeline(
       position: position,

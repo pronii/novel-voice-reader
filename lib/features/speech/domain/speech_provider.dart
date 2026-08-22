@@ -29,6 +29,14 @@ abstract interface class PrefetchingSpeechProvider {
   Future<void> prefetch(SpeechSegment segment, VoiceProfile profile);
 }
 
+abstract interface class BatchPrefetchingSpeechProvider
+    implements PrefetchingSpeechProvider {
+  Future<void> prefetchBatch(
+    List<SpeechSegment> segments,
+    VoiceProfile profile,
+  );
+}
+
 /// A provider that keeps a native playlist of prefetched segments and advances
 /// through them by itself. When the segment the coordinator wants to play next
 /// is already the one the native player has advanced to, prepare() (which may

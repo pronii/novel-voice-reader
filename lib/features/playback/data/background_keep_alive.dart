@@ -4,6 +4,11 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:just_audio/just_audio.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
+
+// `_telemetry` is initialized from a public named parameter and so cannot be a
+// `this._field` initializing formal (named params may not start with `_`).
+// ignore_for_file: prefer_initializing_formals
 
 /// Keeps the platform audio session continuously producing output while
 /// playback is active.
@@ -88,18 +93,24 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
   SilentKeepAlivePlayer({
     required Future<Directory> Function() supportDirectory,
     KeepAliveAudioOutput? output,
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
   }) : _output = output ?? JustAudioKeepAliveOutput(),
-       // ignore: prefer_initializing_formals
+       _telemetry = telemetry,
        _supportDirectory = supportDirectory {
-    _errorSubscription = _output.errors.listen((_) {
+    _errorSubscription = _output.errors.listen((error) {
       // The running loop failed (typically the backing file was purged while
       // backgrounded). Rebuild the source and resume so the session keeps
       // rendering instead of silently dying.
+      _telemetry.record('keepalive.error', {
+        'error': error.runtimeType.toString(),
+        'message': error.toString(),
+      });
       unawaited(_recover());
     });
   }
 
   final KeepAliveAudioOutput _output;
+  final PlaybackTelemetry _telemetry;
   final Future<Directory> Function() _supportDirectory;
   late final StreamSubscription<Object> _errorSubscription;
   Future<void>? _prepared;
@@ -136,6 +147,7 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
       return;
     }
     _running = true;
+    _telemetry.record('keepalive.start');
     try {
       await _ensurePrepared();
       if (_disposed) {
@@ -145,9 +157,13 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
       // stopped. The keep-alive source loops forever, so waiting here would
       // permanently block the sustainer's recovery queue after the first start.
       _startOutput(recoverOnError: true);
-    } catch (_) {
+    } catch (error) {
       // The prepared source may have been evicted; rebuild once and retry so a
       // transient failure doesn't permanently kill the keep-alive loop.
+      _telemetry.record('keepalive.start.error', {
+        'error': error.runtimeType.toString(),
+        'message': error.toString(),
+      });
       await _recover();
     }
   }
@@ -158,6 +174,7 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
       return;
     }
     _running = false;
+    _telemetry.record('keepalive.stop');
     await _output.pause();
   }
 
@@ -180,6 +197,7 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
     if (_disposed || !_running) {
       return;
     }
+    _telemetry.record('keepalive.recover.begin');
     _prepared = null;
     try {
       await _ensurePrepared();
@@ -190,9 +208,14 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
       // here and left for the next explicit start/error signal, preventing a
       // tight infinite recovery loop.
       _startOutput(recoverOnError: false);
-    } catch (_) {
+      _telemetry.record('keepalive.recover.ok');
+    } catch (error) {
       // Give up quietly; the next start()/route change/interruption recovery
       // will try again.
+      _telemetry.record('keepalive.recover.error', {
+        'error': error.runtimeType.toString(),
+        'message': error.toString(),
+      });
     }
   }
 
@@ -204,7 +227,12 @@ final class SilentKeepAlivePlayer implements KeepAlivePlayer {
     unawaited(
       play.then<void>(
         (_) {},
-        onError: (Object _, StackTrace _) {
+        onError: (Object error, StackTrace _) {
+          _telemetry.record('keepalive.play.error', {
+            'error': error.runtimeType.toString(),
+            'message': error.toString(),
+            'recoverOnError': recoverOnError,
+          });
           if (recoverOnError) {
             unawaited(_recover());
           }

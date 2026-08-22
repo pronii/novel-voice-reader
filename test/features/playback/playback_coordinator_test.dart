@@ -373,8 +373,6 @@ void main() {
       provider.completeCurrent();
       await pumpEventQueue();
 
-      // Cache lookup misses, then normal prepare performs the TTS synthesis and
-      // playback continues without waiting for the app to return foreground.
       expect(provider.prepared.map((segment) => segment.id), ['1:0', '2:0']);
       expect(provider.cacheChecked.map((segment) => segment.id), ['2:0']);
       expect(failures, isEmpty);
@@ -414,8 +412,6 @@ void main() {
       provider.completeCurrent();
       await pumpEventQueue();
 
-      // The next in-paragraph segment was not cached, so cache-first lookup
-      // falls through to synthesis while the screen remains locked.
       expect(provider.prepared.map((segment) => segment.id), ['1:0', '1:1']);
       expect(provider.cacheChecked.map((segment) => segment.id), ['1:1']);
       expect(failures, isEmpty);

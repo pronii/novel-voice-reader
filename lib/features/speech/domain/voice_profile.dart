@@ -1,4 +1,4 @@
-enum SpeechProviderType { cloud, mimo }
+enum SpeechProviderType { cloud, server, mimo }
 
 final class VoiceProfile {
   static const _cloudOutputFormats = <String>{
@@ -91,6 +91,30 @@ final class VoiceProfile {
       style: normalizedStyle == null || normalizedStyle.isEmpty
           ? null
           : normalizedStyle,
+    );
+  }
+
+  factory VoiceProfile.server({
+    required String baseUrl,
+    required String model,
+    required String voice,
+    required double speed,
+    String outputFormat = 'wav',
+  }) {
+    final cloud = VoiceProfile.cloud(
+      baseUrl: baseUrl,
+      model: model,
+      voice: voice,
+      speed: speed,
+      outputFormat: outputFormat,
+    );
+    return VoiceProfile._(
+      providerType: SpeechProviderType.server,
+      baseUrl: cloud.baseUrl,
+      model: cloud.model,
+      voice: cloud.voice,
+      speed: cloud.speed,
+      outputFormat: cloud.outputFormat,
     );
   }
 

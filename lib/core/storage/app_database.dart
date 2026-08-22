@@ -145,10 +145,14 @@ final class AppDatabase extends _$AppDatabase {
       AppDatabase(executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (migrator) async {
+      await migrator.createAll();
+      await _createAudioCacheIndexes();
+    },
     onUpgrade: (migrator, from, to) async {
       if (from < 2) {
         await migrator.createTable(tencentTtsMonthlyUsages);
@@ -156,11 +160,35 @@ final class AppDatabase extends _$AppDatabase {
       if (from < 3) {
         await migrator.addColumn(voiceProfiles, voiceProfiles.style);
       }
+      if (from < 4) {
+        await _createAudioCacheIndexes();
+      }
     },
     beforeOpen: (_) async {
       await customStatement('PRAGMA foreign_keys = ON');
     },
   );
+
+  /// Pruning and cache-size accounting scan cache rows filtered by
+  /// `(bookId, status)`; without this index every prune (and it runs after each
+  /// synthesized segment) is a full-table scan over the whole cache.
+  ///
+  /// Guarded by a table-existence check: real installs created
+  /// `audio_cache_entries` at v1, but a partially-provisioned database (such as
+  /// the minimal fixtures in the migration tests) must not fail to open here.
+  Future<void> _createAudioCacheIndexes() async {
+    final table = await customSelect(
+      "SELECT 1 FROM sqlite_master "
+      "WHERE type = 'table' AND name = 'audio_cache_entries'",
+    ).get();
+    if (table.isEmpty) {
+      return;
+    }
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS audio_cache_entries_book_status '
+      'ON audio_cache_entries (book_id, status)',
+    );
+  }
 
   Future<int> createBookWithChapter({
     required String title,
