@@ -138,7 +138,12 @@ final class _ReaderPageState extends State<ReaderPage> {
   Offset? _bodyPointerDownPosition;
   bool _bodyPointerTapEligible = false;
 
-  List<ReaderContentItem> get _items {
+  // Memoized content list, rebuilt only when the source [sections]/[chapters]
+  // change (see [_rebuildItems]). Recomputing it per access allocated the whole
+  // list on hot scroll / auto-scroll / 1 Hz heartbeat paths.
+  late List<ReaderContentItem> _items;
+
+  void _rebuildItems() {
     final items = <ReaderContentItem>[
       for (final section in widget.sections) ...[
         ReaderChapterHeadingItem(section.chapter),
@@ -151,12 +156,13 @@ final class _ReaderPageState extends State<ReaderPage> {
         widget.sections.last.chapter.id == widget.chapters.last.id) {
       items.add(ReaderBookEndItem(widget.sections.last.chapter.id));
     }
-    return items;
+    _items = items;
   }
 
   @override
   void initState() {
     super.initState();
+    _rebuildItems();
     _pageMode = widget.initialPageMode;
     _resetNavigationState();
     _itemPositions.itemPositions.addListener(_onItemPositionsChanged);
@@ -179,6 +185,10 @@ final class _ReaderPageState extends State<ReaderPage> {
   @override
   void didUpdateWidget(covariant ReaderPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.sections, widget.sections) ||
+        !identical(oldWidget.chapters, widget.chapters)) {
+      _rebuildItems();
+    }
     if (oldWidget.navigationGeneration != widget.navigationGeneration) {
       _invalidatePendingProgressReport();
       _scrollMoved = false;
@@ -1448,34 +1458,45 @@ final class _ReaderPageState extends State<ReaderPage> {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('字号', style: Theme.of(context).textTheme.titleMedium),
-                Slider(
-                  key: const Key('reader-font-size-slider'),
-                  value: _fontSize,
-                  min: 15,
-                  max: 30,
-                  divisions: 15,
-                  label: _fontSize.round().toString(),
-                  onChanged: (value) {
-                    setState(() => _fontSize = value);
-                    setSheetState(() {});
-                  },
-                ),
-                const SizedBox(height: 8),
-                _buildAutoScrollSettings(context),
-              ],
+      builder: (context) {
+        // Track the slider value locally so dragging only moves the thumb/label
+        // (cheap) instead of triggering a full page rebuild — and, in the paged
+        // modes, a full synchronous re-pagination — on every division tick. The
+        // chosen size is applied to the page once, on release.
+        var pendingFontSize = _fontSize;
+        return StatefulBuilder(
+          builder: (context, setSheetState) => SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('字号', style: Theme.of(context).textTheme.titleMedium),
+                  Slider(
+                    key: const Key('reader-font-size-slider'),
+                    value: pendingFontSize,
+                    min: 15,
+                    max: 30,
+                    divisions: 15,
+                    label: pendingFontSize.round().toString(),
+                    onChanged: (value) {
+                      setSheetState(() => pendingFontSize = value);
+                    },
+                    onChangeEnd: (value) {
+                      if (value != _fontSize) {
+                        setState(() => _fontSize = value);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  _buildAutoScrollSettings(context),
+                ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
