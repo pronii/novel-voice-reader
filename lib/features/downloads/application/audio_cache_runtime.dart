@@ -49,6 +49,11 @@ final class AudioCacheRuntime {
   final Directory Function(int bookId) cacheDirectoryForBook;
   final Dio _dio;
   final SecureCredentials _credentials;
+
+  /// The process-wide credentials store. Exposed so the settings UI shares the
+  /// exact instance the background synthesis path reads from — a saved API key
+  /// updates the same in-memory cache the locked-screen synthesizer sees.
+  SecureCredentials get credentials => _credentials;
   final DownloadNetworkGate _networkGate;
   final Future<VoiceProfile?> Function()? _activeProfileLoader;
   final Stream<List<ConnectivityResult>>? _connectivityChanges;

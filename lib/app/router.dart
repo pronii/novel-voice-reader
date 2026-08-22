@@ -673,9 +673,14 @@ Future<String> _exportDiagnosticsToClipboard() async {
 }
 
 final _secureCredentialsProvider = Provider.autoDispose<SecureCredentials>(
-  (ref) => SecureCredentials(
-    FlutterSecureKeyValueStore(),
-  ),
+  (ref) {
+    // Reuse the runtime's process-wide instance so a key saved here updates the
+    // same in-memory cache the background synthesizer reads. The standalone
+    // fallback only applies when no runtime is wired (degraded / test paths),
+    // where nothing is synthesizing in the background to go stale.
+    final runtime = ref.watch(audioCacheRuntimeProvider);
+    return runtime?.credentials ?? SecureCredentials(FlutterSecureKeyValueStore());
+  },
 );
 
 final _voiceSettingsInitialDataProvider =
