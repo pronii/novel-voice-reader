@@ -15,6 +15,19 @@ final longParagraphs = List.generate(
   ),
 );
 
+// Enough long paragraphs that the paginated (slide/curl) view splits the
+// chapter across several screen pages, so a left/right tap has somewhere to
+// turn in the page-turn tests.
+final pagedParagraphs = List.generate(
+  30,
+  (index) => ReaderParagraph(
+    id: 200 + index,
+    chapterId: 10,
+    index: index,
+    text: '第${index + 1}段。${'翻页测试的正文内容，需要足够长以占满版面。' * 2}',
+  ),
+);
+
 void main() {
   testWidgets('hides the reader toolbar when the page first opens', (
     tester,
@@ -80,6 +93,73 @@ void main() {
       const Offset(0, -1),
     );
   });
+
+  testWidgets(
+    'paged mode: tapping the outer thirds turns pages, not the toolbar',
+    (tester) async {
+      _useNarrowViewport(tester);
+      final reported = <ReaderParagraph>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: _reader(
+            paragraphs: pagedParagraphs,
+            initialPageMode: ReaderPageMode.slide,
+            onReadingPositionChanged: reported.add,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final beforeTurn = reported.length;
+      final body = tester.getRect(find.byKey(const Key('reader-body')));
+
+      // Right third → next page. A new page position is reported, and the
+      // toolbar stays hidden — an outer-third tap turns the page, it does not
+      // toggle the chrome.
+      await tester.tapAt(Offset(body.right - 1, body.center.dy));
+      await tester.pumpAndSettle();
+      expect(reported.length, greaterThan(beforeTurn));
+      expect(
+        tester
+            .widget<AnimatedSlide>(find.byKey(const Key('reader-toolbar')))
+            .offset,
+        const Offset(0, -1),
+      );
+      final afterNext = reported.last;
+
+      // Left third → previous page, back toward the start.
+      await tester.tapAt(Offset(body.left + 1, body.center.dy));
+      await tester.pumpAndSettle();
+      expect(reported.last, isNot(afterNext));
+    },
+  );
+
+  testWidgets(
+    'paged mode: tapping the middle third still toggles the toolbar',
+    (tester) async {
+      _useNarrowViewport(tester);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: _reader(
+            paragraphs: pagedParagraphs,
+            initialPageMode: ReaderPageMode.slide,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // A tap in the central column reveals the chrome, exactly as it does in
+      // scroll mode.
+      final body = tester.getRect(find.byKey(const Key('reader-body')));
+      await tester.tapAt(Offset(body.center.dx, body.top + 1));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<AnimatedSlide>(find.byKey(const Key('reader-toolbar')))
+            .offset,
+        Offset.zero,
+      );
+    },
+  );
 
   testWidgets(
     'revealing the menu bar pauses the crawl and hiding it resumes',

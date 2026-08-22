@@ -42,6 +42,7 @@ void main() {
     ValueChanged<ReaderParagraph>? onReadingPositionChanged,
     PaginatedEdgeLoad? onLoadPrevious,
     PaginatedEdgeLoad? onLoadNext,
+    PaginatedReaderController? controller,
     Size size = const Size(300, 400),
   }) {
     return MaterialApp(
@@ -59,6 +60,7 @@ void main() {
               onReadingPositionChanged: onReadingPositionChanged,
               onLoadPrevious: onLoadPrevious,
               onLoadNext: onLoadNext,
+              controller: controller,
             ),
           ),
         ),
@@ -136,6 +138,81 @@ void main() {
     await tester.fling(find.byType(PageView), const Offset(-260, 0), 1200);
     await tester.pumpAndSettle();
 
+    expect(reported, isNotEmpty);
+  });
+
+  testWidgets(
+    'slide mode: controller turns forward on next, back on previous',
+    (tester) async {
+      final reported = <ReaderParagraph>[];
+      final controller = PaginatedReaderController();
+      await tester.pumpWidget(
+        host(
+          items: buildItems(),
+          controller: controller,
+          initialCursor: const PlaybackCursor(chapterId: 10, paragraphIndex: 0),
+          onReadingPositionChanged: reported.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Opening the pager reports nothing until a turn happens.
+      expect(reported, isEmpty);
+
+      // Right-tap → next page: a new page position is reported.
+      controller.nextPage();
+      await tester.pumpAndSettle();
+      expect(reported, isNotEmpty);
+      final afterNext = reported.last;
+
+      // Left-tap → previous page: turns back to the opening page, whose first
+      // paragraph is the initial cursor's, reporting a different position.
+      controller.previousPage();
+      await tester.pumpAndSettle();
+      expect(reported.last, isNot(afterNext));
+      expect(reported.last.chapterId, 10);
+      expect(reported.last.index, 0);
+    },
+  );
+
+  testWidgets('slide mode: previousPage on the first page is a no-op', (
+    tester,
+  ) async {
+    final reported = <ReaderParagraph>[];
+    final controller = PaginatedReaderController();
+    await tester.pumpWidget(
+      host(
+        items: buildItems(),
+        controller: controller,
+        initialCursor: const PlaybackCursor(chapterId: 10, paragraphIndex: 0),
+        onReadingPositionChanged: reported.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Already on the first page — a left tap turns nowhere and reports nothing.
+    controller.previousPage();
+    await tester.pumpAndSettle();
+    expect(reported, isEmpty);
+  });
+
+  testWidgets('curl mode: controller turns to the next page', (tester) async {
+    final reported = <ReaderParagraph>[];
+    final controller = PaginatedReaderController();
+    await tester.pumpWidget(
+      host(
+        items: buildItems(),
+        mode: ReaderPageMode.curl,
+        controller: controller,
+        initialCursor: const PlaybackCursor(chapterId: 10, paragraphIndex: 0),
+        onReadingPositionChanged: reported.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(reported, isEmpty);
+
+    controller.nextPage();
+    await tester.pumpAndSettle();
     expect(reported, isNotEmpty);
   });
 

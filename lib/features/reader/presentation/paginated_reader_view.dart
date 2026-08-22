@@ -43,6 +43,7 @@ class PaginatedReaderView extends StatefulWidget {
     this.onReadingPositionChanged,
     this.onLoadPrevious,
     this.onLoadNext,
+    this.controller,
   });
 
   final ReaderPageMode mode;
@@ -62,6 +63,10 @@ class PaginatedReaderView extends StatefulWidget {
   final ValueChanged<ReaderParagraph>? onReadingPositionChanged;
   final PaginatedEdgeLoad? onLoadPrevious;
   final PaginatedEdgeLoad? onLoadNext;
+
+  /// Lets the surrounding reader drive page turns from its left/right tap
+  /// zones. Optional — swipe / curl gestures work without it.
+  final PaginatedReaderController? controller;
 
   @override
   State<PaginatedReaderView> createState() => _PaginatedReaderViewState();
@@ -104,11 +109,16 @@ class _PaginatedReaderViewState extends State<PaginatedReaderView> {
   void initState() {
     super.initState();
     _anchorCursor = widget.initialCursor;
+    widget.controller?._attach(this);
   }
 
   @override
   void didUpdateWidget(covariant PaginatedReaderView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.controller, widget.controller)) {
+      oldWidget.controller?._detach(this);
+      widget.controller?._attach(this);
+    }
     // When the narration advances to a new paragraph, flip to its page once the
     // current build settles. Guarded to genuine cursor changes (value equality)
     // so manual page turns — which never move the playback cursor — are not
@@ -127,6 +137,7 @@ class _PaginatedReaderViewState extends State<PaginatedReaderView> {
 
   @override
   void dispose() {
+    widget.controller?._detach(this);
     _pageController?.dispose();
     super.dispose();
   }
@@ -329,6 +340,42 @@ class _PaginatedReaderViewState extends State<PaginatedReaderView> {
     }
   }
 
+  // Turns one page in [direction] (+1 = next / right tap, -1 = previous / left
+  // tap) using the active mode's native animation. Bookkeeping — progress
+  // report and edge prefetch — flows through the same onPageChanged /
+  // onPageFlipped path a swipe takes, so nothing extra is needed here.
+  void _turnPage(int direction) {
+    if (_pages.isEmpty) {
+      return;
+    }
+    switch (widget.mode) {
+      case ReaderPageMode.slide:
+        final controller = _pageController;
+        if (controller == null || !controller.hasClients) {
+          return;
+        }
+        final target = (_currentPage + direction).clamp(0, _pages.length - 1);
+        if (target == _currentPage) {
+          return;
+        }
+        controller.animateToPage(
+          target,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeInOut,
+        );
+      case ReaderPageMode.curl:
+        // nextPage/previousPage animate the flip and fire onPageFlipped
+        // (→ _onPageChanged); each no-ops at its own boundary.
+        if (direction > 0) {
+          _flipController.nextPage();
+        } else {
+          _flipController.previousPage();
+        }
+      case ReaderPageMode.scroll:
+        break;
+    }
+  }
+
   // Index of the first loaded page whose blocks include [cursor]'s paragraph,
   // or -1 when it is not in the current window.
   int _pageContaining(PlaybackCursor cursor) {
@@ -410,4 +457,26 @@ class _PaginatedReaderViewState extends State<PaginatedReaderView> {
       ),
     };
   }
+}
+
+/// Drives page turns in a [PaginatedReaderView] from outside its subtree — the
+/// reader binds this to its left/right tap zones. The view attaches itself
+/// while mounted and detaches on dispose, so a turn is a no-op when no paged
+/// view is on screen (e.g. in scroll mode).
+class PaginatedReaderController {
+  _PaginatedReaderViewState? _view;
+
+  void _attach(_PaginatedReaderViewState view) => _view = view;
+
+  void _detach(_PaginatedReaderViewState view) {
+    if (identical(_view, view)) {
+      _view = null;
+    }
+  }
+
+  /// Turns to the next page (right tap). No-op at the last loaded page.
+  void nextPage() => _view?._turnPage(1);
+
+  /// Turns to the previous page (left tap). No-op at the first loaded page.
+  void previousPage() => _view?._turnPage(-1);
 }

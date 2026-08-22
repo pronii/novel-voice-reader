@@ -21,6 +21,10 @@ typedef ReaderEdgeLoadCallback =
 typedef ReaderPlaybackChapterCallback = Future<void> Function(int chapterId);
 typedef ReaderListenCallback = void Function(PlaybackCursor start);
 
+/// Horizontal tap zone within the reader body. The middle third toggles the
+/// chrome; the outer thirds turn pages in the paged reading modes.
+enum _TapZone { left, middle, right }
+
 final class ReaderPage extends StatefulWidget {
   const ReaderPage({
     super.key,
@@ -137,6 +141,11 @@ final class _ReaderPageState extends State<ReaderPage> {
   int? _bodyPointerId;
   Offset? _bodyPointerDownPosition;
   bool _bodyPointerTapEligible = false;
+
+  // Drives page turns for the paged modes from the body's left/right tap zones.
+  // A turn is a no-op unless a PaginatedReaderView is currently mounted.
+  final PaginatedReaderController _paginatedController =
+      PaginatedReaderController();
 
   // Memoized content list, rebuilt only when the source [sections]/[chapters]
   // change (see [_rebuildItems]). Recomputing it per access allocated the whole
@@ -278,6 +287,7 @@ final class _ReaderPageState extends State<ReaderPage> {
                       onReadingPositionChanged: _reportReadingPosition,
                       onLoadPrevious: widget.onLoadPrevious,
                       onLoadNext: widget.onLoadNext,
+                      controller: _paginatedController,
                     ),
             ),
             ClipRect(
@@ -598,32 +608,50 @@ final class _ReaderPageState extends State<ReaderPage> {
       return;
     }
     final tapPosition = event.position;
-    final shouldToggle = _bodyPointerTapEligible;
+    final wasTap = _bodyPointerTapEligible;
     _clearBodyPointer();
-    // Only a tap in the central column toggles the chrome. The left/right
-    // thirds are reserved as page-turn gesture zones, so a tap there is
-    // ignored here — it neither reveals nor hides the toolbar, avoiding
-    // mis-triggers while paging ("点击左右不会唤起工具栏，避免误触").
-    if (shouldToggle && _isMiddleZone(tapPosition)) {
-      _setToolbarVisible(!_toolbarVisible);
+    if (!wasTap) {
+      return;
+    }
+    // The central third toggles the chrome in every mode. The left/right thirds
+    // turn the page in the paged modes (left = previous, right = next); in
+    // scroll mode they stay inert, so a stray tap while reading does nothing
+    // ("滚动模式下点击左右不翻页，避免误触").
+    switch (_horizontalTapZone(tapPosition)) {
+      case _TapZone.middle:
+        _setToolbarVisible(!_toolbarVisible);
+      case _TapZone.left:
+        if (_pageMode != ReaderPageMode.scroll) {
+          _paginatedController.previousPage();
+        }
+      case _TapZone.right:
+        if (_pageMode != ReaderPageMode.scroll) {
+          _paginatedController.nextPage();
+        }
     }
   }
 
-  // Whether [globalPosition] falls in the reader's horizontal middle third
-  // (the "toggle UI" zone). The outer thirds are the page-turn gesture areas.
-  // Defaults to true when the body can't be measured yet, so an early tap
-  // still works rather than being silently swallowed.
-  bool _isMiddleZone(Offset globalPosition) {
+  // Which horizontal third of the reader body [globalPosition] falls in: the
+  // middle third toggles the toolbar, the outer thirds are the page-turn zones.
+  // Defaults to [_TapZone.middle] when the body can't be measured yet, so an
+  // early tap still toggles the chrome rather than being silently swallowed.
+  _TapZone _horizontalTapZone(Offset globalPosition) {
     final box = context.findRenderObject();
     if (box is! RenderBox || !box.hasSize) {
-      return true;
+      return _TapZone.middle;
     }
     final width = box.size.width;
     if (width <= 0) {
-      return true;
+      return _TapZone.middle;
     }
     final dx = box.globalToLocal(globalPosition).dx;
-    return dx >= width / 3 && dx <= width * 2 / 3;
+    if (dx < width / 3) {
+      return _TapZone.left;
+    }
+    if (dx > width * 2 / 3) {
+      return _TapZone.right;
+    }
+    return _TapZone.middle;
   }
 
   void _onBodyPointerCancel(PointerCancelEvent event) {
