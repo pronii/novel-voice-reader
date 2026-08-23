@@ -7,11 +7,15 @@ final class LibraryBookItem {
     required this.id,
     required this.title,
     required this.progressLabel,
+    this.coverImagePath,
   });
 
   final int id;
   final String title;
   final String progressLabel;
+
+  /// Local path of a fetched cover image, or null to show a generated cover.
+  final String? coverImagePath;
 }
 
 final class LibraryPage extends StatelessWidget {
@@ -200,7 +204,12 @@ class _BookCard extends StatelessWidget {
           padding: const EdgeInsets.all(Insets.md),
           child: Row(
             children: [
-              BookCover(title: book.title, width: 56, height: 78),
+              BookCover(
+                title: book.title,
+                imagePath: book.coverImagePath,
+                width: 56,
+                height: 78,
+              ),
               const SizedBox(width: Insets.lg),
               Expanded(
                 child: Column(

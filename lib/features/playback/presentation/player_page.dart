@@ -10,6 +10,7 @@ final class PlayerPage extends StatefulWidget {
   const PlayerPage({
     super.key,
     required this.bookTitle,
+    this.bookCoverPath,
     required this.chapterTitle,
     this.onPrevious,
     this.onNext,
@@ -25,6 +26,10 @@ final class PlayerPage extends StatefulWidget {
   });
 
   final String bookTitle;
+
+  /// Local path of a fetched cover image, or null to show a generated cover.
+  final String? bookCoverPath;
+
   final String chapterTitle;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
@@ -90,6 +95,7 @@ final class _PlayerPageState extends State<PlayerPage> {
                   children: [
                     BookCover(
                       title: widget.bookTitle,
+                      imagePath: widget.bookCoverPath,
                       width: coverWidth,
                       height: coverHeight,
                     ),

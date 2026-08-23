@@ -76,6 +76,29 @@ class $BooksTable extends Books with TableInfo<$BooksTable, BookRecord> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _coverImagePathMeta = const VerificationMeta(
+    'coverImagePath',
+  );
+  @override
+  late final GeneratedColumn<String> coverImagePath = GeneratedColumn<String>(
+    'cover_image_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _coverFetchedAtMeta = const VerificationMeta(
+    'coverFetchedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> coverFetchedAt =
+      GeneratedColumn<DateTime>(
+        'cover_fetched_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -84,6 +107,8 @@ class $BooksTable extends Books with TableInfo<$BooksTable, BookRecord> {
     sourceFileName,
     importedAt,
     lastReadAt,
+    coverImagePath,
+    coverFetchedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -138,6 +163,24 @@ class $BooksTable extends Books with TableInfo<$BooksTable, BookRecord> {
         ),
       );
     }
+    if (data.containsKey('cover_image_path')) {
+      context.handle(
+        _coverImagePathMeta,
+        coverImagePath.isAcceptableOrUnknown(
+          data['cover_image_path']!,
+          _coverImagePathMeta,
+        ),
+      );
+    }
+    if (data.containsKey('cover_fetched_at')) {
+      context.handle(
+        _coverFetchedAtMeta,
+        coverFetchedAt.isAcceptableOrUnknown(
+          data['cover_fetched_at']!,
+          _coverFetchedAtMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -171,6 +214,14 @@ class $BooksTable extends Books with TableInfo<$BooksTable, BookRecord> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}last_read_at'],
       ),
+      coverImagePath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}cover_image_path'],
+      ),
+      coverFetchedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}cover_fetched_at'],
+      ),
     );
   }
 
@@ -187,6 +238,16 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
   final String? sourceFileName;
   final DateTime importedAt;
   final DateTime? lastReadAt;
+
+  /// Local file path of the book's cover image, once fetched from the
+  /// self-hosted cover proxy or picked manually. Null until a real cover is
+  /// obtained, in which case the UI shows a generated placeholder cover.
+  final String? coverImagePath;
+
+  /// When an automatic cover fetch was last attempted (regardless of outcome).
+  /// Gates re-fetching so a book with no match is not re-requested on every
+  /// launch; null means never attempted.
+  final DateTime? coverFetchedAt;
   const BookRecord({
     required this.id,
     required this.title,
@@ -194,6 +255,8 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
     this.sourceFileName,
     required this.importedAt,
     this.lastReadAt,
+    this.coverImagePath,
+    this.coverFetchedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -207,6 +270,12 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
     map['imported_at'] = Variable<DateTime>(importedAt);
     if (!nullToAbsent || lastReadAt != null) {
       map['last_read_at'] = Variable<DateTime>(lastReadAt);
+    }
+    if (!nullToAbsent || coverImagePath != null) {
+      map['cover_image_path'] = Variable<String>(coverImagePath);
+    }
+    if (!nullToAbsent || coverFetchedAt != null) {
+      map['cover_fetched_at'] = Variable<DateTime>(coverFetchedAt);
     }
     return map;
   }
@@ -223,6 +292,12 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
       lastReadAt: lastReadAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastReadAt),
+      coverImagePath: coverImagePath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(coverImagePath),
+      coverFetchedAt: coverFetchedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(coverFetchedAt),
     );
   }
 
@@ -238,6 +313,8 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
       sourceFileName: serializer.fromJson<String?>(json['sourceFileName']),
       importedAt: serializer.fromJson<DateTime>(json['importedAt']),
       lastReadAt: serializer.fromJson<DateTime?>(json['lastReadAt']),
+      coverImagePath: serializer.fromJson<String?>(json['coverImagePath']),
+      coverFetchedAt: serializer.fromJson<DateTime?>(json['coverFetchedAt']),
     );
   }
   @override
@@ -250,6 +327,8 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
       'sourceFileName': serializer.toJson<String?>(sourceFileName),
       'importedAt': serializer.toJson<DateTime>(importedAt),
       'lastReadAt': serializer.toJson<DateTime?>(lastReadAt),
+      'coverImagePath': serializer.toJson<String?>(coverImagePath),
+      'coverFetchedAt': serializer.toJson<DateTime?>(coverFetchedAt),
     };
   }
 
@@ -260,6 +339,8 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
     Value<String?> sourceFileName = const Value.absent(),
     DateTime? importedAt,
     Value<DateTime?> lastReadAt = const Value.absent(),
+    Value<String?> coverImagePath = const Value.absent(),
+    Value<DateTime?> coverFetchedAt = const Value.absent(),
   }) => BookRecord(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -269,6 +350,12 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
         : this.sourceFileName,
     importedAt: importedAt ?? this.importedAt,
     lastReadAt: lastReadAt.present ? lastReadAt.value : this.lastReadAt,
+    coverImagePath: coverImagePath.present
+        ? coverImagePath.value
+        : this.coverImagePath,
+    coverFetchedAt: coverFetchedAt.present
+        ? coverFetchedAt.value
+        : this.coverFetchedAt,
   );
   BookRecord copyWithCompanion(BooksCompanion data) {
     return BookRecord(
@@ -286,6 +373,12 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
       lastReadAt: data.lastReadAt.present
           ? data.lastReadAt.value
           : this.lastReadAt,
+      coverImagePath: data.coverImagePath.present
+          ? data.coverImagePath.value
+          : this.coverImagePath,
+      coverFetchedAt: data.coverFetchedAt.present
+          ? data.coverFetchedAt.value
+          : this.coverFetchedAt,
     );
   }
 
@@ -297,7 +390,9 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
           ..write('sourceType: $sourceType, ')
           ..write('sourceFileName: $sourceFileName, ')
           ..write('importedAt: $importedAt, ')
-          ..write('lastReadAt: $lastReadAt')
+          ..write('lastReadAt: $lastReadAt, ')
+          ..write('coverImagePath: $coverImagePath, ')
+          ..write('coverFetchedAt: $coverFetchedAt')
           ..write(')'))
         .toString();
   }
@@ -310,6 +405,8 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
     sourceFileName,
     importedAt,
     lastReadAt,
+    coverImagePath,
+    coverFetchedAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -320,7 +417,9 @@ class BookRecord extends DataClass implements Insertable<BookRecord> {
           other.sourceType == this.sourceType &&
           other.sourceFileName == this.sourceFileName &&
           other.importedAt == this.importedAt &&
-          other.lastReadAt == this.lastReadAt);
+          other.lastReadAt == this.lastReadAt &&
+          other.coverImagePath == this.coverImagePath &&
+          other.coverFetchedAt == this.coverFetchedAt);
 }
 
 class BooksCompanion extends UpdateCompanion<BookRecord> {
@@ -330,6 +429,8 @@ class BooksCompanion extends UpdateCompanion<BookRecord> {
   final Value<String?> sourceFileName;
   final Value<DateTime> importedAt;
   final Value<DateTime?> lastReadAt;
+  final Value<String?> coverImagePath;
+  final Value<DateTime?> coverFetchedAt;
   const BooksCompanion({
     this.id = const Value.absent(),
     this.title = const Value.absent(),
@@ -337,6 +438,8 @@ class BooksCompanion extends UpdateCompanion<BookRecord> {
     this.sourceFileName = const Value.absent(),
     this.importedAt = const Value.absent(),
     this.lastReadAt = const Value.absent(),
+    this.coverImagePath = const Value.absent(),
+    this.coverFetchedAt = const Value.absent(),
   });
   BooksCompanion.insert({
     this.id = const Value.absent(),
@@ -345,6 +448,8 @@ class BooksCompanion extends UpdateCompanion<BookRecord> {
     this.sourceFileName = const Value.absent(),
     this.importedAt = const Value.absent(),
     this.lastReadAt = const Value.absent(),
+    this.coverImagePath = const Value.absent(),
+    this.coverFetchedAt = const Value.absent(),
   }) : title = Value(title);
   static Insertable<BookRecord> custom({
     Expression<int>? id,
@@ -353,6 +458,8 @@ class BooksCompanion extends UpdateCompanion<BookRecord> {
     Expression<String>? sourceFileName,
     Expression<DateTime>? importedAt,
     Expression<DateTime>? lastReadAt,
+    Expression<String>? coverImagePath,
+    Expression<DateTime>? coverFetchedAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -361,6 +468,8 @@ class BooksCompanion extends UpdateCompanion<BookRecord> {
       if (sourceFileName != null) 'source_file_name': sourceFileName,
       if (importedAt != null) 'imported_at': importedAt,
       if (lastReadAt != null) 'last_read_at': lastReadAt,
+      if (coverImagePath != null) 'cover_image_path': coverImagePath,
+      if (coverFetchedAt != null) 'cover_fetched_at': coverFetchedAt,
     });
   }
 
@@ -371,6 +480,8 @@ class BooksCompanion extends UpdateCompanion<BookRecord> {
     Value<String?>? sourceFileName,
     Value<DateTime>? importedAt,
     Value<DateTime?>? lastReadAt,
+    Value<String?>? coverImagePath,
+    Value<DateTime?>? coverFetchedAt,
   }) {
     return BooksCompanion(
       id: id ?? this.id,
@@ -379,6 +490,8 @@ class BooksCompanion extends UpdateCompanion<BookRecord> {
       sourceFileName: sourceFileName ?? this.sourceFileName,
       importedAt: importedAt ?? this.importedAt,
       lastReadAt: lastReadAt ?? this.lastReadAt,
+      coverImagePath: coverImagePath ?? this.coverImagePath,
+      coverFetchedAt: coverFetchedAt ?? this.coverFetchedAt,
     );
   }
 
@@ -403,6 +516,12 @@ class BooksCompanion extends UpdateCompanion<BookRecord> {
     if (lastReadAt.present) {
       map['last_read_at'] = Variable<DateTime>(lastReadAt.value);
     }
+    if (coverImagePath.present) {
+      map['cover_image_path'] = Variable<String>(coverImagePath.value);
+    }
+    if (coverFetchedAt.present) {
+      map['cover_fetched_at'] = Variable<DateTime>(coverFetchedAt.value);
+    }
     return map;
   }
 
@@ -414,7 +533,9 @@ class BooksCompanion extends UpdateCompanion<BookRecord> {
           ..write('sourceType: $sourceType, ')
           ..write('sourceFileName: $sourceFileName, ')
           ..write('importedAt: $importedAt, ')
-          ..write('lastReadAt: $lastReadAt')
+          ..write('lastReadAt: $lastReadAt, ')
+          ..write('coverImagePath: $coverImagePath, ')
+          ..write('coverFetchedAt: $coverFetchedAt')
           ..write(')'))
         .toString();
   }
@@ -3726,6 +3847,8 @@ typedef $$BooksTableCreateCompanionBuilder =
       Value<String?> sourceFileName,
       Value<DateTime> importedAt,
       Value<DateTime?> lastReadAt,
+      Value<String?> coverImagePath,
+      Value<DateTime?> coverFetchedAt,
     });
 typedef $$BooksTableUpdateCompanionBuilder =
     BooksCompanion Function({
@@ -3735,6 +3858,8 @@ typedef $$BooksTableUpdateCompanionBuilder =
       Value<String?> sourceFileName,
       Value<DateTime> importedAt,
       Value<DateTime?> lastReadAt,
+      Value<String?> coverImagePath,
+      Value<DateTime?> coverFetchedAt,
     });
 
 final class $$BooksTableReferences
@@ -3860,6 +3985,16 @@ class $$BooksTableFilterComposer extends Composer<_$AppDatabase, $BooksTable> {
 
   ColumnFilters<DateTime> get lastReadAt => $composableBuilder(
     column: $table.lastReadAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get coverImagePath => $composableBuilder(
+    column: $table.coverImagePath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get coverFetchedAt => $composableBuilder(
+    column: $table.coverFetchedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4002,6 +4137,16 @@ class $$BooksTableOrderingComposer
     column: $table.lastReadAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get coverImagePath => $composableBuilder(
+    column: $table.coverImagePath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get coverFetchedAt => $composableBuilder(
+    column: $table.coverFetchedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$BooksTableAnnotationComposer
@@ -4036,6 +4181,16 @@ class $$BooksTableAnnotationComposer
 
   GeneratedColumn<DateTime> get lastReadAt => $composableBuilder(
     column: $table.lastReadAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get coverImagePath => $composableBuilder(
+    column: $table.coverImagePath,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get coverFetchedAt => $composableBuilder(
+    column: $table.coverFetchedAt,
     builder: (column) => column,
   );
 
@@ -4181,6 +4336,8 @@ class $$BooksTableTableManager
                 Value<String?> sourceFileName = const Value.absent(),
                 Value<DateTime> importedAt = const Value.absent(),
                 Value<DateTime?> lastReadAt = const Value.absent(),
+                Value<String?> coverImagePath = const Value.absent(),
+                Value<DateTime?> coverFetchedAt = const Value.absent(),
               }) => BooksCompanion(
                 id: id,
                 title: title,
@@ -4188,6 +4345,8 @@ class $$BooksTableTableManager
                 sourceFileName: sourceFileName,
                 importedAt: importedAt,
                 lastReadAt: lastReadAt,
+                coverImagePath: coverImagePath,
+                coverFetchedAt: coverFetchedAt,
               ),
           createCompanionCallback:
               ({
@@ -4197,6 +4356,8 @@ class $$BooksTableTableManager
                 Value<String?> sourceFileName = const Value.absent(),
                 Value<DateTime> importedAt = const Value.absent(),
                 Value<DateTime?> lastReadAt = const Value.absent(),
+                Value<String?> coverImagePath = const Value.absent(),
+                Value<DateTime?> coverFetchedAt = const Value.absent(),
               }) => BooksCompanion.insert(
                 id: id,
                 title: title,
@@ -4204,6 +4365,8 @@ class $$BooksTableTableManager
                 sourceFileName: sourceFileName,
                 importedAt: importedAt,
                 lastReadAt: lastReadAt,
+                coverImagePath: coverImagePath,
+                coverFetchedAt: coverFetchedAt,
               ),
           withReferenceMapper: (p0) => p0
               .map(

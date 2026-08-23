@@ -1,10 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:novel_voice_reader/app/design/paper_tokens.dart';
 
-/// A synthesized placeholder cover for books with no artwork.
+/// A book cover: the real fetched artwork when [imagePath] is set and readable,
+/// otherwise a synthesized placeholder.
 ///
-/// Imported TXT/EPUB novels rarely carry a cover image, so we generate a
-/// recognizable "spine" cover instead of a blank box: a warm color chosen by a
+/// Imported TXT/EPUB novels rarely carry a cover image, so when none has been
+/// fetched we generate a recognizable "spine" cover instead of a blank box: a
+/// warm color chosen by a
 /// stable hash of the title (so a given book always looks the same), a darker
 /// spine strip, and the title's first character as a large serif monogram.
 ///
@@ -17,16 +21,55 @@ class BookCover extends StatelessWidget {
   const BookCover({
     super.key,
     required this.title,
+    this.imagePath,
     this.width = 56,
     this.height = 78,
   });
 
   final String title;
+
+  /// Local path of a fetched cover image. When set (and readable) the real
+  /// artwork is shown; otherwise a generated placeholder is drawn from [title].
+  final String? imagePath;
+
   final double width;
   final double height;
 
   @override
   Widget build(BuildContext context) {
+    final path = imagePath;
+    if (path != null) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      return Container(
+        width: width,
+        height: height,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(Corners.cover),
+          boxShadow: [
+            BoxShadow(
+              color: Color.fromRGBO(0, 0, 0, isDark ? 0.45 : 0.20),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Image.file(
+          File(path),
+          width: width,
+          height: height,
+          fit: BoxFit.cover,
+          // A deleted or corrupt file must never crash the list; fall back to
+          // the generated placeholder exactly as if no cover had been fetched.
+          errorBuilder: (context, error, stackTrace) =>
+              _buildPlaceholder(context),
+        ),
+      );
+    }
+    return _buildPlaceholder(context);
+  }
+
+  Widget _buildPlaceholder(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final base = CoverPalette.forTitle(title, dark: isDark);
     final spine = Color.alphaBlend(const Color(0x33000000), base);

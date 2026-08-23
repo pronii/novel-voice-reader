@@ -33,3 +33,4 @@ outputs/
 
 # Local build artifacts — never commit binaries
 /artifacts/
+*.ipa

@@ -87,6 +87,33 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
   bool _importing = false;
 
   @override
+  void initState() {
+    super.initState();
+    unawaited(_fetchMissingCovers());
+  }
+
+  /// Kicks off a one-shot background pass to fetch covers for books that have
+  /// none. The cover proxy lives on the self-hosted TTS server, so this only
+  /// runs when the active voice profile points at such a server; MiMo / cloud
+  /// users keep the generated placeholders. The repository is reentrancy-guarded
+  /// and only requests books outside its retry window, so triggering it on each
+  /// library visit is cheap. Fetched covers are written to the database and the
+  /// list refreshes itself through the watching [libraryBooksProvider] stream.
+  Future<void> _fetchMissingCovers() async {
+    final database = ref.read(databaseProvider);
+    final repository = ref.read(coverRepositoryProvider);
+    if (database == null || repository == null) {
+      return;
+    }
+    final profile = await loadActiveVoiceProfile(database);
+    if (profile == null ||
+        profile.providerType != SpeechProviderType.server) {
+      return;
+    }
+    await repository.fetchMissingCovers(baseUrl: profile.normalizedBaseUrl);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeControllerProvider);
     void cycleTheme() => ref.read(themeModeControllerProvider.notifier).cycle();
@@ -122,6 +149,7 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
               id: book.id,
               title: book.title,
               progressLabel: book.lastReadAt == null ? '尚未开始' : '继续阅读',
+              coverImagePath: book.coverImagePath,
             ),
         ],
         loading: _importing,
@@ -611,6 +639,7 @@ final class _PlayerRoutePage extends ConsumerWidget {
       error: (_, _) => const Scaffold(body: Center(child: Text('播放器加载失败'))),
       data: (value) => PlayerPage(
         bookTitle: value.book.title,
+        bookCoverPath: value.book.coverImagePath,
         actions: const [SleepTimerButton()],
         chapterTitle:
             value.chapters

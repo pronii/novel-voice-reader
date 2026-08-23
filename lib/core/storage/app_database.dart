@@ -10,6 +10,16 @@ class Books extends Table {
   TextColumn get sourceFileName => text().nullable()();
   DateTimeColumn get importedAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get lastReadAt => dateTime().nullable()();
+
+  /// Local file path of the book's cover image, once fetched from the
+  /// self-hosted cover proxy or picked manually. Null until a real cover is
+  /// obtained, in which case the UI shows a generated placeholder cover.
+  TextColumn get coverImagePath => text().nullable()();
+
+  /// When an automatic cover fetch was last attempted (regardless of outcome).
+  /// Gates re-fetching so a book with no match is not re-requested on every
+  /// launch; null means never attempted.
+  DateTimeColumn get coverFetchedAt => dateTime().nullable()();
 }
 
 @DataClassName('ChapterRecord')
@@ -145,7 +155,7 @@ final class AppDatabase extends _$AppDatabase {
       AppDatabase(executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -162,6 +172,10 @@ final class AppDatabase extends _$AppDatabase {
       }
       if (from < 4) {
         await _createAudioCacheIndexes();
+      }
+      if (from < 5) {
+        await migrator.addColumn(books, books.coverImagePath);
+        await migrator.addColumn(books, books.coverFetchedAt);
       }
     },
     beforeOpen: (_) async {
@@ -221,6 +235,26 @@ final class AppDatabase extends _$AppDatabase {
 
   Future<void> deleteBookById(int bookId) async {
     await (delete(books)..where((book) => book.id.equals(bookId))).go();
+  }
+
+  /// Records a successfully obtained cover: stores its local [path] and stamps
+  /// the fetch time so the auto-fetcher treats the book as resolved.
+  Future<void> setBookCover({required int bookId, required String path}) async {
+    await (update(books)..where((book) => book.id.equals(bookId))).write(
+      BooksCompanion(
+        coverImagePath: Value(path),
+        coverFetchedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  /// Stamps a cover-fetch attempt without changing the image, so a book with no
+  /// online match is not re-requested until the retry window elapses. Leaves any
+  /// existing (e.g. manually chosen) cover untouched.
+  Future<void> markBookCoverFetched(int bookId) async {
+    await (update(books)..where((book) => book.id.equals(bookId))).write(
+      BooksCompanion(coverFetchedAt: Value(DateTime.now())),
+    );
   }
 
   Future<int> paragraphCountForBook(int bookId) async {

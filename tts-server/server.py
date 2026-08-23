@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import base64
 import json
+import hashlib
 import ipaddress
 import os
 import queue
@@ -219,6 +220,100 @@ def endpoint(base, path):
         path = path[3:]
     return base + path
 
+# ---- Book cover proxy -------------------------------------------------------
+# Imported TXT/EPUB novels rarely carry cover art, so the app asks THIS server
+# for a cover by title and we look one up from a public source, returning the
+# image bytes. Keeping the lookup server-side means the client only ever talks
+# to the user's own server (reliable from mainland China) and the matching can
+# be improved here without an app update. A miss returns 404 and the client
+# falls back to a generated placeholder cover.
+COVER_DIR = os.path.join(DATA, 'covers')
+COVER_UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+            'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36')
+# Image URLs are only fetched from these hosts, so a crafted source response
+# cannot steer the server at an internal address (SSRF guard).
+COVER_HOST_SUFFIXES = (
+    'doubanio.com', 'douban.com',
+    'books.google.com', 'books.googleusercontent.com',
+    'googleusercontent.com', 'ggpht.com',
+)
+COVER_MAX_BYTES = 5 * 1024 * 1024
+
+def _cover_key(title, author):
+    raw = (title + '|' + author).strip('|')
+    return hashlib.sha1(raw.encode('utf-8')).hexdigest()
+
+def _host_allowed(url):
+    host = (urllib.parse.urlsplit(url).hostname or '').lower()
+    return any(host == s or host.endswith('.' + s) for s in COVER_HOST_SUFFIXES)
+
+def _http_bytes(url, referer=None):
+    if url.startswith('http://'):
+        url = 'https://' + url[len('http://'):]
+    headers = {'User-Agent': COVER_UA}
+    if referer:
+        headers['Referer'] = referer
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return resp.headers.get('Content-Type', ''), resp.read(COVER_MAX_BYTES + 1)
+
+def _cover_candidates(title, author):
+    q = title if not author else title + ' ' + author
+    # Douban suggest: best coverage for Chinese books and web novels.
+    try:
+        url = 'https://book.douban.com/j/subject_suggest?q=' + urllib.parse.quote(q)
+        _, data = _http_bytes(url, referer='https://book.douban.com/')
+        for item in json.loads(data):
+            if isinstance(item, dict) and item.get('type') == 'b' and item.get('pic'):
+                yield item['pic']
+    except Exception:
+        pass
+    # Google Books fallback: clean JSON, weaker on web novels / may be geo-limited.
+    try:
+        url = ('https://www.googleapis.com/books/v1/volumes?country=US&maxResults=1&q='
+               + urllib.parse.quote('intitle:' + q))
+        _, data = _http_bytes(url)
+        for vol in (json.loads(data).get('items') or []):
+            links = (vol.get('volumeInfo') or {}).get('imageLinks') or {}
+            pic = links.get('thumbnail') or links.get('smallThumbnail')
+            if pic:
+                yield pic
+    except Exception:
+        pass
+
+def fetch_cover(title, author=''):
+    """Returns (content_type, image_bytes) for a book cover, or None.
+
+    Successful lookups are cached on disk so a repeated title never re-hits the
+    upstream source. Best-effort throughout: any upstream failure falls through
+    to the next candidate and ultimately to None (the client shows a generated
+    cover), never an error.
+    """
+    title = (title or '').strip()
+    if not title:
+        return None
+    os.makedirs(COVER_DIR, exist_ok=True)
+    cached = os.path.join(COVER_DIR, _cover_key(title, author))
+    if os.path.isfile(cached):
+        with open(cached, 'rb') as f:
+            return 'image/jpeg', f.read()
+    for pic in _cover_candidates(title, author):
+        if not _host_allowed(pic):
+            continue
+        try:
+            ctype, data = _http_bytes(pic, referer='https://book.douban.com/')
+        except Exception:
+            continue
+        if not ctype.startswith('image/') or not (200 <= len(data) <= COVER_MAX_BYTES):
+            continue
+        try:
+            with open(cached, 'wb') as f:
+                f.write(data)
+        except OSError:
+            pass
+        return ctype, data
+    return None
+
 def synth(job, idx, token):
     with db() as c: row = c.execute('SELECT * FROM jobs WHERE id=?', (job,)).fetchone()
     with db() as c: seg = c.execute('SELECT text FROM segments WHERE job_id=? AND idx=?', (job, idx)).fetchone()
@@ -294,6 +389,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/healthz': return self.send_json(200, {'ok': True})
         parsed = urllib.parse.urlsplit(self.path)
         if parsed.path == '/nvr/diagnostics/tail': return self.tail_diagnostics(parsed)
+        if parsed.path == '/cover': return self.serve_cover(parsed)
         m = re.fullmatch(r'/v1/jobs/([a-f0-9]{24})', self.path)
         if m:
             with db() as c:
@@ -357,6 +453,23 @@ class Handler(BaseHTTPRequestHandler):
             os.makedirs(DIAG_DIR, exist_ok=True)
             with open(DIAG_LOG, 'a') as f: f.write(line + '\n')
         self.send_json(200, {'ok': True, 'stored': len(record['events'])})
+
+    def serve_cover(self, parsed):
+        params = urllib.parse.parse_qs(parsed.query)
+        title = (params.get('title', [''])[0]).strip()
+        author = (params.get('author', [''])[0]).strip()
+        if not title:
+            return self.send_json(400, {'error': 'title is required'})
+        result = fetch_cover(title, author)
+        if not result:
+            return self.send_json(404, {'error': 'no cover found'})
+        ctype, data = result
+        self.send_response(200)
+        self.send_header('Content-Type', ctype if ctype.startswith('image/') else 'image/jpeg')
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Cache-Control', 'public, max-age=604800')
+        self.end_headers()
+        self.wfile.write(data)
 
     def tail_diagnostics(self, parsed):
         params = urllib.parse.parse_qs(parsed.query)
