@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/app/app.dart';
+import 'package:novel_voice_reader/app/design/paper_tokens.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
@@ -112,6 +113,7 @@ void main() {
       paragraphs: const ['第一段。'],
     );
     final chapter = (await database.chaptersForBook(bookId)).single;
+    final paragraph = (await database.paragraphsForChapter(chapter.id)).single;
     final controller = AttachablePlaybackController();
     final runtime = PlaybackRuntime(
       controller: controller,
@@ -143,6 +145,24 @@ void main() {
     await _pumpUntilFound(
       tester,
       find.byKey(ValueKey<String>('playing-paragraph-${chapter.id}-0')),
+    );
+    expect(
+      _paragraphBackground(tester, paragraph.id),
+      PaperPalette.highlightWash,
+    );
+
+    await runtime.handler.pause();
+    await tester.pump();
+
+    expect(runtime.currentCursor, cursor);
+    expect(_paragraphBackground(tester, paragraph.id), isNull);
+
+    await runtime.handler.play();
+    await tester.pump();
+
+    expect(
+      _paragraphBackground(tester, paragraph.id),
+      PaperPalette.highlightWash,
     );
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -777,4 +797,18 @@ Future<void> _pumpUntilFound(WidgetTester tester, Finder finder) async {
       .whereType<String>()
       .toList();
   fail('Timed out waiting for the expected widget. Visible text: $visibleText');
+}
+
+Color? _paragraphBackground(WidgetTester tester, int paragraphId) {
+  final paragraph = find
+      .byKey(ValueKey<String>('paragraph-$paragraphId'))
+      .first;
+  final decoratedContainer = find.descendant(
+    of: paragraph,
+    matching: find.byWidgetPredicate(
+      (widget) => widget is Container && widget.decoration is BoxDecoration,
+    ),
+  ).first;
+  return (tester.widget<Container>(decoratedContainer).decoration as BoxDecoration)
+      .color;
 }
