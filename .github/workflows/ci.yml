@@ -37,11 +37,22 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build
-      - run: flutter build apk --debug
+      - name: Restore release keystore
+        run: |
+          mkdir -p signing
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > signing/novel-voice-reader-release.jks
+          cat > android/key.properties <<EOF
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          storeFile=signing/novel-voice-reader-release.jks
+          EOF
+      - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: app-release
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
 
   build-ios:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
