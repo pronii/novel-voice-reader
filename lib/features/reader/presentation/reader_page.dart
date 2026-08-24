@@ -777,15 +777,16 @@ final class _ReaderPageState extends State<ReaderPage> {
     // its read-from-here button are how the user re-targets playback.
     //
     // In scroll mode there is no page-turn concept, so paragraph-tap selection
-    // is suppressed entirely — taps on text do not produce a "selected"
-    // highlight, only a passive ripple, and the read-from-here button stays
-    // hidden. Paged modes (slide / curl) keep the full selection behaviour
+    // is suppressed entirely — taps on text stay visually neutral, and the
+    // read-from-here button stays hidden. Paged modes keep selection behaviour
     // because taps are also used to retarget a turn.
+    final scrollMode = _pageMode == ReaderPageMode.scroll;
     final playing =
         widget.playbackActive &&
         widget.playbackCursor?.chapterId == paragraph.chapterId &&
         widget.playbackCursor?.paragraphIndex == paragraph.index;
-    final allowSelection = _pageMode != ReaderPageMode.scroll;
+    final showPlayingHighlight = playing && !scrollMode;
+    final allowSelection = !scrollMode;
     final active = allowSelection &&
         widget.playbackActive &&
         paragraph.id == _activeParagraphId;
@@ -806,13 +807,17 @@ final class _ReaderPageState extends State<ReaderPage> {
                 : 'paragraph-${paragraph.id}',
           ),
           borderRadius: BorderRadius.circular(8),
+          splashFactory: scrollMode ? NoSplash.splashFactory : null,
+          overlayColor: scrollMode
+              ? const WidgetStatePropertyAll<Color>(Colors.transparent)
+              : null,
           onTap: () => _selectParagraph(paragraph),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              // The paragraph being narrated gets the warm "now-reading" wash;
-              // a paragraph merely tapped (selected) gets a quieter tint.
-              color: playing
+              // Scroll mode keeps every paragraph visually neutral, including
+              // the playing cursor used for follow/position tracking.
+              color: showPlayingHighlight
                   ? paper.highlightWash
                   : active
                   ? scheme.surfaceContainerHigh

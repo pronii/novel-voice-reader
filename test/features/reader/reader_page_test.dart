@@ -320,6 +320,14 @@ void main() {
     await tester.tap(find.text('第二段。'));
     await tester.pump();
 
+    final paragraphInkWell = tester.widget<InkWell>(
+      find.byKey(const ValueKey<String>('paragraph-101')),
+    );
+    expect(paragraphInkWell.splashFactory, same(NoSplash.splashFactory));
+    expect(
+      paragraphInkWell.overlayColor?.resolve({WidgetState.pressed}),
+      Colors.transparent,
+    );
     expect(
       find.byKey(const ValueKey<String>('active-paragraph-101')),
       findsNothing,
@@ -327,7 +335,7 @@ void main() {
     expect(find.text('从这里朗读'), findsNothing);
   });
 
-  testWidgets('highlights the currently playing paragraph independently', (
+  testWidgets('tracks playback without highlighting paragraphs in scroll mode', (
     tester,
   ) async {
     PlaybackCursor? playbackCursor = const PlaybackCursor(
@@ -353,6 +361,7 @@ void main() {
       find.byKey(const ValueKey<String>('playing-paragraph-10-0')),
       findsOneWidget,
     );
+    expect(_paragraphBackground(tester, chapterId: 10, index: 0), isNull);
     setHostState(() {
       playbackCursor = const PlaybackCursor(chapterId: 10, paragraphIndex: 1);
     });
@@ -365,6 +374,7 @@ void main() {
       find.byKey(const ValueKey<String>('playing-paragraph-10-1')),
       findsOneWidget,
     );
+    expect(_paragraphBackground(tester, chapterId: 10, index: 1), isNull);
 
     setHostState(() => playbackCursor = null);
     await tester.pump();
@@ -1053,6 +1063,23 @@ final startsWithPlayingParagraph = find.byWidgetPredicate(
       widget.key is ValueKey<String> &&
       (widget.key! as ValueKey<String>).value.startsWith('playing-paragraph-'),
 );
+
+Color? _paragraphBackground(
+  WidgetTester tester, {
+  required int chapterId,
+  required int index,
+}) {
+  final paragraph = find.byKey(
+    ValueKey<String>('playing-paragraph-$chapterId-$index'),
+  );
+  final container = find.descendant(
+    of: paragraph,
+    matching: find.byWidgetPredicate(
+      (widget) => widget is Container && widget.decoration is BoxDecoration,
+    ),
+  );
+  return (tester.widget<Container>(container).decoration! as BoxDecoration).color;
+}
 
 List<ReaderParagraph> _paragraphs(int chapterId, List<String> texts) {
   return List.generate(
