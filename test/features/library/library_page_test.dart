@@ -11,7 +11,7 @@ void main() {
     );
 
     expect(find.text('还没有导入小说'), findsOneWidget);
-    expect(find.byTooltip('导入小说'), findsOneWidget);
+    expect(find.text('导入第一本书'), findsOneWidget);
   });
 
   testWidgets('does not overflow at a large text scale', (tester) async {
@@ -50,9 +50,41 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byTooltip('缓存设置'));
+    await tester.longPress(find.text('测试书'));
 
     expect(selectedBookId, 7);
+  });
+
+  testWidgets('opens the book on tap and shows the add placeholder', (
+    tester,
+  ) async {
+    int? openedBookId;
+    var importCalled = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LibraryPage(
+          books: const [
+            LibraryBookItem(id: 3, title: '三体', progressLabel: '继续阅读'),
+            LibraryBookItem(id: 5, title: '活着', progressLabel: '尚未开始'),
+            LibraryBookItem(id: 9, title: '百年孤独', progressLabel: '第 12 章'),
+            LibraryBookItem(id: 11, title: '小王子', progressLabel: '尚未开始'),
+            LibraryBookItem(id: 13, title: '红楼梦', progressLabel: '已读完'),
+            LibraryBookItem(id: 17, title: '围城', progressLabel: '继续阅读'),
+          ],
+          onImport: () async => importCalled = true,
+          onOpenBook: (bookId) => openedBookId = bookId,
+        ),
+      ),
+    );
+
+    // 第二层书架末尾的「添加书籍」占位应存在。
+    expect(find.text('添加书籍'), findsOneWidget);
+
+    await tester.tap(find.text('添加书籍'));
+    expect(importCalled, isTrue);
+
+    await tester.tap(find.text('活着'));
+    expect(openedBookId, 5);
   });
 }
 
