@@ -11,6 +11,7 @@ import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
+import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
@@ -241,6 +242,22 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(milliseconds: 1));
   });
+
+  testWidgets(
+    'keeps a scroll chapter visible while playback continues elsewhere',
+    (tester) => _verifyChapterBrowsingDuringPlayback(
+      tester,
+      mode: ReaderPageMode.scroll,
+    ),
+  );
+
+  testWidgets(
+    'keeps a paged chapter visible while playback continues elsewhere',
+    (tester) => _verifyChapterBrowsingDuringPlayback(
+      tester,
+      mode: ReaderPageMode.slide,
+    ),
+  );
 
   testWidgets('follows playback into a chapter outside the reading window', (
     tester,
@@ -494,6 +511,74 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
   });
+}
+
+Future<void> _verifyChapterBrowsingDuringPlayback(
+  WidgetTester tester, {
+  required ReaderPageMode mode,
+}) async {
+  final database = AppDatabase.forTesting(NativeDatabase.memory());
+  final title = '播放中目录跳转-${mode.storageKey}';
+  final bookId = await _createChapteredBook(
+    database,
+    title: title,
+    chapterCount: 7,
+    paragraphCount: 2,
+  );
+  final chapters = await database.chaptersForBook(bookId);
+  final controller = AttachablePlaybackController();
+  final runtime = PlaybackRuntime(
+    controller: controller,
+    handler: NovelAudioHandler(controller),
+  );
+  final playingCursor = PlaybackCursor(
+    chapterId: chapters.first.id,
+    paragraphIndex: 0,
+  );
+  final coordinator = PlaybackCoordinator(
+    provider: _NavigationSpeechProvider(),
+    progress: _NavigationProgressRepository(),
+    paragraphs: _NavigationParagraphSource(),
+    voiceProfile: testVoiceProfile(),
+    scheduleWatchdog: _inertWatchdog,
+  );
+  await runtime.replaceAndPlayFrom(
+    coordinator,
+    playingCursor,
+    token: runtime.beginReplacement(),
+  );
+
+  await tester.pumpWidget(
+    NovelVoiceReaderApp(database: database, playbackRuntime: runtime),
+  );
+  await _pumpUntilFound(tester, find.text(title));
+  await tester.tap(find.text(title));
+  await _pumpUntilFound(tester, find.byTooltip('章节目录'));
+  await _showReaderToolbar(tester);
+  if (mode != ReaderPageMode.scroll) {
+    await tester.tap(find.byKey(const Key('reader-mode-gear')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(Key('page-mode-option-${mode.storageKey}')));
+    await tester.pumpAndSettle();
+    await _showReaderToolbar(tester);
+  }
+  await tester.tap(find.byTooltip('章节目录'));
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byType(TextField), '7');
+  await tester.pump();
+  await tester.tap(find.widgetWithText(ListTile, '第7章'));
+  await _pumpUntilFound(tester, find.text('第7章第1段正文。'));
+
+  // The playback-follow heartbeat must not undo explicit directory navigation,
+  // and selecting a chapter must not redirect or stop audio.
+  await tester.pump(const Duration(seconds: 2));
+  expect(find.text('第7章第1段正文。'), findsOneWidget);
+  expect(find.text('第1章第1段正文。'), findsNothing);
+  expect(runtime.currentCursor, playingCursor);
+  expect(runtime.handler.playbackState.value.playing, isTrue);
+
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump(const Duration(milliseconds: 1));
 }
 
 final class _SpeedPlaybackController implements PlaybackController {

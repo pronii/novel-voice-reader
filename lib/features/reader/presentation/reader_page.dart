@@ -113,6 +113,7 @@ final class _ReaderPageState extends State<ReaderPage> {
   bool _loadingPrevious = false;
   bool _loadingNext = false;
   bool _playbackFollow = true;
+  bool _playbackFollowSuspendedByNavigation = false;
   PlaybackCursor? _pendingPlaybackTarget;
   int? _requestedPlaybackChapterId;
   int _scrollGeneration = 0;
@@ -274,9 +275,13 @@ final class _ReaderPageState extends State<ReaderPage> {
                       ),
                     )
                   : PaginatedReaderView(
-                      // Keyed by mode so slide↔curl swaps the underlying pager
-                      // cleanly; content/window changes are handled in-place.
-                      key: ValueKey<ReaderPageMode>(_pageMode),
+                      // Explicit chapter navigation must discard the pager's
+                      // old anchor. Adjacent window loads keep the generation
+                      // stable and continue to preserve the current page.
+                      key: ValueKey<String>(
+                        'reader-pager-${_pageMode.storageKey}-'
+                        '${widget.navigationGeneration}',
+                      ),
                       mode: _pageMode,
                       items: items,
                       textStyle: _readingTextStyle(context),
@@ -284,7 +289,9 @@ final class _ReaderPageState extends State<ReaderPage> {
                           Theme.of(context).textTheme.headlineSmall ??
                           const TextStyle(fontSize: 24),
                       initialCursor: _pagedInitialCursor,
-                      playbackCursor: widget.playbackCursor,
+                      playbackCursor: _playbackFollow
+                          ? widget.playbackCursor
+                          : null,
                       playbackActive: widget.playbackActive,
                       onReadingPositionChanged: _reportReadingPosition,
                       onLoadPrevious: widget.onLoadPrevious,
@@ -981,7 +988,9 @@ final class _ReaderPageState extends State<ReaderPage> {
       // during a drag to avoid fighting the swipe). The comment in
       // ScrollStart promised "picks back up on its own once the drag
       // settles" - this is where that promise is kept.
-      _playbackFollow = true;
+      if (!_playbackFollowSuspendedByNavigation) {
+        _playbackFollow = true;
+      }
       // Let the crawl resume after the swipe (and any fling) has stopped.
       _autoScroll.notifyUserInteractionEnd();
       final scrollMoved = _scrollMoved;
@@ -1214,6 +1223,7 @@ final class _ReaderPageState extends State<ReaderPage> {
       return;
     }
     _lastUserScrollAt = null;
+    _playbackFollowSuspendedByNavigation = false;
     _playbackFollow = true;
     final active = widget.sections
         .expand((section) => section.paragraphs)
@@ -1279,6 +1289,7 @@ final class _ReaderPageState extends State<ReaderPage> {
       chapterId: paragraph.chapterId,
       paragraphIndex: paragraph.index,
     );
+    _playbackFollowSuspendedByNavigation = false;
     _playbackFollow = true;
     setState(() => _activeParagraphId = paragraph.id);
     _reportReadingPosition(paragraph);
@@ -1511,6 +1522,10 @@ final class _ReaderPageState extends State<ReaderPage> {
     );
     if (selectedChapterId != null) {
       _invalidatePendingProgressReport();
+      setState(() {
+        _playbackFollowSuspendedByNavigation = true;
+        _playbackFollow = false;
+      });
       widget.onChapterSelected?.call(selectedChapterId);
     }
   }
