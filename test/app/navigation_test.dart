@@ -182,13 +182,9 @@ void main() {
       ),
       maxScrolls: 40,
     );
-    await tester.drag(
-      find.byType(ScrollablePositionedList),
-      const Offset(0, -300),
-    );
+    await tester.ensureVisible(find.text('第6章第2段正文。'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
-    await tester.tap(find.text('第6章第2段正文。'));
     ReadingProgressRecord? progress;
     for (var attempt = 0; attempt < 20; attempt++) {
       await tester.pump(const Duration(milliseconds: 50));
@@ -200,8 +196,6 @@ void main() {
     expect(progress?.chapterId, chapters[5].id);
 
     await _showReaderToolbar(tester);
-    // Tapping the paragraph above also toggled the toolbar; make sure its
-    // slide-in animation has finished before we tap a button inside it.
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('返回书架'));
     await tester.pumpAndSettle();
