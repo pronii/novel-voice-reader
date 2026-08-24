@@ -1151,10 +1151,10 @@ final class _ReaderPageState extends State<ReaderPage> {
 
   void _selectParagraph(ReaderParagraph paragraph) {
     // In scroll mode paragraph taps must not produce a selection (no highlight,
-    // no "从这里朗读" button). The InkWell still absorbs the tap so text
-    // doesn't swallow gestures the reader or pager rely on, but the call is
-    // otherwise a no-op.
+    // no "从这里朗读" button). Preserve the existing reading-position report,
+    // but never promote the tapped paragraph to active visual state.
     if (_pageMode == ReaderPageMode.scroll) {
+      _reportReadingPosition(paragraph);
       return;
     }
     setState(() => _activeParagraphId = paragraph.id);

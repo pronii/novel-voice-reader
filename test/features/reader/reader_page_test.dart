@@ -799,7 +799,7 @@ void main() {
     expect(reported, isEmpty);
   });
 
-  testWidgets('scroll paragraph taps do not report a new position', (tester) async {
+  testWidgets('scroll paragraph taps report position without highlighting', (tester) async {
     _useNarrowViewport(tester);
     final reported = <int>[];
     await tester.pumpWidget(
@@ -816,9 +816,14 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey<String>('paragraph-16')));
 
-    expect(reported, isEmpty);
+    expect(reported, [16]);
+    expect(
+      find.byKey(const ValueKey<String>('active-paragraph-16')),
+      findsNothing,
+    );
+    expect(find.text('从这里朗读'), findsNothing);
     await tester.pump(const Duration(milliseconds: 600));
-    expect(reported, isEmpty);
+    expect(reported, [16]);
   });
 
   testWidgets('reports a played paragraph immediately', (tester) async {
