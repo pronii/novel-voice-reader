@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
@@ -293,6 +294,31 @@ void main() {
     expect(find.text('从这里朗读'), findsNothing);
   });
 
+  testWidgets('separated or cross-paragraph taps do not start playback', (
+    tester,
+  ) async {
+    final played = <ReaderParagraph>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: _reader(
+          paragraphs: _paragraphs(10, ['第一段。', '第二段。']),
+          onPlayFrom: played.add,
+        ),
+      ),
+    );
+
+    final first = find.byKey(const ValueKey<String>('paragraph-100'));
+    final second = find.byKey(const ValueKey<String>('paragraph-101'));
+    await tester.tap(first);
+    await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 1));
+    await tester.tap(first);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(second);
+    await tester.pumpAndSettle();
+
+    expect(played, isEmpty);
+  });
+
   testWidgets('disables playback commands while playback is starting', (
     tester,
   ) async {
@@ -315,7 +341,6 @@ void main() {
     expect(find.text('从这里朗读'), findsNothing);
 
     final paragraph = find.byKey(const ValueKey<String>('paragraph-100'));
-    expect(tester.widget<InkWell>(paragraph).onDoubleTap, isNull);
     await tester.tap(paragraph);
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(paragraph);

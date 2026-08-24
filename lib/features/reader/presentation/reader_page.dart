@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:novel_voice_reader/app/design/paper_tokens.dart';
 import 'package:novel_voice_reader/app/theme.dart';
@@ -144,6 +145,10 @@ final class _ReaderPageState extends State<ReaderPage> {
   int? _bodyPointerId;
   Offset? _bodyPointerDownPosition;
   bool _bodyPointerTapEligible = false;
+  int? _pendingParagraphTapId;
+  Duration? _pendingParagraphTapAt;
+  int? _lastTappedParagraphId;
+  Duration? _lastParagraphTapAt;
 
   // Drives page turns for the paged modes from the body's left/right tap zones.
   // A turn is a no-op unless a PaginatedReaderView is currently mounted.
@@ -804,49 +809,52 @@ final class _ReaderPageState extends State<ReaderPage> {
           : null,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: InkWell(
-          key: ValueKey<String>(
-            active
-                ? 'active-paragraph-${paragraph.id}'
-                : 'paragraph-${paragraph.id}',
-          ),
-          borderRadius: BorderRadius.circular(8),
-          splashFactory: scrollMode ? NoSplash.splashFactory : null,
-          overlayColor: scrollMode
-              ? const WidgetStatePropertyAll<Color>(Colors.transparent)
-              : null,
-          onTap: () => _selectParagraph(paragraph),
-          onDoubleTap: widget.playbackStarting
-              ? null
-              : () => _play(paragraph),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              // Scroll mode keeps every paragraph visually neutral, including
-              // the playing cursor used for follow/position tracking.
-              color: showPlayingHighlight
-                  ? paper.highlightWash
-                  : active
-                  ? scheme.surfaceContainerHigh
-                  : null,
-              borderRadius: BorderRadius.circular(8),
+        child: Listener(
+          onPointerDown: (event) {
+            _pendingParagraphTapId = paragraph.id;
+            _pendingParagraphTapAt = event.timeStamp;
+          },
+          child: InkWell(
+            key: ValueKey<String>(
+              active
+                  ? 'active-paragraph-${paragraph.id}'
+                  : 'paragraph-${paragraph.id}',
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(paragraph.text, style: _readingTextStyle(context)),
-                if (active)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: widget.playbackStarting
-                          ? null
-                          : () => _play(paragraph),
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text('从这里朗读'),
+            borderRadius: BorderRadius.circular(8),
+            splashFactory: scrollMode ? NoSplash.splashFactory : null,
+            overlayColor: scrollMode
+                ? const WidgetStatePropertyAll<Color>(Colors.transparent)
+                : null,
+            onTap: () => _handleParagraphTap(paragraph),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                // Scroll mode keeps every paragraph visually neutral, including
+                // the playing cursor used for follow/position tracking.
+                color: showPlayingHighlight
+                    ? paper.highlightWash
+                    : active
+                    ? scheme.surfaceContainerHigh
+                    : null,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(paragraph.text, style: _readingTextStyle(context)),
+                  if (active)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: widget.playbackStarting
+                            ? null
+                            : () => _play(paragraph),
+                        icon: const Icon(Icons.play_arrow),
+                        label: const Text('从这里朗读'),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -1173,6 +1181,33 @@ final class _ReaderPageState extends State<ReaderPage> {
     }
     setState(() => _activeParagraphId = paragraph.id);
     _reportReadingPosition(paragraph);
+  }
+
+  void _handleParagraphTap(ReaderParagraph paragraph) {
+    final now = _pendingParagraphTapId == paragraph.id
+        ? _pendingParagraphTapAt
+        : null;
+    _pendingParagraphTapId = null;
+    _pendingParagraphTapAt = null;
+    final previousTapAt = _lastParagraphTapAt;
+    final elapsed = now != null && previousTapAt != null
+        ? now - previousTapAt
+        : null;
+    final doubleTap = _lastTappedParagraphId == paragraph.id &&
+        elapsed != null &&
+        !elapsed.isNegative &&
+        elapsed <= kDoubleTapTimeout;
+    if (doubleTap) {
+      _lastTappedParagraphId = null;
+      _lastParagraphTapAt = null;
+      if (!widget.playbackStarting) {
+        _play(paragraph);
+      }
+      return;
+    }
+    _lastTappedParagraphId = now == null ? null : paragraph.id;
+    _lastParagraphTapAt = now;
+    _selectParagraph(paragraph);
   }
 
   void _reportReadingPosition(ReaderParagraph paragraph) {

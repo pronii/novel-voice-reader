@@ -58,7 +58,7 @@ git push origin HEAD
 
 **Interfaces:**
 - Consumes: `_play(ReaderParagraph paragraph)` and the existing `ReaderParagraph.chapterId` / `index` cursor fields.
-- Produces: Paragraph `InkWell.onDoubleTap` behavior that starts from the tapped paragraph while retaining neutral single-tap visuals.
+- Produces: Immediate paragraph tap handling that recognizes a second tap on the same paragraph and starts playback while retaining neutral single-tap visuals.
 
 - [ ] **Step 1: Extend the single-tap regression**
 
@@ -70,7 +70,7 @@ Tap the second paragraph twice within the double-tap interval, assert `onPlayFro
 
 - [ ] **Step 3: Connect the gesture**
 
-Set `InkWell.onDoubleTap` to `_play(paragraph)` unless `playbackStarting` is true. Keep the existing `onTap` callback unchanged.
+Keep `InkWell.onTap` immediate and track two pointer-down timestamps on the same paragraph within Flutter's `kDoubleTapTimeout`. Use `PointerEvent.timeStamp` so production and widget tests share a monotonic event clock. The first tap runs `_selectParagraph`; the second runs `_play(paragraph)` unless `playbackStarting` is true. Avoid `InkWell.onDoubleTap`, whose gesture recognizer delays every single-tap callback.
 
 - [ ] **Step 4: Submit CI verification**
 
