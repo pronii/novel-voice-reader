@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 import base64
+import io
 import json
 import hashlib
 import ipaddress
+import math
 import os
 import queue
 import re
 import secrets
 import socket
 import sqlite3
+import struct
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DATA = os.environ.get('TTS_DATA', '/data')
@@ -200,6 +204,118 @@ def normalize_cn_text(text):
     text = re.sub(r'-?\d+', lambda m: _cn_int(int(m.group(0))), text)
     return text
 
+# ---- Content classification -------------------------------------------------
+# Some book paragraphs are not worth speaking out loud:
+#   - Pure punctuation / whitespace (e.g. "……", "——", "   ").
+#   - Single-character SFX (e.g. "哔！", "轰", "啊") - the TTS engine tends
+#     to play these with an exaggerated burst that overwhelms the surrounding
+#     narration. Returning a short silent clip and marking the segment
+#     'silent' keeps the cursor advancing and the playback flow steady.
+_SILENT_RE = re.compile(r'[\s\W_]+', re.UNICODE)
+# Whitelist of interjections and onomatopoeia whose TTS bursts sound jarring
+# (loud, long, with reverb) compared to the surrounding narration. Anything
+# not in this set is treated as real prose and synthesised normally, so words
+# like "你好" or "哈哈" - in context - are still spoken.
+_SFX_WHITELIST = frozenset({
+    '啊', '呀', '哦', '嗯', '唉', '哎', '呕', '喔', '诶', '呜', '呵', '嘿', '哼',
+    '哔', '轰', '砰', '咚', '啪', '嗖', '嘶', '咻', '哧', '鸣', '嘀', '嗒', '嘭',
+    '嗞', '嘎', '咔', '嗨', '嚯', '吼', '啸', '唰',
+})
+
+def _is_silent_text(text):
+    """True for paragraphs that are only punctuation, dashes, or whitespace."""
+    if not text:
+        return True
+    return not _SILENT_RE.sub('', text)
+
+def _is_short_sfx_text(text):
+    """True for short paragraphs whose body is a whitelisted SFX / interjection.
+
+    The TTS engine tends to dramatise single-character onomatopoeia with a
+    loud, long burst. Replacing the body with a short silent clip removes
+    the jolt while still advancing the cursor. Real prose (e.g. "你好",
+    "哈哈" as a name) is left to the TTS to read.
+    """
+    if not text:
+        return False
+    stripped = text.strip()
+    core = _SILENT_RE.sub('', stripped)
+    if not core or len(core) > 2:
+        return False
+    return core in _SFX_WHITELIST
+
+# Pre-render a 0.5 s mono 16 kHz 16-bit silent WAV. Used as the audio body for
+# 'silent' segments so the client keeps advancing without a jarring gap or a
+# stylised SFX that overpowers the surrounding narration.
+_SILENT_WAV_CACHE = None
+
+def _silent_wav_bytes():
+    global _SILENT_WAV_CACHE
+    if _SILENT_WAV_CACHE is not None:
+        return _SILENT_WAV_CACHE
+    buf = io.BytesIO()
+    with wave.open(buf, 'wb') as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b'\x00\x00' * 8000)  # 0.5 s
+    _SILENT_WAV_CACHE = buf.getvalue()
+    return _SILENT_WAV_CACHE
+
+# ---- WAV loudness normalisation ---------------------------------------------
+# Different TTS providers / voices return wildly different perceived volumes:
+# a whispery passage can be near-silent, while a single "啊!" can clip. The
+# coordinator stitches the segments back-to-back, so a loud segment right
+# after a quiet one sounds like the volume "suddenly jumped". We normalise
+# each WAV to a target RMS while capping the gain to avoid pumping noise, and
+# also clip the peak to 0.95 to remove harsh transients.
+def _normalize_wav(data, target_rms=0.05, max_gain_db=12.0, peak_clip=0.95):
+    if not data or len(data) < 64:
+        return data
+    try:
+        with wave.open(io.BytesIO(data), 'rb') as w:
+            channels = w.getnchannels()
+            sampwidth = w.getsampwidth()
+            framerate = w.getframerate()
+            nframes = w.getnframes()
+            raw = w.readframes(nframes)
+    except (wave.Error, EOFError, struct.error):
+        return data
+    if sampwidth != 2 or channels not in (1, 2):
+        return data
+    # Convert to mono int16 samples in [-1.0, 1.0).
+    samples = struct.unpack('<' + 'h' * (len(raw) // 2), raw)
+    if channels == 2:
+        samples = samples[0::2]
+    n = len(samples)
+    if n == 0:
+        return data
+    peak = max(abs(s) for s in samples) / 32768.0
+    if peak <= 0.001:
+        return data  # already effectively silent
+    sq = sum(s * s for s in samples)
+    rms = math.sqrt(sq / n) / 32768.0
+    if rms <= 0.0001:
+        return data
+    gain = target_rms / rms
+    # Cap gain so a very quiet segment is boosted at most max_gain_db (~4x).
+    gain = min(gain, 10 ** (max_gain_db / 20.0))
+    # After gain, ensure peak stays under peak_clip; if it would clip, scale
+    # down to peak_clip.
+    new_peak = peak * gain
+    if new_peak > peak_clip:
+        gain = peak_clip / peak
+    if abs(gain - 1.0) < 0.05:
+        return data  # already in a reasonable range
+    new_samples = [max(-32768, min(32767, int(s * gain))) for s in samples]
+    out = io.BytesIO()
+    with wave.open(out, 'wb') as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(framerate)
+        w.writeframes(struct.pack('<' + 'h' * len(new_samples), *new_samples))
+    return out.getvalue()
+
 def validated_base(base):
     base = (base or DEFAULT_BASE).strip().rstrip('/')
     p = urllib.parse.urlsplit(base)
@@ -346,6 +462,11 @@ def synth(job, idx, token):
         if DEFAULT_PROVIDER == 'mimo':
             response = json.loads(data)
             data = base64.b64decode(response['choices'][0]['message']['audio']['data'], validate=True)
+        # Smooth out TTS volume swings so a loud SFX right after a quiet line
+        # does not sound like the volume "suddenly jumped". wav only; mp3/opus
+        # decoding would need extra deps that the image does not ship with.
+        if row['fmt'] == 'wav':
+            data = _normalize_wav(data)
         with open(path, 'wb') as f: f.write(data)
         with db() as c:
             c.execute("UPDATE segments SET status='done', error=NULL WHERE job_id=? AND idx=?", (job, idx))
@@ -365,11 +486,19 @@ def synth(job, idx, token):
             message = f'upstream request failed (HTTP {e.code})'
         with db() as c:
             c.execute("UPDATE segments SET status='failed', error=? WHERE job_id=? AND idx=?", (message, job, idx))
-            c.execute("UPDATE jobs SET status='failed', error=? WHERE id=?", (message, job))
+            # A single failed segment must NOT mark the whole job failed: the
+            # client stops pulling remaining segments on job failure, which
+            # stalls playback mid-chapter. Keep the job running until every
+            # segment has settled, then finish it (with the last error noted).
+            if _job_has_unsettled(c, job):
+                pass
+            else:
+                c.execute("UPDATE jobs SET status='completed', error=? WHERE id=?", (message, job))
     except Exception as e:
         with db() as c:
             c.execute("UPDATE segments SET status='failed', error=? WHERE job_id=? AND idx=?", (str(e)[:500], job, idx))
-            c.execute("UPDATE jobs SET status='failed', error=? WHERE id=?", (str(e)[:500], job))
+            if not _job_has_unsettled(c, job):
+                c.execute("UPDATE jobs SET status='completed', error=? WHERE id=?", (str(e)[:500], job))
 
 def worker():
     while True:
@@ -377,6 +506,19 @@ def worker():
         if item is STOP: return
         synth(*item)
         WORK.task_done()
+
+def _job_has_unsettled(c, job):
+    """True while a job still has segments queued/running.
+
+    Used by the failure path: a job only reaches a terminal state once every
+    segment has settled (done / silent / failed), so one flaky segment does
+    not sink the whole chapter.
+    """
+    row = c.execute(
+        'SELECT COUNT(*) FROM segments WHERE job_id=? AND status IN ("queued","running")',
+        (job,),
+    ).fetchone()
+    return row is not None and row[0] > 0
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_): pass
@@ -399,7 +541,20 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, {'id': j['id'], 'status': j['status'], 'completed': j['completed'], 'total': j['total'], 'error': j['error'], 'segments': [{'index': x['idx'], 'text': x['text'], 'status': x['status'], 'error': x['error'], 'url': f'/v1/jobs/{j["id"]}/segments/{x["idx"]}'} for x in s]})
         m = re.fullmatch(r'/v1/jobs/([a-f0-9]{24})/segments/(\d+)', self.path)
         if m:
-            with db() as c: row = c.execute('SELECT fmt FROM jobs WHERE id=?', (m.group(1),)).fetchone()
+            with db() as c:
+                row = c.execute('SELECT fmt FROM jobs WHERE id=?', (m.group(1),)).fetchone()
+                seg = c.execute('SELECT status FROM segments WHERE job_id=? AND idx=?', (m.group(1), m.group(2))).fetchone()
+            # Silent segments (pure punctuation or short SFX) were never
+            # synthesised. Stream a cached short silent clip so the client
+            # keeps the cursor advancing without an over-dramatic SFX burst.
+            if seg and seg['status'] == 'silent':
+                data = _silent_wav_bytes()
+                self.send_response(200)
+                self.send_header('Content-Type', 'audio/wav')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
             path = os.path.join(DATA, 'jobs', m.group(1), m.group(2) + '.' + (row['fmt'] if row else 'mp3'))
             if not os.path.isfile(path): return self.send_json(404, {'error': 'segment not ready'})
             data = open(path, 'rb').read(); self.send_response(200); self.send_header('Content-Type', {'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'opus': 'audio/ogg', 'aac': 'audio/aac'}.get(row['fmt'], 'application/octet-stream')); self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data); return
@@ -423,10 +578,24 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e: return self.send_json(400, {'error': str(e)})
         default_model = 'mimo-v2.5-tts' if DEFAULT_PROVIDER == 'mimo' else 'gpt-4o-mini-tts'
         default_voice = '冰糖' if DEFAULT_PROVIDER == 'mimo' else 'alloy'
+        # Mark pure-punctuation / single-character SFX paragraphs as 'silent'
+        # so the client receives a short silent clip instead of an
+        # over-dramatic burst of SFX audio. The job's total reflects the
+        # raw split count; only the segments that need synthesis are queued.
+        seg_rows = []
+        queued = 0
+        for i, s in enumerate(segs):
+            if _is_silent_text(s) or _is_short_sfx_text(s):
+                seg_rows.append((jid, i, s, 'silent'))
+            else:
+                seg_rows.append((jid, i, s, 'queued'))
+                queued += 1
         with db() as c:
-            c.execute('INSERT INTO jobs(id,status,total,created,model,voice,fmt,speed) VALUES(?,?,?,?,?,?,?,?)', (jid, 'running', len(segs), int(time.time()), p.get('model', default_model), p.get('voice', default_voice), fmt, float(p.get('speed', 1))))
-            c.executemany('INSERT INTO segments(job_id,idx,text,status) VALUES(?,?,?,?)', [(jid, i, s, 'queued') for i, s in enumerate(segs)])
-        for i in range(len(segs)): WORK.put((jid, i, token))
+            c.execute('INSERT INTO jobs(id,status,total,created,model,voice,fmt,speed) VALUES(?,?,?,?,?,?,?,?)', (jid, 'running' if queued else 'completed', len(segs), int(time.time()), p.get('model', default_model), p.get('voice', default_voice), fmt, float(p.get('speed', 1))))
+            c.executemany('INSERT INTO segments(job_id,idx,text,status) VALUES(?,?,?,?)', seg_rows)
+        for i, s in enumerate(segs):
+            if not (_is_silent_text(s) or _is_short_sfx_text(s)):
+                WORK.put((jid, i, token))
         # Opportunistic sweep: purge audio files of jobs completed > 7 days ago
         # so the data volume does not grow without bound (657 MB and counting).
         cleanup_old_jobs()
