@@ -226,8 +226,10 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
   int? _visibleChapterId;
   PlaybackRuntime? _observedPlaybackRuntime;
   StreamSubscription<PlaybackCursor?>? _playbackCursorSubscription;
+  StreamSubscription<bool>? _playbackPlayingSubscription;
   int _playbackSubscriptionGeneration = 0;
   PlaybackCursor? _playbackCursor;
+  bool _playbackPlaying = false;
   PlaybackRuntime? _pendingPlaybackRuntime;
   PlaybackReplacementToken? _pendingPlaybackReplacement;
   bool _playbackStarting = false;
@@ -247,6 +249,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     _chapterWindow?.removeListener(_onChapterWindowChanged);
     _chapterWindow?.dispose();
     unawaited(_playbackCursorSubscription?.cancel());
+    unawaited(_playbackPlayingSubscription?.cancel());
     super.dispose();
   }
 
@@ -303,7 +306,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
           navigationGeneration: window.navigationGeneration,
           playbackStarting: _playbackStarting,
           playbackCursor: _playbackCursor,
-          playbackActive: _playbackCursor != null,
+          playbackActive: _playbackPlaying,
           onBackToLibrary: _backToLibrary,
           onChapterSelected: (chapterId) =>
               unawaited(_selectChapter(chapterId)),
@@ -381,13 +384,23 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     }
     final generation = ++_playbackSubscriptionGeneration;
     unawaited(_playbackCursorSubscription?.cancel());
+    unawaited(_playbackPlayingSubscription?.cancel());
     _observedPlaybackRuntime = runtime;
     _playbackCursor = runtime?.currentCursor;
+    _playbackPlaying = runtime?.handler.playbackState.value.playing ?? false;
     _playbackCursorSubscription = runtime?.cursorChanges.listen((cursor) {
       if (mounted && generation == _playbackSubscriptionGeneration) {
         setState(() => _playbackCursor = cursor);
       }
     });
+    _playbackPlayingSubscription = runtime?.handler.playbackState
+        .map((state) => state.playing)
+        .distinct()
+        .listen((playing) {
+          if (mounted && generation == _playbackSubscriptionGeneration) {
+            setState(() => _playbackPlaying = playing);
+          }
+        });
   }
 
   Future<void> _ensurePlaybackChapter(int chapterId) async {
