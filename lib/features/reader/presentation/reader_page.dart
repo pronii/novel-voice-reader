@@ -786,15 +786,13 @@ final class _ReaderPageState extends State<ReaderPage> {
     // paragraph cursor without introducing a character-offset model.
     //
     // In scroll mode there is no page-turn concept, so paragraph-tap selection
-    // is suppressed entirely — taps on text stay visually neutral, and the
-    // read-from-here button stays hidden. Paged modes keep selection behaviour
-    // because taps are also used to retarget a turn.
+    // feedback is suppressed: taps stay neutral and the read-from-here button
+    // stays hidden. The current playback paragraph remains highlighted.
     final scrollMode = _pageMode == ReaderPageMode.scroll;
     final playing =
         widget.playbackActive &&
         widget.playbackCursor?.chapterId == paragraph.chapterId &&
         widget.playbackCursor?.paragraphIndex == paragraph.index;
-    final showPlayingHighlight = playing && !scrollMode;
     final allowSelection = !scrollMode;
     final active = allowSelection &&
         widget.playbackActive &&
@@ -829,9 +827,7 @@ final class _ReaderPageState extends State<ReaderPage> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                // Scroll mode keeps every paragraph visually neutral, including
-                // the playing cursor used for follow/position tracking.
-                color: showPlayingHighlight
+                color: playing
                     ? paper.highlightWash
                     : active
                     ? scheme.surfaceContainerHigh
