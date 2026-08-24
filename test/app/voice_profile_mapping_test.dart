@@ -6,6 +6,17 @@ import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 void main() {
+  test('falls back to the default self-hosted server when no profile exists', (
+    ) async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+
+    final profile = await loadActiveVoiceProfile(database);
+
+    expect(profile.providerType, SpeechProviderType.server);
+    expect(profile.baseUrl, kDefaultServerBaseUrl);
+  });
+
   test('ignores a legacy system profile', () {
     const record = VoiceProfileRecord(
       id: 3,
@@ -62,8 +73,8 @@ void main() {
 
     final profile = await loadActiveVoiceProfile(database);
 
-    expect(profile?.providerType, SpeechProviderType.cloud);
-    expect(profile?.speed, 1.1);
+    expect(profile.providerType, SpeechProviderType.cloud);
+    expect(profile.speed, 1.1);
   });
 
   test('maps a stored server profile', () {
