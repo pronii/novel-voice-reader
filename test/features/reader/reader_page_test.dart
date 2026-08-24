@@ -752,10 +752,10 @@ void main() {
         ValueKey<String>('paragraph-${paragraph.id}'),
       );
       if (paragraphFinder.evaluate().isEmpty ||
-          tester.getBottom(paragraphFinder).dy <= 0) {
+          tester.getBottomRight(paragraphFinder).dy <= 0) {
         continue;
       }
-      final top = tester.getTop(paragraphFinder).dy;
+      final top = tester.getTopLeft(paragraphFinder).dy;
       if (top < finalTop) {
         finalTop = top;
         finalVisibleParagraph = paragraph;
