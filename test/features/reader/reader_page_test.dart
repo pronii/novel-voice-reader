@@ -289,7 +289,13 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(home: _reader(paragraphs: _paragraphs(10, ['第一段。', '第二段。']), playbackActive: true)),
+      MaterialApp(
+        home: _reader(
+          paragraphs: _paragraphs(10, ['第一段。', '第二段。']),
+          playbackActive: true,
+          initialPageMode: ReaderPageMode.slide,
+        ),
+      ),
     );
 
     await tester.tap(find.text('第二段。'));
@@ -325,6 +331,31 @@ void main() {
     );
     expect(find.text('从这里朗读'), findsNothing);
   });
+
+  testWidgets('tapping a paragraph in scroll mode never highlights it', (
+    tester,
+  ) async {
+    // Scroll mode has no page-turn concept, so paragraph taps must not
+    // produce a selected highlight or a "从这里朗读" button — even while
+    // listening — to keep scrolling the only interaction on the body.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: _reader(
+          paragraphs: _paragraphs(10, ['第一段。', '第二段。']),
+          playbackActive: true,
+          initialPageMode: ReaderPageMode.scroll,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('第二段。'));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey<String>('active-paragraph-101')),
+      findsNothing,
+    );
+    expect(find.text('从这里朗读'), findsNothing);
 
   testWidgets('highlights the currently playing paragraph independently', (
     tester,

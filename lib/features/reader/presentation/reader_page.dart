@@ -775,11 +775,20 @@ final class _ReaderPageState extends State<ReaderPage> {
     // into listening is the dedicated 听小说 button (which then shows the
     // start-position picker). Inside listen mode, the active selection and
     // its read-from-here button are how the user re-targets playback.
+    //
+    // In scroll mode there is no page-turn concept, so paragraph-tap selection
+    // is suppressed entirely — taps on text do not produce a "selected"
+    // highlight, only a passive ripple, and the read-from-here button stays
+    // hidden. Paged modes (slide / curl) keep the full selection behaviour
+    // because taps are also used to retarget a turn.
     final playing =
         widget.playbackActive &&
         widget.playbackCursor?.chapterId == paragraph.chapterId &&
         widget.playbackCursor?.paragraphIndex == paragraph.index;
-    final active = widget.playbackActive && paragraph.id == _activeParagraphId;
+    final allowSelection = _pageMode != ReaderPageMode.scroll;
+    final active = allowSelection &&
+        widget.playbackActive &&
+        paragraph.id == _activeParagraphId;
     final scheme = Theme.of(context).colorScheme;
     final paper = context.paper;
     return KeyedSubtree(
@@ -1141,6 +1150,13 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   void _selectParagraph(ReaderParagraph paragraph) {
+    // In scroll mode paragraph taps must not produce a selection (no highlight,
+    // no "从这里朗读" button). The InkWell still absorbs the tap so text
+    // doesn't swallow gestures the reader or pager rely on, but the call is
+    // otherwise a no-op.
+    if (_pageMode == ReaderPageMode.scroll) {
+      return;
+    }
     setState(() => _activeParagraphId = paragraph.id);
     _reportReadingPosition(paragraph);
   }
