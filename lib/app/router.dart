@@ -106,8 +106,7 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
       return;
     }
     final profile = await loadActiveVoiceProfile(database);
-    if (profile == null ||
-        profile.providerType != SpeechProviderType.server) {
+    if (profile.providerType != SpeechProviderType.server) {
       return;
     }
     await repository.fetchMissingCovers(baseUrl: profile.normalizedBaseUrl);
@@ -449,10 +448,6 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
       _pendingPlaybackRuntime = runtime;
       _pendingPlaybackReplacement = replacementToken;
       final profile = await loadActiveVoiceProfile(database);
-      if (profile == null) {
-        _showSpeechFailure(const AppFailure('请先配置远程语音服务'));
-        return;
-      }
       final audioCacheRuntime = ref.read(audioCacheRuntimeProvider);
       final Directory cacheDirectory;
       if (audioCacheRuntime == null) {
@@ -901,9 +896,6 @@ final class _CacheSettingsRoutePage extends ConsumerWidget {
           cachedSegmentCount: data.cachedSegmentCount,
           onApply: (policy) async {
             final profile = await loadActiveVoiceProfile(database);
-            if (profile == null) {
-              throw const AppFailure('请先配置兼容或 MiMo 语音服务');
-            }
             final runtime = ref.read(audioCacheRuntimeProvider);
             if (runtime == null) {
               throw const AppFailure('缓存服务暂时不可用');

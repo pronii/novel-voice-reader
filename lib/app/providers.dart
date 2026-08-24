@@ -96,11 +96,24 @@ final sleepTimerControllerProvider = Provider<SleepTimerController>((ref) {
   return controller;
 });
 
-Future<VoiceProfile?> loadActiveVoiceProfile(AppDatabase database) async {
+/// Default self-hosted TTS server used when the user has not configured any
+/// voice profile. Pointing at the built-in server means listening works out of
+/// the box and book covers (served from the same host) fetch automatically.
+const String kDefaultServerBaseUrl = 'https://tts.ll.993209.xyz:888';
+
+/// The active voice profile, or the built-in self-hosted server when none has
+/// been configured. The app's default voice service is the self-hosted server,
+/// so the user never has to pick a provider before first use.
+Future<VoiceProfile> loadActiveVoiceProfile(AppDatabase database) async {
   final query = database.select(database.voiceProfiles)
     ..orderBy([(profile) => OrderingTerm.desc(profile.id)])
     ..limit(1);
-  return voiceProfileFromRecord(await query.getSingleOrNull());
+  return voiceProfileFromRecord(await query.getSingleOrNull()) ??
+      VoiceProfile.server(
+        baseUrl: kDefaultServerBaseUrl,
+        model: VoiceProfile.mimoModel,
+        voice: VoiceProfile.defaultMiMoVoice,
+      );
 }
 
 VoiceProfile? voiceProfileFromRecord(VoiceProfileRecord? record) {
