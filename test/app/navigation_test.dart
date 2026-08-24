@@ -93,7 +93,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('返回书架'), findsNothing);
-    expect(find.text('添加书籍'), findsOneWidget);
+    expect(find.byTooltip('导入小说'), findsOneWidget);
     expect(find.text('测试书'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
