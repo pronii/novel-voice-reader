@@ -309,11 +309,15 @@ void main() {
 
     final first = find.byKey(const ValueKey<String>('paragraph-100'));
     final second = find.byKey(const ValueKey<String>('paragraph-101'));
-    await tester.tap(first);
-    await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 1));
-    await tester.tap(first);
-    await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(second);
+    final afterTimeout = kDoubleTapTimeout + const Duration(milliseconds: 1);
+    await _tapWithTimestamp(tester, first, Duration.zero, pointer: 11);
+    await _tapWithTimestamp(tester, first, afterTimeout, pointer: 12);
+    await _tapWithTimestamp(
+      tester,
+      second,
+      afterTimeout + const Duration(milliseconds: 50),
+      pointer: 13,
+    );
     await tester.pumpAndSettle();
 
     expect(played, isEmpty);
@@ -1080,6 +1084,22 @@ void main() {
     expect(find.byType(PaginatedReaderView), findsOneWidget);
     expect(find.byType(ScrollablePositionedList), findsNothing);
   });
+}
+
+Future<void> _tapWithTimestamp(
+  WidgetTester tester,
+  Finder target,
+  Duration timeStamp, {
+  required int pointer,
+}) async {
+  final testPointer = TestPointer(pointer);
+  await tester.sendEventToBinding(
+    testPointer.down(tester.getCenter(target), timeStamp: timeStamp),
+  );
+  await tester.sendEventToBinding(
+    testPointer.up(timeStamp: timeStamp + const Duration(milliseconds: 1)),
+  );
+  await tester.pump();
 }
 
 ReaderPage _reader({
