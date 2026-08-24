@@ -113,6 +113,7 @@ Future<VoiceProfile> loadActiveVoiceProfile(AppDatabase database) async {
         baseUrl: kDefaultServerBaseUrl,
         model: VoiceProfile.mimoModel,
         voice: VoiceProfile.defaultMiMoVoice,
+        speed: 1,
       );
 }
 
