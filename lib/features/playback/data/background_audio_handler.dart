@@ -2,9 +2,15 @@ import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
+
+// `_telemetry` in PlaybackRuntime is initialized from a public `telemetry` named
+// parameter, which cannot be a `this._field` initializing formal (named params
+// may not start with an underscore); the pass-through assignment is intended.
+// ignore_for_file: prefer_initializing_formals
 
 final class AttachablePlaybackController implements PlaybackController {
   PlaybackController? _delegate;
@@ -75,9 +81,11 @@ final class PlaybackRuntime {
   PlaybackRuntime({
     required this.controller,
     required this.handler,
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
     void Function(Object error, StackTrace stackTrace)?
     onCoordinatorDisposeError,
-  }) : _onCoordinatorDisposeError =
+  }) : _telemetry = telemetry,
+       _onCoordinatorDisposeError =
            onCoordinatorDisposeError ?? _reportCoordinatorDisposeError {
     _playbackStateSubscription = handler.playbackState.listen((state) {
       if (state.processingState == AudioProcessingState.idle) {
@@ -90,6 +98,7 @@ final class PlaybackRuntime {
 
   final AttachablePlaybackController controller;
   final NovelAudioHandler handler;
+  final PlaybackTelemetry _telemetry;
   final void Function(Object error, StackTrace stackTrace)
   _onCoordinatorDisposeError;
   final StreamController<PlaybackCursor?> _cursorChanges =
@@ -138,7 +147,12 @@ final class PlaybackRuntime {
     required PlaybackReplacementToken token,
   }) {
     return _enqueue(() async {
+      _telemetry.record('playback.runtime.replace.begin', {
+        'chapter_id': cursor.chapterId,
+        'paragraph_index': cursor.paragraphIndex,
+      });
       if (!_isCurrent(token)) {
+        _telemetry.record('playback.runtime.replace.cancelled');
         await _dispose(next);
         return false;
       }
@@ -149,14 +163,19 @@ final class PlaybackRuntime {
       }
       try {
         await next.playFrom(cursor);
-      } catch (_) {
+      } catch (error) {
+        _telemetry.record('playback.runtime.replace.failure', {
+          'error_type': error.runtimeType.toString(),
+        });
         await _removeCurrent(next);
         rethrow;
       }
       if (!_isCurrent(token)) {
+        _telemetry.record('playback.runtime.replace.cancelled');
         await _removeCurrent(next);
         return false;
       }
+      _telemetry.record('playback.runtime.replace.success');
       return true;
     });
   }
@@ -218,6 +237,11 @@ final class PlaybackRuntime {
           !identical(_coordinator, next)) {
         return;
       }
+      // The single most useful diagnostic for the lock-screen bug: it names the
+      // exact reason `playing` flips (a real synth/playback failure, a natural
+      // completion, or a pause) instead of leaving the sustainer to infer it
+      // from the aggregate playing flag alone.
+      _telemetry.record('playback.activity', {'kind': activity.name});
       switch (activity) {
         case PlaybackActivity.playing:
           handler.markPlaying();

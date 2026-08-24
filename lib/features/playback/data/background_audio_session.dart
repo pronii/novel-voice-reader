@@ -1,6 +1,11 @@
 import 'dart:io';
 
 import 'package:audio_session/audio_session.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
+
+// `_telemetry` is initialized from a public named parameter and so cannot be a
+// `this._field` initializing formal (named params may not start with `_`).
+// ignore_for_file: prefer_initializing_formals
 
 /// A normalised audio-session interruption signal, decoupled from the plugin so
 /// the sustaining logic can be exercised without a platform channel.
@@ -33,17 +38,22 @@ abstract interface class AudioSessionDelegate {
 final class BackgroundAudioSession {
   const BackgroundAudioSession(
     this._delegate,
-    this._activateOnInitialize,
-  );
+    this._activateOnInitialize, {
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
+  }) : _telemetry = telemetry;
 
   final AudioSessionDelegate _delegate;
   final bool _activateOnInitialize;
+  final PlaybackTelemetry _telemetry;
 
-  static Future<BackgroundAudioSession> system() async {
+  static Future<BackgroundAudioSession> system({
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
+  }) async {
     final session = await AudioSession.instance;
     return BackgroundAudioSession(
       _PluginAudioSessionDelegate(session),
       Platform.isIOS,
+      telemetry: telemetry,
     );
   }
 
@@ -75,10 +85,30 @@ final class BackgroundAudioSession {
   Future<bool> ensureActive() async {
     for (var attempt = 0; attempt < _activationAttempts; attempt++) {
       if (await _delegate.setActive(true)) {
+        _telemetry.record('session.ensureActive', {
+          'active': true,
+          'attempts': attempt + 1,
+        });
         return true;
       }
     }
+    _telemetry.record('session.ensureActive', {
+      'active': false,
+      'attempts': _activationAttempts,
+    });
     return false;
+  }
+
+  /// Deactivates the audio session after playback has been fully stopped
+  /// (e.g. the sleep timer expired and the user is done listening).
+  ///
+  /// While the session stays active iOS keeps the app in a running
+  /// background-audio state even after the keep-alive loop has been paused,
+  /// which wastes battery. Deactivating lets the OS suspend the app; the next
+  /// [ensureActive] on a fresh play request re-activates it.
+  Future<void> deactivate() async {
+    await _delegate.setActive(false);
+    _telemetry.record('session.deactivate');
   }
 
   static const int _activationAttempts = 3;

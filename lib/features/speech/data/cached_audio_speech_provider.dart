@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' show min;
 
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:just_audio/just_audio.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
@@ -170,6 +172,7 @@ final class CachedAudioSpeechProvider
         DisposableSpeechProvider,
         AdjustableSpeechProvider,
         PrefetchingSpeechProvider,
+        BatchPrefetchingSpeechProvider,
         PlaylistSpeechProvider,
         CacheOnlySpeechProvider,
         PlaybackStatusSpeechProvider,
@@ -243,16 +246,34 @@ final class CachedAudioSpeechProvider
       if (generation != _prepareGeneration) {
         return;
       }
-      final failure = error is AppFailure
-          ? error
-          : const AppFailure('云端语音播放准备失败');
+      // Preserve a classified cloud failure as-is; otherwise the underlying
+      // exception is what we still can't see on a locked screen. A
+      // PlatformException here is a just_audio native load failure: its code
+      // (and message) name the AVFoundation reason and reference only the LOCAL
+      // cache file — never the cloud URL or key — so they are safe to surface.
+      // Any other error type is reported by runtime type ONLY, so a raw
+      // toString() can't leak the cloud URL or API key.
+      final AppFailure failure;
+      if (error is AppFailure) {
+        failure = error;
+      } else if (error is PlatformException) {
+        final detail = error.message == null
+            ? error.code
+            : '${error.code}: ${error.message}';
+        failure = AppFailure('云端语音播放准备失败 (PlatformException $detail)');
+      } else {
+        failure = AppFailure('云端语音播放准备失败 (${error.runtimeType})');
+      }
       _events.add(SpeechFailed(segmentId: segment.id, failure: failure));
       rethrow;
     }
   }
 
   @override
-  Future<bool> prepareCached(SpeechSegment segment, VoiceProfile profile) async {
+  Future<bool> prepareCached(
+    SpeechSegment segment,
+    VoiceProfile profile,
+  ) async {
     final audioCache = cache;
     if (audioCache is! LookupSpeechAudioCache) {
       // The active cache can't answer a lookup without synthesizing, so treat
@@ -313,6 +334,50 @@ final class CachedAudioSpeechProvider
       await queuedEngine.queueNextFilePath(file.path);
       _queued.add(_PlaylistItem(segment: segment, path: file.path));
     });
+  }
+
+  @override
+  Future<void> prefetchBatch(
+    List<SpeechSegment> segments,
+    VoiceProfile profile,
+  ) async {
+    final generation = _prepareGeneration;
+    const maxConcurrentSyntheses = 2;
+    for (
+      var start = 0;
+      start < segments.length;
+      start += maxConcurrentSyntheses
+    ) {
+      final end = min(start + maxConcurrentSyntheses, segments.length);
+      final batch = segments.sublist(start, end);
+      final files = await Future.wait([
+        for (final segment in batch) _obtain(segment, profile),
+      ]);
+      if (generation != _prepareGeneration) {
+        return;
+      }
+      final playbackEngine = engine;
+      if (_current == null || playbackEngine is! QueuedAudioPlaybackEngine) {
+        continue;
+      }
+      final queuedEngine = playbackEngine as QueuedAudioPlaybackEngine;
+      await _enqueueSourceUpdate(() async {
+        if (generation != _prepareGeneration || _current == null) {
+          return;
+        }
+        for (var index = 0; index < batch.length; index++) {
+          final segment = batch[index];
+          if (_current!.segment.id == segment.id ||
+              _queued.any((item) => item.segment.id == segment.id)) {
+            continue;
+          }
+          final file = files[index];
+          _rememberSegment(file.path, segment);
+          await queuedEngine.queueNextFilePath(file.path);
+          _queued.add(_PlaylistItem(segment: segment, path: file.path));
+        }
+      });
+    }
   }
 
   @override
@@ -408,14 +473,20 @@ final class CachedAudioSpeechProvider
   Future<void> _playEngine() async {
     try {
       await engine.play();
-    } catch (_) {
+    } catch (error) {
       final current = _current;
       if (current != null) {
+        final AppFailure failure;
+        if (error is PlatformException) {
+          final detail = error.message == null
+              ? error.code
+              : '${error.code}: ${error.message}';
+          failure = AppFailure('云端音频播放失败 (PlatformException $detail)');
+        } else {
+          failure = AppFailure('云端音频播放失败 (${error.runtimeType})');
+        }
         _events.add(
-          SpeechFailed(
-            segmentId: current.segment.id,
-            failure: const AppFailure('云端音频播放失败'),
-          ),
+          SpeechFailed(segmentId: current.segment.id, failure: failure),
         );
       }
     }

@@ -86,7 +86,7 @@ void main() {
 
     expect(find.text('第一章'), findsWidgets);
     expect(find.byTooltip('返回书架'), findsOneWidget);
-    expect(find.byTooltip('听书'), findsOneWidget);
+    expect(find.byTooltip('播放'), findsOneWidget);
     expect(find.byTooltip('播放器'), findsOneWidget);
 
     await tester.tap(find.byTooltip('返回书架'));
@@ -364,7 +364,7 @@ void main() {
     await tester.tap(find.text('第二章'));
     await _pumpUntilFound(
       tester,
-      find.byKey(ValueKey<String>('active-paragraph-$secondParagraphId')),
+      find.byKey(ValueKey<String>('paragraph-$secondParagraphId')),
     );
 
     await _showReaderToolbar(tester);
@@ -373,7 +373,7 @@ void main() {
     await tester.tap(find.text('切章测试书'));
     await _pumpUntilFound(
       tester,
-      find.byKey(ValueKey<String>('active-paragraph-$secondParagraphId')),
+      find.byKey(ValueKey<String>('paragraph-$secondParagraphId')),
     );
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -623,10 +623,7 @@ Future<void> _openMiMoSettings(WidgetTester tester) async {
   await _selectVoiceProvider(tester, 'MiMo');
 }
 
-Future<void> _selectVoiceProvider(
-  WidgetTester tester,
-  String label,
-) async {
+Future<void> _selectVoiceProvider(WidgetTester tester, String label) async {
   final dropdown = find.byKey(const Key('tts-provider-dropdown'));
   await _pumpUntilFound(tester, dropdown);
   await tester.tap(dropdown);
@@ -642,8 +639,10 @@ Future<void> _showReaderToolbar(WidgetTester tester) async {
     matching: find.byType(IgnorePointer),
   );
   if (tester.widget<IgnorePointer>(pointerGate).ignoring) {
-    final body = find.byKey(const Key('reader-body'));
-    await tester.tapAt(tester.getTopLeft(body) + const Offset(2, 2));
+    // Only a tap in the horizontal middle third reveals the chrome; the
+    // left/right thirds are page-turn zones. tester.tap hits the widget's
+    // centre, which is squarely in the middle zone.
+    await tester.tap(find.byKey(const Key('reader-body')));
     await tester.pumpAndSettle();
   }
   expect(tester.widget<AnimatedSlide>(toolbar).offset, Offset.zero);

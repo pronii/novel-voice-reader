@@ -60,7 +60,16 @@ void main() {
     output.failNextPlay = true;
 
     await player.start();
-    await pumpEventQueue();
+    // The rebuild-and-restart runs asynchronously off the failed play() and
+    // rewrites the clip with real file I/O, so wait for it to actually land
+    // rather than assuming a single event-queue drain covers it — a contended
+    // CI runner can take several real milliseconds to flush the write.
+    await _pumpUntil(
+      () =>
+          clip.existsSync() &&
+          output.loadedPaths.length >= 2 &&
+          output.playCalls >= 2,
+    );
 
     expect(clip.existsSync(), isTrue); // rewritten
     expect(output.loadedPaths, hasLength(2)); // source reloaded
@@ -133,8 +142,21 @@ void main() {
   });
 }
 
-final class _RecordingKeepAliveOutput implements KeepAliveAudioOutput {
-  final _errors = StreamController<Object>.broadcast();
+/// Pumps real event-loop turns until [ready] holds or [timeout] elapses.
+/// Unlike a fixed [pumpEventQueue] drain, this waits in wall-clock time, so a
+/// test can depend on asynchronous recovery that performs real file I/O without
+/// racing a loaded machine.
+Future<void> _pumpUntil(
+  bool Function() ready, {
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final stopwatch = Stopwatch()..start();
+  while (!ready() && stopwatch.elapsed < timeout) {
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
+final class _RecordingKeepAliveOutput implements KeepAliveAudioOutput {  final _errors = StreamController<Object>.broadcast();
   final List<String> loadedPaths = [];
   int playCalls = 0;
   int pauseCalls = 0;

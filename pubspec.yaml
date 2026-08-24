@@ -52,6 +52,7 @@ dependencies:
   html: ^0.15.6
   connectivity_plus: ^7.3.1
   scrollable_positioned_list: ^0.3.8
+  page_flip: ^0.2.5+1
 
 dev_dependencies:
   flutter_test:
@@ -82,6 +83,20 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # Bundled CJK fonts for the warm-paper design. These are Noto Serif SC /
+  # Noto Sans SC subsetted (see tool/build_fonts.sh) to the main CJK block +
+  # Latin + punctuation + kana so imported novels render without missing
+  # glyphs while keeping each file ~8-11MB; rarer glyphs fall back to the
+  # platform CJK font automatically. A single Regular weight ships per family;
+  # bolder text is rendered by the engine.
+  fonts:
+    - family: NotoSerifSC
+      fonts:
+        - asset: assets/fonts/NotoSerifSC-Regular.ttf
+    - family: NotoSansSC
+      fonts:
+        - asset: assets/fonts/NotoSansSC-Regular.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

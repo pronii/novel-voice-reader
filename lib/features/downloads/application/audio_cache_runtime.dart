@@ -15,6 +15,7 @@ import 'package:novel_voice_reader/features/downloads/domain/cache_key.dart';
 import 'package:novel_voice_reader/features/downloads/domain/download_policy.dart';
 import 'package:novel_voice_reader/features/speech/data/cloud_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
+import 'package:novel_voice_reader/features/speech/data/server_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
@@ -48,6 +49,11 @@ final class AudioCacheRuntime {
   final Directory Function(int bookId) cacheDirectoryForBook;
   final Dio _dio;
   final SecureCredentials _credentials;
+
+  /// The process-wide credentials store. Exposed so the settings UI shares the
+  /// exact instance the background synthesis path reads from — a saved API key
+  /// updates the same in-memory cache the locked-screen synthesizer sees.
+  SecureCredentials get credentials => _credentials;
   final DownloadNetworkGate _networkGate;
   final Future<VoiceProfile?> Function()? _activeProfileLoader;
   final Stream<List<ConnectivityResult>>? _connectivityChanges;
@@ -85,37 +91,51 @@ final class AudioCacheRuntime {
     }
 
     late final Future<File> operation;
-    operation =
-        AudioCacheRepository(
-              directory: cacheDirectoryForBook(bookId),
-              synthesizer: _synthesizer(profile),
-            )
-            .obtain(segment, profile)
-            .then((file) async {
-              await _store.recordCachedFile(
-                bookId: bookId,
-                segment: segment,
-                profile: profile,
-                file: file,
-              );
-              _protectRecent(bookId, cacheKey);
-              final policy = await _store.policyForBook(bookId);
-              await _store.pruneToLimit(
-                bookId: bookId,
-                maxBytes:
-                    policy?.maxCacheBytes ??
-                    DownloadPolicy.defaultMaxCacheBytes,
-                protectedKeys: _recentKeysForBook(bookId),
-              );
-              return file;
-            })
-            .whenComplete(() {
-              if (identical(_inFlight[key], operation)) {
-                _inFlight.remove(key);
-              }
-            });
+    operation = _obtainAndRecord(bookId, segment, profile, cacheKey)
+        .whenComplete(() {
+          if (identical(_inFlight[key], operation)) {
+            _inFlight.remove(key);
+          }
+        });
     _inFlight[key] = operation;
     return operation;
+  }
+
+  Future<File> _obtainAndRecord(
+    int bookId,
+    SpeechSegment segment,
+    VoiceProfile profile,
+    String cacheKey,
+  ) async {
+    final repository = AudioCacheRepository(
+      directory: cacheDirectoryForBook(bookId),
+      synthesizer: _synthesizer(profile),
+    );
+    // A validated cache hit adds no bytes; only synthesis grows the cache.
+    final cached = await repository.lookup(segment, profile);
+    final file = cached ?? await repository.obtain(segment, profile);
+    await _store.recordCachedFile(
+      bookId: bookId,
+      segment: segment,
+      profile: profile,
+      file: file,
+    );
+    _protectRecent(bookId, cacheKey);
+    if (cached == null) {
+      // Reclaim space only after real synthesis. A hit cannot have pushed the
+      // cache over its limit, so running the per-obtain prune — a full-table
+      // scan plus a stat per row — on every hit is pure overhead when replaying
+      // an already-downloaded book. Limit/policy changes still prune via
+      // _reconcileNow.
+      final policy = await _store.policyForBook(bookId);
+      await _store.pruneToLimit(
+        bookId: bookId,
+        maxBytes:
+            policy?.maxCacheBytes ?? DownloadPolicy.defaultMaxCacheBytes,
+        protectedKeys: _recentKeysForBook(bookId),
+      );
+    }
+    return file;
   }
 
   /// Returns the cached, validated audio file for [segment] if it is already on
@@ -312,6 +332,10 @@ final class AudioCacheRuntime {
   CloudSpeechSynthesizer _synthesizer(VoiceProfile profile) {
     return switch (profile.providerType) {
       SpeechProviderType.cloud => CloudTtsClient(
+        dio: _dio,
+        credentials: _credentials,
+      ),
+      SpeechProviderType.server => ServerTtsClient(
         dio: _dio,
         credentials: _credentials,
       ),

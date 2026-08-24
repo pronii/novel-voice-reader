@@ -2,12 +2,15 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:novel_voice_reader/app/design/paper_tokens.dart';
+import 'package:novel_voice_reader/app/widgets/book_cover.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 
 final class PlayerPage extends StatefulWidget {
   const PlayerPage({
     super.key,
     required this.bookTitle,
+    this.bookCoverPath,
     required this.chapterTitle,
     this.onPrevious,
     this.onNext,
@@ -23,6 +26,10 @@ final class PlayerPage extends StatefulWidget {
   });
 
   final String bookTitle;
+
+  /// Local path of a fetched cover image, or null to show a generated cover.
+  final String? bookCoverPath;
+
   final String chapterTitle;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
@@ -71,75 +78,126 @@ final class _PlayerPageState extends State<PlayerPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('播放器'), actions: widget.actions),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              const Spacer(),
-              Icon(
-                Icons.auto_stories,
-                size: 88,
-                color: Theme.of(context).colorScheme.primary,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Size the cover to the screen so it reads as an immersive
+            // now-playing hero, but cap it so the transport controls and speed
+            // selector below always stay on-screen (and above the fold on the
+            // 800x600 test surface). Scrolls only under extreme text scaling.
+            final coverHeight = (constraints.maxHeight * 0.32).clamp(150.0, 240.0);
+            final coverWidth = coverHeight * 0.72;
+            return SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight - 44),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    BookCover(
+                      title: widget.bookTitle,
+                      imagePath: widget.bookCoverPath,
+                      width: coverWidth,
+                      height: coverHeight,
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      widget.bookTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      widget.chapterTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+                    _buildProgress(context),
+                    const SizedBox(height: 28),
+                    _buildTransport(context),
+                    const SizedBox(height: 28),
+                    SegmentedButton<double>(
+                      segments: const [
+                        ButtonSegment(value: 0.8, label: Text('0.8x')),
+                        ButtonSegment(value: 1, label: Text('1.0x')),
+                        ButtonSegment(value: 1.25, label: Text('1.25x')),
+                        ButtonSegment(value: 1.5, label: Text('1.5x')),
+                      ],
+                      selected: {_speed},
+                      onSelectionChanged: (values) {
+                        _queueSpeedChange(values.single);
+                      },
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 28),
-              Text(
-                widget.bookTitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 8),
-              Text(widget.chapterTitle, textAlign: TextAlign.center),
-              const SizedBox(height: 32),
-              LinearProgressIndicator(value: _progress),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(child: Text(_elapsedLabel)),
-                  Text(_remainingLabel),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  IconButton(
-                    tooltip: '上一段',
-                    onPressed: widget.onPrevious,
-                    icon: const Icon(Icons.skip_previous),
-                  ),
-                  IconButton.filled(
-                    tooltip: _playing ? '暂停' : '播放',
-                    iconSize: 36,
-                    onPressed: _togglePlayback,
-                    icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
-                  ),
-                  IconButton(
-                    tooltip: '下一段',
-                    onPressed: widget.onNext,
-                    icon: const Icon(Icons.skip_next),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 28),
-              SegmentedButton<double>(
-                segments: const [
-                  ButtonSegment(value: 0.8, label: Text('0.8x')),
-                  ButtonSegment(value: 1, label: Text('1.0x')),
-                  ButtonSegment(value: 1.25, label: Text('1.25x')),
-                  ButtonSegment(value: 1.5, label: Text('1.5x')),
-                ],
-                selected: {_speed},
-                onSelectionChanged: (values) {
-                  _queueSpeedChange(values.single);
-                },
-              ),
-              const Spacer(),
-            ],
-          ),
+            );
+          },
         ),
       ),
+    );
+  }
+
+  Widget _buildProgress(BuildContext context) {
+    final theme = Theme.of(context);
+    final labelStyle = theme.textTheme.labelMedium;
+    return Column(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: _progress,
+            minHeight: 6,
+            color: context.paper.accent,
+            backgroundColor: theme.colorScheme.surfaceContainerHighest,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(child: Text(_elapsedLabel, style: labelStyle)),
+            Text(_remainingLabel, style: labelStyle),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTransport(BuildContext context) {
+    final paper = context.paper;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        IconButton(
+          tooltip: '上一段',
+          iconSize: 32,
+          onPressed: widget.onPrevious,
+          icon: const Icon(Icons.skip_previous),
+        ),
+        IconButton.filled(
+          tooltip: _playing ? '暂停' : '播放',
+          iconSize: 40,
+          onPressed: _togglePlayback,
+          style: IconButton.styleFrom(
+            backgroundColor: paper.accent,
+            foregroundColor: paper.onAccent,
+            minimumSize: const Size(72, 72),
+          ),
+          icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
+        ),
+        IconButton(
+          tooltip: '下一段',
+          iconSize: 32,
+          onPressed: widget.onNext,
+          icon: const Icon(Icons.skip_next),
+        ),
+      ],
     );
   }
 

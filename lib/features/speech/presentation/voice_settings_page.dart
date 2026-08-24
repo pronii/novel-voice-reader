@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:novel_voice_reader/app/widgets/section_card.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_credentials_input.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
@@ -21,6 +22,10 @@ final class VoiceSettingsPage extends StatefulWidget {
     this.hasSavedMiMoApiKey = false,
     this.onTestConnection,
     this.onSave,
+    this.initialDiagnosticsEndpoint,
+    this.onSaveDiagnosticsEndpoint,
+    this.onUploadDiagnostics,
+    this.onExportDiagnostics,
   });
 
   final VoiceProfile? initialProfile;
@@ -29,6 +34,20 @@ final class VoiceSettingsPage extends StatefulWidget {
   final Future<void> Function(VoiceSettingsSubmission submission)?
   onTestConnection;
   final Future<void> Function(VoiceSettingsSubmission submission)? onSave;
+
+  /// Currently configured diagnostics upload URL, shown in the field.
+  final String? initialDiagnosticsEndpoint;
+
+  /// Persists a new diagnostics upload URL (empty clears it). When null, the
+  /// whole diagnostics section is hidden.
+  final Future<void> Function(String endpoint)? onSaveDiagnosticsEndpoint;
+
+  /// Triggers an immediate upload of buffered diagnostics.
+  final Future<void> Function()? onUploadDiagnostics;
+
+  /// Exports the buffered diagnostics (e.g. copies them to the clipboard) for
+  /// when no collector is configured. Returns a human-readable result summary.
+  final Future<String> Function()? onExportDiagnostics;
 
   @override
   State<VoiceSettingsPage> createState() => _VoiceSettingsPageState();
@@ -41,12 +60,16 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   final _apiKey = TextEditingController();
   final _mimoApiKey = TextEditingController();
   final _mimoStyle = TextEditingController();
+  final _diagnosticsEndpoint = TextEditingController();
+
+  static const _defaultServerUrl = 'https://tts.ll.993209.xyz:888';
 
   SpeechProviderType _provider = SpeechProviderType.cloud;
   String _mimoVoice = VoiceProfile.defaultMiMoVoice;
   double _speed = 1;
   bool _saving = false;
   bool _testingConnection = false;
+  bool _diagnosticsBusy = false;
 
   static const _mimoVoiceLabels = <String, String>{
     '冰糖': '冰糖（中文女声）',
@@ -62,6 +85,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   @override
   void initState() {
     super.initState();
+    _diagnosticsEndpoint.text = widget.initialDiagnosticsEndpoint ?? '';
     final profile = widget.initialProfile;
     if (profile == null) return;
     _provider = profile.providerType;
@@ -69,7 +93,8 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     if (profile.providerType == SpeechProviderType.mimo) {
       _mimoVoice = profile.voice ?? VoiceProfile.defaultMiMoVoice;
       _mimoStyle.text = profile.style ?? '';
-    } else if (profile.providerType == SpeechProviderType.cloud) {
+    } else if (profile.providerType == SpeechProviderType.cloud ||
+        profile.providerType == SpeechProviderType.server) {
       // Restore the saved cloud endpoint config so reopening settings doesn't
       // silently revert to the hardcoded defaults.
       final baseUrl = profile.baseUrl;
@@ -89,12 +114,15 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     _apiKey.dispose();
     _mimoApiKey.dispose();
     _mimoStyle.dispose();
+    _diagnosticsEndpoint.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final cloud = _provider == SpeechProviderType.cloud;
+    final cloud =
+        _provider == SpeechProviderType.cloud ||
+        _provider == SpeechProviderType.server;
     final mimo = _provider == SpeechProviderType.mimo;
     return Scaffold(
       appBar: AppBar(title: const Text('语音设置')),
@@ -110,6 +138,13 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
               DropdownMenuItem(
                 value: SpeechProviderType.cloud,
                 child: _ProviderOption(icon: Icons.cloud_outlined, label: '兼容'),
+              ),
+              DropdownMenuItem(
+                value: SpeechProviderType.server,
+                child: _ProviderOption(
+                  icon: Icons.dns_outlined,
+                  label: '自建服务端',
+                ),
               ),
               DropdownMenuItem(
                 value: SpeechProviderType.mimo,
@@ -135,15 +170,69 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
           ),
           if (cloud) ..._cloudFields(),
           if (mimo) ..._mimoFields(),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: _saving || _testingConnection ? null : _save,
-            icon: const Icon(Icons.save_outlined),
-            label: Text(_saving ? '保存中' : '保存'),
-          ),
+          if (widget.onSaveDiagnosticsEndpoint != null) ..._diagnosticsFields(),
         ],
       ),
+      bottomNavigationBar: StickyActionBar(
+        action: FilledButton.icon(
+          onPressed: _saving || _testingConnection ? null : _save,
+          icon: const Icon(Icons.save_outlined),
+          label: Text(_saving ? '保存中' : '保存'),
+        ),
+      ),
     );
+  }
+
+  List<Widget> _diagnosticsFields() {
+    return [
+      const SizedBox(height: 24),
+      const Divider(),
+      const SizedBox(height: 8),
+      Text('诊断上报', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 4),
+      const Text(
+        '锁屏播放诊断事件会先存在本机，回到前台时上传到下面的地址(任何能接收 '
+        'POST JSON 的服务/临时 webhook 都行)。已内置默认上报地址,无需填写;'
+        '如需改到自己的服务器可覆盖此地址。',
+        style: TextStyle(fontSize: 12),
+      ),
+      const SizedBox(height: 12),
+      TextField(
+        key: const Key('diagnostics-endpoint-field'),
+        controller: _diagnosticsEndpoint,
+        keyboardType: TextInputType.url,
+        enableSuggestions: false,
+        autocorrect: false,
+        decoration: const InputDecoration(
+          labelText: '诊断上报地址',
+          hintText: 'https://example.com/collect',
+        ),
+      ),
+      const SizedBox(height: 12),
+      Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: _diagnosticsBusy ? null : _saveDiagnosticsEndpoint,
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('保存地址'),
+          ),
+          if (widget.onUploadDiagnostics != null)
+            OutlinedButton.icon(
+              onPressed: _diagnosticsBusy ? null : _uploadDiagnostics,
+              icon: const Icon(Icons.cloud_upload_outlined),
+              label: const Text('立即上传'),
+            ),
+          if (widget.onExportDiagnostics != null)
+            OutlinedButton.icon(
+              onPressed: _diagnosticsBusy ? null : _exportDiagnostics,
+              icon: const Icon(Icons.ios_share),
+              label: const Text('导出'),
+            ),
+        ],
+      ),
+    ];
   }
 
   List<Widget> _cloudFields() {
@@ -152,7 +241,11 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       TextField(
         controller: _baseUrl,
         keyboardType: TextInputType.url,
-        decoration: const InputDecoration(labelText: 'Base URL'),
+        decoration: InputDecoration(
+          labelText: _provider == SpeechProviderType.server
+              ? '服务端地址'
+              : 'Base URL',
+        ),
       ),
       const SizedBox(height: 12),
       TextField(
@@ -166,15 +259,25 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       ),
       const SizedBox(height: 12),
       TextField(
-        controller: _apiKey,
+        controller: _provider == SpeechProviderType.server
+            ? _mimoApiKey
+            : _apiKey,
         obscureText: true,
         enableSuggestions: false,
         autocorrect: false,
         decoration: InputDecoration(
-          labelText: 'API Key',
-          helperText: widget.hasSavedCloudApiKey ? '已保存，留空则保持不变' : null,
+          labelText: _provider == SpeechProviderType.server
+              ? 'MiMo API Key'
+              : 'API Key',
+          helperText: _provider == SpeechProviderType.server
+              ? '留空则使用服务器内置密钥'
+              : (widget.hasSavedCloudApiKey ? '已保存，留空则保持不变' : null),
         ),
       ),
+      if (_provider == SpeechProviderType.server) ...[
+        const SizedBox(height: 12),
+        _connectionButton(),
+      ],
     ];
   }
 
@@ -183,6 +286,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       const SizedBox(height: 12),
       DropdownButtonFormField<String>(
         initialValue: _mimoVoice,
+        isExpanded: true,
         decoration: const InputDecoration(labelText: '音色'),
         items: [
           for (final voice in VoiceProfile.mimoVoices)
@@ -234,7 +338,18 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   }
 
   void _selectProvider(SpeechProviderType provider) {
-    setState(() => _provider = provider);
+    setState(() {
+      _provider = provider;
+      if (provider == SpeechProviderType.server &&
+          (_baseUrl.text.trim().isEmpty ||
+              _baseUrl.text.trim() == 'https://api.openai.com')) {
+        _baseUrl.text = _defaultServerUrl;
+      }
+      if (provider == SpeechProviderType.server) {
+        _model.text = VoiceProfile.mimoModel;
+        _voice.text = VoiceProfile.defaultMiMoVoice;
+      }
+    });
   }
 
   Future<void> _save() async {
@@ -285,9 +400,8 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
         SpeechProviderType.cloud => SpeechCredentialsInput(
           apiKey: _apiKey.text,
         ),
-        SpeechProviderType.mimo => SpeechCredentialsInput(
-          apiKey: _mimoApiKey.text,
-        ),
+        SpeechProviderType.server || SpeechProviderType.mimo =>
+          SpeechCredentialsInput(apiKey: _mimoApiKey.text),
       },
     );
   }
@@ -301,6 +415,13 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
         speed: _speed,
         outputFormat: 'mp3',
       ),
+      SpeechProviderType.server => VoiceProfile.server(
+        baseUrl: _baseUrl.text,
+        model: _model.text,
+        voice: _voice.text,
+        speed: _speed,
+        outputFormat: 'wav',
+      ),
       SpeechProviderType.mimo => VoiceProfile.mimo(
         voice: _mimoVoice,
         style: _mimoStyle.text,
@@ -312,6 +433,9 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   bool _hasUsableCredential(VoiceSettingsSubmission submission) {
     if (submission.credentials.normalizedApiKey != null) return true;
     final saved = switch (_provider) {
+      // The self-hosted server can carry the upstream key itself, so it needs
+      // no local key.
+      SpeechProviderType.server => true,
       SpeechProviderType.cloud => widget.hasSavedCloudApiKey,
       SpeechProviderType.mimo => widget.hasSavedMiMoApiKey,
     };
@@ -323,6 +447,48 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       );
     }
     return saved;
+  }
+
+  Future<void> _saveDiagnosticsEndpoint() async {
+    final save = widget.onSaveDiagnosticsEndpoint;
+    if (save == null || _diagnosticsBusy) return;
+    setState(() => _diagnosticsBusy = true);
+    try {
+      await save(_diagnosticsEndpoint.text.trim());
+      _showMessage('诊断上报地址已保存');
+    } catch (_) {
+      _showMessage('诊断上报地址保存失败');
+    } finally {
+      if (mounted) setState(() => _diagnosticsBusy = false);
+    }
+  }
+
+  Future<void> _uploadDiagnostics() async {
+    final upload = widget.onUploadDiagnostics;
+    if (upload == null || _diagnosticsBusy) return;
+    setState(() => _diagnosticsBusy = true);
+    try {
+      await upload();
+      _showMessage('已尝试上传诊断日志');
+    } catch (_) {
+      _showMessage('诊断日志上传失败');
+    } finally {
+      if (mounted) setState(() => _diagnosticsBusy = false);
+    }
+  }
+
+  Future<void> _exportDiagnostics() async {
+    final export = widget.onExportDiagnostics;
+    if (export == null || _diagnosticsBusy) return;
+    setState(() => _diagnosticsBusy = true);
+    try {
+      final summary = await export();
+      _showMessage(summary);
+    } catch (_) {
+      _showMessage('诊断日志导出失败');
+    } finally {
+      if (mounted) setState(() => _diagnosticsBusy = false);
+    }
   }
 
   void _showMessage(String message) {
@@ -342,7 +508,11 @@ final class _ProviderOption extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      children: [Icon(icon, size: 20), const SizedBox(width: 12), Text(label)],
+      children: [
+        Icon(icon, size: 20),
+        const SizedBox(width: 12),
+        Expanded(child: Text(label, maxLines: 1, softWrap: false)),
+      ],
     );
   }
 }

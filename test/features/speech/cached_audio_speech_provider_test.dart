@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
+import 'package:novel_voice_reader/features/downloads/domain/cache_key.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/speech/data/cached_audio_speech_provider.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_provider.dart';
@@ -289,6 +291,48 @@ void main() {
     await directory.delete(recursive: true);
   });
 
+  test('batch prefetch synthesizes two at a time and queues in order', () async {
+    final directory = await Directory.systemTemp.createTemp('cached-batch-');
+    final engine = QueuedFakeAudioPlaybackEngine();
+    final synthesizer = ControllableCloudSpeechSynthesizer();
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(directory: directory, synthesizer: synthesizer),
+      engine: engine,
+    );
+    const current = SpeechSegment(id: '70:0', paragraphId: 70, text: '当前', partIndex: 0);
+    const first = SpeechSegment(id: '71:0', paragraphId: 71, text: '第一项', partIndex: 0);
+    const second = SpeechSegment(id: '72:0', paragraphId: 72, text: '第二项', partIndex: 0);
+    const third = SpeechSegment(id: '73:0', paragraphId: 73, text: '第三项', partIndex: 0);
+    final profile = _cloudProfile();
+
+    final prepare = provider.prepare(current, profile);
+    await synthesizer.waitForRequests(1);
+    synthesizer.complete(0);
+    await prepare;
+
+    final prefetch = (provider as BatchPrefetchingSpeechProvider).prefetchBatch(
+      const [first, second, third],
+      profile,
+    );
+    await synthesizer.waitForRequests(3);
+    synthesizer.complete(2);
+    await pumpEventQueue();
+    expect(engine.queuedPaths, isEmpty);
+    synthesizer.complete(1);
+    await synthesizer.waitForRequests(4);
+    expect(engine.queuedPaths, hasLength(2));
+    synthesizer.complete(3);
+    await prefetch;
+
+    expect(engine.queuedPaths, hasLength(3));
+    expect(engine.queuedPaths[0], contains(CacheKey.forSegment(first, profile)));
+    expect(engine.queuedPaths[1], contains(CacheKey.forSegment(second, profile)));
+    expect(engine.queuedPaths[2], contains(CacheKey.forSegment(third, profile)));
+
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
+
   test('prepare reuses an in-flight prefetch request', () async {
     final directory = await Directory.systemTemp.createTemp(
       'cached-prefetch-in-flight-',
@@ -513,6 +557,73 @@ void main() {
     await provider.dispose();
     await directory.delete(recursive: true);
   });
+
+  test('surfaces the underlying exception type on a prepare failure', () async {
+    final engine = FakeAudioPlaybackEngine();
+    final provider = CachedAudioSpeechProvider(
+      cache: _ThrowingSpeechAudioCache(_TransportGlitch()),
+      engine: engine,
+    );
+    final events = <SpeechEvent>[];
+    final subscription = provider.events.listen(events.add);
+    const segment = SpeechSegment(
+      id: '9:0',
+      paragraphId: 9,
+      text: '正文',
+      partIndex: 0,
+    );
+
+    await expectLater(
+      provider.prepare(segment, _cloudProfile()),
+      throwsA(isA<_TransportGlitch>()),
+    );
+
+    final failure = events.whereType<SpeechFailed>().single;
+    expect(failure.segmentId, '9:0');
+    // The message names the failing subsystem via its runtime type so a
+    // locked-screen diagnostic is not left with the generic fallback alone.
+    expect(failure.failure.message, contains('_TransportGlitch'));
+
+    await subscription.cancel();
+    await provider.dispose();
+  });
+
+  test('surfaces the just_audio load code on a PlatformException', () async {
+    final engine = _ThrowingAudioPlaybackEngine(
+      PlatformException(code: '-11800', message: 'The operation could not be completed'),
+    );
+    final directory = await Directory.systemTemp.createTemp('cached-platform-');
+    final provider = CachedAudioSpeechProvider(
+      cache: AudioCacheRepository(
+        directory: directory,
+        synthesizer: FakeCloudSpeechSynthesizer(),
+      ),
+      engine: engine,
+    );
+    final events = <SpeechEvent>[];
+    final subscription = provider.events.listen(events.add);
+    const segment = SpeechSegment(
+      id: '9:0',
+      paragraphId: 9,
+      text: '正文',
+      partIndex: 0,
+    );
+
+    await expectLater(
+      provider.prepare(segment, _cloudProfile()),
+      throwsA(isA<PlatformException>()),
+    );
+
+    // The AVFoundation code is carried into the failure so lock-screen telemetry
+    // pinpoints the native load reason, not just "PlatformException".
+    final failure = events.whereType<SpeechFailed>().single;
+    expect(failure.failure.message, contains('PlatformException'));
+    expect(failure.failure.message, contains('-11800'));
+
+    await subscription.cancel();
+    await provider.dispose();
+    await directory.delete(recursive: true);
+  });
 }
 
 final class _MockAudioPlayer extends Mock implements AudioPlayer {}
@@ -653,5 +764,35 @@ final class QueuedFakeAudioPlaybackEngine extends FakeAudioPlaybackEngine
     if (finished != null) {
       _completed.add(finished);
     }
+  }
+}
+
+/// An unclassified, non-[AppFailure] error — stands in for the kind of raw
+/// just_audio load / network-IO exception whose type the prepare() fallback
+/// must surface (by runtime type only) instead of masking behind a generic
+/// message.
+final class _TransportGlitch implements Exception {}
+
+final class _ThrowingSpeechAudioCache implements SpeechAudioCache {
+  _ThrowingSpeechAudioCache(this.error);
+
+  final Object error;
+
+  @override
+  Future<File> obtain(SpeechSegment segment, VoiceProfile profile) async {
+    throw error;
+  }
+}
+
+/// An engine whose native load always fails — stands in for just_audio raising a
+/// [PlatformException] from setAudioSource while the app is backgrounded.
+final class _ThrowingAudioPlaybackEngine extends FakeAudioPlaybackEngine {
+  _ThrowingAudioPlaybackEngine(this.error);
+
+  final Object error;
+
+  @override
+  Future<void> setFilePath(String path) async {
+    throw error;
   }
 }

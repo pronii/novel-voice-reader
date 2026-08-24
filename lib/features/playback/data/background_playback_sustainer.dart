@@ -1,9 +1,14 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';
 import 'package:novel_voice_reader/features/playback/data/background_keep_alive.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
+
+// `_telemetry` is initialized from a public named parameter and so cannot be a
+// `this._field` initializing formal (named params may not start with `_`).
+// ignore_for_file: prefer_initializing_formals
 
 /// Bridges the audio session, the keep-alive loop, and the media handler so
 /// background playback survives inter-segment gaps and audio interruptions.
@@ -18,10 +23,11 @@ final class BackgroundPlaybackSustainer {
     required BackgroundAudioSession session,
     required KeepAlivePlayer keepAlive,
     required NovelAudioHandler handler,
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
   }) : _session = session,
-       // ignore: prefer_initializing_formals
        _keepAlive = keepAlive,
-       _handler = handler {
+       _handler = handler,
+       _telemetry = telemetry {
     _playbackSubscription = handler.playbackState.listen(_onPlaybackState);
     _interruptionSubscription = session.interruptions.listen(_onInterruption);
     _devicesSubscription = session.devicesChanged.listen(
@@ -33,6 +39,7 @@ final class BackgroundPlaybackSustainer {
   final BackgroundAudioSession _session;
   final KeepAlivePlayer _keepAlive;
   final NovelAudioHandler _handler;
+  final PlaybackTelemetry _telemetry;
 
   late final StreamSubscription<PlaybackState> _playbackSubscription;
   late final StreamSubscription<AudioInterruption> _interruptionSubscription;
@@ -51,6 +58,11 @@ final class BackgroundPlaybackSustainer {
       return;
     }
     _engaged = shouldRender;
+    _telemetry.record('sustainer.render', {
+      'shouldRender': shouldRender,
+      'playing': state.playing,
+      'processingState': state.processingState.name,
+    });
     _enqueue(() async {
       if (shouldRender) {
         await _session.ensureActive();
@@ -73,6 +85,9 @@ final class BackgroundPlaybackSustainer {
   // audio_session cannot introspect the interruption's origin, so if this proves
   // false on device the fix is native (AVAudioSession delegate), not here.
   void _onInterruption(AudioInterruption interruption) {
+    _telemetry.record('sustainer.interruption', {
+      'kind': interruption.name,
+    });
     switch (interruption) {
       case AudioInterruption.began:
         _resumeAfterInterruption = _shouldRender(_handler.playbackState.value);
@@ -98,6 +113,7 @@ final class BackgroundPlaybackSustainer {
     if (!_engaged) {
       return;
     }
+    _telemetry.record('sustainer.devicesChanged');
     _enqueue(() async {
       await _session.ensureActive();
       // iOS may stop an AudioPlayer when its output route changes without
@@ -111,7 +127,12 @@ final class BackgroundPlaybackSustainer {
     final operation = _operations.then((_) => action());
     _operations = operation.then<void>(
       (_) {},
-      onError: (Object _, StackTrace _) {},
+      onError: (Object error, StackTrace _) {
+        _telemetry.record('sustainer.operation.error', {
+          'error': error.runtimeType.toString(),
+          'message': error.toString(),
+        });
+      },
     );
     return operation;
   }

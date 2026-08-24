@@ -1,20 +1,28 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 import 'package:novel_voice_reader/app/app.dart';
 import 'package:novel_voice_reader/app/providers.dart';
 import 'package:novel_voice_reader/core/network/speech_http_client.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
+import 'package:novel_voice_reader/features/diagnostics/data/buffered_playback_telemetry.dart';
+import 'package:novel_voice_reader/features/diagnostics/data/diagnostics_settings_store.dart';
+import 'package:novel_voice_reader/features/diagnostics/diagnostics_defaults.dart';
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_path.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/data/background_keep_alive.dart';
 import 'package:novel_voice_reader/features/playback/data/background_playback_sustainer.dart';
+import 'package:novel_voice_reader/features/settings/data/theme_mode_preference_store.dart';
 
 /// Retains the background playback sustainer for the whole process lifetime.
 ///
@@ -28,9 +36,18 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final database = AppDatabase(driftDatabase(name: 'novel_voice_reader'));
   final supportDirectory = await getApplicationSupportDirectory();
-  final credentials = SecureCredentials(
-    FlutterSecureKeyValueStore(const FlutterSecureStorage()),
-  );
+  final credentials = SecureCredentials(FlutterSecureKeyValueStore());
+  // Re-persist any pre-existing keys with the current Keychain accessibility
+  // (afterFirstUnlock) so locked-screen background synthesis can read them
+  // without hitting errSecInteractionNotAllowed (-25308). Runs while the app is
+  // foregrounded and unlocked, so the read/write succeeds.
+  //
+  // Run this in the background so it does not block cold start. Keychain work
+  // is per-key and can take hundreds of milliseconds; the upgrade is
+  // idempotent and only meaningful on the first launch after an install that
+  // used an older accessibility class, so it can safely happen after the UI
+  // is already visible.
+  unawaited(credentials.upgradeKeychainAccessibility());
   final audioCacheRuntime = AudioCacheRuntime(
     database: database,
     cacheDirectoryForBook: (bookId) =>
@@ -41,8 +58,53 @@ Future<void> main() async {
     connectivityChanges: Connectivity().onConnectivityChanged,
   );
   await audioCacheRuntime.start();
+  // Diagnostics: buffer background-playback events locally and upload them to a
+  // user-configured collector when the app is alive (launch / foreground). The
+  // lock-screen failure suspends the isolate, so live per-event upload would
+  // lose exactly the events around the death; local-first + deferred upload
+  // preserves them, and the monotonic-time gap pinpoints the suspension.
+  final diagnosticsSettings = DiagnosticsSettingsStore(
+    supportDirectory: getApplicationSupportDirectory,
+  );
+  // One id per process run. Stamped onto every event (so buffered events from a
+  // previous launch keep their own identity even when a later launch uploads
+  // them) and also sent as the batch's session context.
+  final launchId = const Uuid().v4();
+  final telemetry = BufferedPlaybackTelemetry(
+    supportDirectory: getApplicationSupportDirectory,
+    launchId: launchId,
+    // Default to the built-in collector so uploads work out of the box with no
+    // manual setup; a value saved in Settings still overrides it. Overridable at
+    // build time via --dart-define=NVR_TELEMETRY_ENDPOINT=...
+    endpointLoader: () async {
+      final saved = await diagnosticsSettings.loadEndpoint();
+      if (saved != null && saved.isNotEmpty) {
+        return saved;
+      }
+      return kBuiltInTelemetryEndpoint.isEmpty ? null : kBuiltInTelemetryEndpoint;
+    },
+    uploader: DioTelemetryUploader(
+      createSpeechDio(),
+      // Shared secret guarding the public diagnostics collector. This only gates
+      // the telemetry sink (diagnostic metadata, no book text / no secrets); it
+      // is not a credential to any paid or sensitive service, so shipping it in
+      // the client is acceptable. Overridable at build time via --dart-define.
+      token: kBuiltInTelemetryToken,
+      session: <String, Object?>{
+        'launchId': launchId,
+        'platform': Platform.operatingSystem,
+        'osVersion': Platform.operatingSystemVersion,
+        'debug': kDebugMode,
+      },
+    ),
+    isOnline: () async {
+      final results = await Connectivity().checkConnectivity();
+      return results.any((result) => result != ConnectivityResult.none);
+    },
+  );
+  telemetry.record('session.start');
   final controller = AttachablePlaybackController();
-  final audioSession = await BackgroundAudioSession.system();
+  final audioSession = await BackgroundAudioSession.system(telemetry: telemetry);
   final handler = await initializePlaybackServices(
     initializeAudioSession: audioSession.initialize,
     initializeAudioService: () => AudioService.init(
@@ -61,8 +123,10 @@ Future<void> main() async {
     session: audioSession,
     keepAlive: SilentKeepAlivePlayer(
       supportDirectory: getApplicationSupportDirectory,
+      telemetry: telemetry,
     ),
     handler: handler,
+    telemetry: telemetry,
   );
   runApp(
     NovelVoiceReaderApp(
@@ -70,8 +134,14 @@ Future<void> main() async {
       playbackRuntime: PlaybackRuntime(
         controller: controller,
         handler: handler,
+        telemetry: telemetry,
       ),
       audioCacheRuntime: audioCacheRuntime,
+      backgroundAudioSession: audioSession,
+      themeModeStore: ThemeModePreferenceStore(
+        supportDirectory: getApplicationSupportDirectory,
+      ),
+      telemetry: telemetry,
     ),
   );
 }

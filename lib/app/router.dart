@@ -4,8 +4,8 @@ import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:novel_voice_reader/app/providers.dart';
@@ -13,6 +13,8 @@ import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/network/speech_http_client.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
+import 'package:novel_voice_reader/features/diagnostics/data/diagnostics_settings_store.dart';
+import 'package:novel_voice_reader/features/diagnostics/diagnostics_defaults.dart';
 import 'package:novel_voice_reader/features/downloads/domain/download_policy.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_path.dart';
 import 'package:novel_voice_reader/features/downloads/presentation/cache_page.dart';
@@ -26,11 +28,13 @@ import 'package:novel_voice_reader/features/playback/domain/playback_timeline.da
 import 'package:novel_voice_reader/features/playback/presentation/player_page.dart';
 import 'package:novel_voice_reader/features/playback/presentation/sleep_timer_button.dart';
 import 'package:novel_voice_reader/features/reader/application/reader_chapter_window_controller.dart';
+import 'package:novel_voice_reader/features/reader/data/reader_preferences_store.dart';
 import 'package:novel_voice_reader/features/reader/data/reading_progress_repository.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
 import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
+import 'package:novel_voice_reader/features/speech/data/server_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import 'package:novel_voice_reader/features/speech/presentation/voice_settings_page.dart';
 
@@ -83,22 +87,60 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
   bool _importing = false;
 
   @override
+  void initState() {
+    super.initState();
+    unawaited(_fetchMissingCovers());
+  }
+
+  /// Kicks off a one-shot background pass to fetch covers for books that have
+  /// none. The cover proxy lives on the self-hosted TTS server, so this only
+  /// runs when the active voice profile points at such a server; MiMo / cloud
+  /// users keep the generated placeholders. The repository is reentrancy-guarded
+  /// and only requests books outside its retry window, so triggering it on each
+  /// library visit is cheap. Fetched covers are written to the database and the
+  /// list refreshes itself through the watching [libraryBooksProvider] stream.
+  Future<void> _fetchMissingCovers() async {
+    final database = ref.read(databaseProvider);
+    final repository = ref.read(coverRepositoryProvider);
+    if (database == null || repository == null) {
+      return;
+    }
+    final profile = await loadActiveVoiceProfile(database);
+    if (profile == null ||
+        profile.providerType != SpeechProviderType.server) {
+      return;
+    }
+    await repository.fetchMissingCovers(baseUrl: profile.normalizedBaseUrl);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final themeMode = ref.watch(themeModeControllerProvider);
+    void cycleTheme() => ref.read(themeModeControllerProvider.notifier).cycle();
     if (ref.watch(databaseProvider) == null) {
       return LibraryPage(
         books: const [],
         onImport: _importBook,
         onOpenVoiceSettings: () => context.push('/settings/voice'),
+        themeMode: themeMode,
+        onCycleThemeMode: cycleTheme,
       );
     }
     final books = ref.watch(libraryBooksProvider);
     return books.when(
-      loading: () =>
-          LibraryPage(books: const [], loading: true, onImport: _importBook),
+      loading: () => LibraryPage(
+        books: const [],
+        loading: true,
+        onImport: _importBook,
+        themeMode: themeMode,
+        onCycleThemeMode: cycleTheme,
+      ),
       error: (_, _) => LibraryPage(
         books: const [],
         errorMessage: '书架加载失败',
         onImport: _importBook,
+        themeMode: themeMode,
+        onCycleThemeMode: cycleTheme,
       ),
       data: (records) => LibraryPage(
         books: [
@@ -107,6 +149,7 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
               id: book.id,
               title: book.title,
               progressLabel: book.lastReadAt == null ? '尚未开始' : '继续阅读',
+              coverImagePath: book.coverImagePath,
             ),
         ],
         loading: _importing,
@@ -115,6 +158,8 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
         onOpenVoiceSettings: () => context.push('/settings/voice'),
         onOpenCacheSettings: (bookId) =>
             context.push('/settings/cache/$bookId'),
+        themeMode: themeMode,
+        onCycleThemeMode: cycleTheme,
       ),
     );
   }
@@ -187,6 +232,11 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
   PlaybackRuntime? _pendingPlaybackRuntime;
   PlaybackReplacementToken? _pendingPlaybackReplacement;
   bool _playbackStarting = false;
+  // The persisted page-turn mode, loaded once during window initialization so
+  // the reader opens directly in the saved mode (no scroll→curl flash). Kept in
+  // sync with disk on every user toggle so a later ReaderPage remount re-seeds
+  // from the right value.
+  ReaderPageMode _initialPageMode = ReaderPageMode.scroll;
 
   @override
   void dispose() {
@@ -226,6 +276,8 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         chapters: const [],
         sections: const [],
         onBackToLibrary: _backToLibrary,
+        initialPageMode: _initialPageMode,
+        onPageModeChanged: _persistPageMode,
       );
     }
     final initialization = _ensureChapterWindow(data, database);
@@ -263,11 +315,22 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
             unawaited(_persistReadingPosition(database, paragraph));
           },
           onOpenPlayer: () => context.push('/player/${widget.bookId}'),
-          onStopPlayback: _stopPlayback,
           onPlayFrom: (paragraph) => unawaited(_playFrom(data, paragraph)),
+          onListenFrom: (start) => unawaited(_listenFrom(data, start)),
+          onStopPlayback: () {
+            // Tap the toolbar listen button again to leave listen mode: tear
+            // the runtime handler down so the cursor clears and the button
+            // flips back to its headphones icon.
+            final runtime = ref.read(playbackRuntimeProvider);
+            if (runtime != null) {
+              unawaited(runtime.handler.stop());
+            }
+          },
           onLoadPrevious: window.loadPrevious,
           onLoadNext: window.loadNext,
           onPlaybackChapterNeeded: _ensurePlaybackChapter,
+          initialPageMode: _initialPageMode,
+          onPageModeChanged: _persistPageMode,
         );
       },
     );
@@ -286,9 +349,25 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     );
     window.addListener(_onChapterWindowChanged);
     _chapterWindow = window;
-    return _chapterWindowInitialization = window.initialize(
+    // Load the saved page-turn mode concurrently with the first chapter so both
+    // are ready before ReaderPage is first built (the FutureBuilder gates on
+    // this future), avoiding an initial-mode flash. Bounded so a stalled
+    // preferences read can never hold the reader's first paint hostage: on
+    // timeout we open in the default mode and the user's next toggle re-persists.
+    final modeFuture = ref
+        .read(_readerPreferencesStoreProvider)
+        .loadMode()
+        .timeout(
+          const Duration(milliseconds: 800),
+          onTimeout: () => ReaderPageMode.scroll,
+        );
+    final initializeFuture = window.initialize(
       chapterId: data.savedCursor?.chapterId ?? data.chapters.first.id,
     );
+    return _chapterWindowInitialization = () async {
+      _initialPageMode = await modeFuture;
+      await initializeFuture;
+    }();
   }
 
   void _onChapterWindowChanged() {
@@ -319,6 +398,37 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
       return;
     }
     await window.centerOn(chapterId: chapterId, resetNavigation: false);
+  }
+
+  /// Starts listening from the given cursor: ensures the target chapter is
+  /// loaded, resolves the paragraph, then kicks off playback via [_playFrom].
+  Future<void> _listenFrom(ReaderPageData data, PlaybackCursor start) async {
+    final window = _chapterWindow;
+    if (window == null) {
+      return;
+    }
+    if (!window.sections.any((section) => section.chapter.id == start.chapterId)) {
+      await window.centerOn(
+        chapterId: start.chapterId,
+        resetNavigation: false,
+      );
+    }
+    final section = _chapterWindow?.sections
+        .where((s) => s.chapter.id == start.chapterId)
+        .firstOrNull;
+    ReaderParagraph? paragraph;
+    if (section != null) {
+      for (final p in section.paragraphs) {
+        if (p.index == start.paragraphIndex) {
+          paragraph = p;
+          break;
+        }
+      }
+    }
+    if (paragraph == null) {
+      return;
+    }
+    await _playFrom(data, paragraph);
   }
 
   Future<void> _playFrom(ReaderPageData data, ReaderParagraph paragraph) async {
@@ -358,7 +468,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
           ? SpeechProviderFactory(
               dio: createSpeechDio(),
               credentials: SecureCredentials(
-                FlutterSecureKeyValueStore(const FlutterSecureStorage()),
+                FlutterSecureKeyValueStore(),
               ),
               cacheDirectory: cacheDirectory,
             )
@@ -376,6 +486,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         paragraphs: DriftPlaybackParagraphSource(database),
         voiceProfile: profile,
         onFailure: _showSpeechFailure,
+        telemetry: ref.read(playbackTelemetryProvider),
       );
       final started = await runtime.replaceAndPlayFrom(
         coordinator,
@@ -425,9 +536,9 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
         }
       }
     } catch (error) {
-      if (error is! AppFailure) {
-        _showSpeechFailure(const AppFailure('朗读启动失败'));
-      }
+      _showSpeechFailure(
+        error is AppFailure ? error : const AppFailure('朗读启动失败'),
+      );
     } finally {
       _pendingPlaybackRuntime = null;
       _pendingPlaybackReplacement = null;
@@ -438,26 +549,18 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
   }
 
   void _showSpeechFailure(AppFailure failure) {
+    // Record why synthesis/playback ultimately gave up (after retries) so the
+    // collector shows the concrete cause behind a `playback.activity: failed`
+    // — the un-instrumented reason the lock-screen session went quiet.
+    ref.read(playbackTelemetryProvider).record('playback.failure', {
+      'message': failure.message,
+    });
     if (!mounted) {
       return;
     }
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(failure.message)));
-  }
-
-  // Tears down the current listening session without navigating away from the
-  // reader. Surfaced via the reader's listening controls so the user can leave
-  // narration without first opening the full player page. The cursor is
-  // cleared optimistically; the runtime will follow with `handler.stop()` and
-  // publish a null cursor, which the existing stream listener will pick up.
-  void _stopPlayback() {
-    final runtime = ref.read(playbackRuntimeProvider);
-    if (runtime == null) {
-      return;
-    }
-    setState(() => _playbackCursor = null);
-    unawaited(runtime.handler.stop().then<void>((_) {}, onError: (_) {}));
   }
 
   void _backToLibrary() {
@@ -512,6 +615,13 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
           ..where((book) => book.id.equals(widget.bookId)))
         .write(BooksCompanion(lastReadAt: Value(DateTime.now())));
   }
+
+  // Persists a page-turn mode picked in the reader's bottom bar. Updates the
+  // in-memory seed too so a ReaderPage remount reflects the latest choice.
+  void _persistPageMode(ReaderPageMode mode) {
+    _initialPageMode = mode;
+    unawaited(ref.read(_readerPreferencesStoreProvider).saveMode(mode));
+  }
 }
 
 final class _PlayerRoutePage extends ConsumerWidget {
@@ -529,6 +639,7 @@ final class _PlayerRoutePage extends ConsumerWidget {
       error: (_, _) => const Scaffold(body: Center(child: Text('播放器加载失败'))),
       data: (value) => PlayerPage(
         bookTitle: value.book.title,
+        bookCoverPath: value.book.coverImagePath,
         actions: const [SleepTimerButton()],
         chapterTitle:
             value.chapters
@@ -559,23 +670,66 @@ final class _VoiceSettingsInitialData {
     required this.profile,
     required this.hasSavedCloudApiKey,
     required this.hasSavedMiMoApiKey,
+    required this.diagnosticsEndpoint,
   });
 
   final VoiceProfile? profile;
   final bool hasSavedCloudApiKey;
   final bool hasSavedMiMoApiKey;
+  final String? diagnosticsEndpoint;
+}
+
+final _diagnosticsSettingsStoreProvider =
+    Provider.autoDispose<DiagnosticsSettingsStore>(
+      (ref) => DiagnosticsSettingsStore(
+        supportDirectory: getApplicationSupportDirectory,
+      ),
+    );
+
+final _readerPreferencesStoreProvider =
+    Provider.autoDispose<ReaderPreferencesStore>(
+      (ref) => ReaderPreferencesStore(
+        supportDirectory: getApplicationSupportDirectory,
+      ),
+    );
+
+/// Copies the buffered diagnostics JSONL to the clipboard as a fallback for
+/// when no collector URL is configured, returning a summary for the snackbar.
+Future<String> _exportDiagnosticsToClipboard() async {
+  try {
+    final directory = await getApplicationSupportDirectory();
+    final file = File('${directory.path}/diagnostics/playback_events.jsonl');
+    if (!file.existsSync()) {
+      return '暂无诊断日志';
+    }
+    final content = await file.readAsString();
+    final lines = content.split('\n').where((l) => l.trim().isNotEmpty).length;
+    if (lines == 0) {
+      return '暂无诊断日志';
+    }
+    await Clipboard.setData(ClipboardData(text: content));
+    return '已复制 $lines 条诊断事件到剪贴板';
+  } catch (_) {
+    return '诊断日志导出失败';
+  }
 }
 
 final _secureCredentialsProvider = Provider.autoDispose<SecureCredentials>(
-  (ref) => SecureCredentials(
-    FlutterSecureKeyValueStore(const FlutterSecureStorage()),
-  ),
+  (ref) {
+    // Reuse the runtime's process-wide instance so a key saved here updates the
+    // same in-memory cache the background synthesizer reads. The standalone
+    // fallback only applies when no runtime is wired (degraded / test paths),
+    // where nothing is synthesizing in the background to go stale.
+    final runtime = ref.watch(audioCacheRuntimeProvider);
+    return runtime?.credentials ?? SecureCredentials(FlutterSecureKeyValueStore());
+  },
 );
 
 final _voiceSettingsInitialDataProvider =
     FutureProvider.autoDispose<_VoiceSettingsInitialData>((ref) async {
       final database = ref.watch(databaseProvider);
       final credentials = ref.watch(_secureCredentialsProvider);
+      final diagnosticsStore = ref.watch(_diagnosticsSettingsStoreProvider);
       final profile = database == null
           ? null
           : await loadActiveVoiceProfile(database);
@@ -595,6 +749,20 @@ final _voiceSettingsInitialDataProvider =
         profile: profile,
         hasSavedCloudApiKey: cloudApiKey?.trim().isNotEmpty ?? false,
         hasSavedMiMoApiKey: mimoApiKey?.trim().isNotEmpty ?? false,
+        // Guard against the diagnostics store stalling (path_provider is
+        // unmocked in widget tests and never answers). loadEndpoint already
+        // swallows errors to null; the timeout covers a hang so the settings
+        // page always renders. Fall back to the built-in collector so the field
+        // shows the address the app actually uploads to rather than looking
+        // like the user must supply one.
+        diagnosticsEndpoint:
+            await diagnosticsStore.loadEndpoint().timeout(
+              const Duration(seconds: 1),
+              onTimeout: () => null,
+            ) ??
+            (kBuiltInTelemetryEndpoint.isEmpty
+                ? null
+                : kBuiltInTelemetryEndpoint),
       );
     });
 
@@ -605,6 +773,8 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final database = ref.watch(databaseProvider);
     final credentials = ref.watch(_secureCredentialsProvider);
+    final diagnosticsStore = ref.watch(_diagnosticsSettingsStoreProvider);
+    final telemetry = ref.watch(playbackTelemetryProvider);
     final initialData = ref.watch(_voiceSettingsInitialDataProvider);
     return initialData.when(
       loading: () =>
@@ -614,6 +784,13 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
         initialProfile: initial.profile,
         hasSavedCloudApiKey: initial.hasSavedCloudApiKey,
         hasSavedMiMoApiKey: initial.hasSavedMiMoApiKey,
+        initialDiagnosticsEndpoint: initial.diagnosticsEndpoint,
+        onSaveDiagnosticsEndpoint: (endpoint) async {
+          await diagnosticsStore.saveEndpoint(endpoint);
+          ref.invalidate(_voiceSettingsInitialDataProvider);
+        },
+        onUploadDiagnostics: telemetry.flush,
+        onExportDiagnostics: () => _exportDiagnosticsToClipboard(),
         onTestConnection: (submission) async {
           final profile = submission.profile;
           switch (profile.providerType) {
@@ -633,6 +810,16 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
               }
             case SpeechProviderType.cloud:
               throw const AppFailure('当前语音服务不支持连接测试');
+            case SpeechProviderType.server:
+              final dio = createSpeechDio();
+              try {
+                await ServerTtsClient(
+                  dio: dio,
+                  credentials: credentials,
+                ).testConnection(profile.normalizedBaseUrl);
+              } finally {
+                dio.close(force: true);
+              }
           }
         },
         onSave: (submission) async {
@@ -657,7 +844,8 @@ final class _VoiceSettingsRoutePage extends ConsumerWidget {
             });
           }
 
-          if (profile.providerType == SpeechProviderType.mimo) {
+          if (profile.providerType == SpeechProviderType.mimo ||
+              profile.providerType == SpeechProviderType.server) {
             await credentials.runWithMiMoApiKeyUpdate(
               apiKey: submission.credentials.normalizedApiKey,
               commit: persistProfile,

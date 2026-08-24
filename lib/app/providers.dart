@@ -1,16 +1,73 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart';
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:novel_voice_reader/core/network/speech_http_client.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
+import 'package:novel_voice_reader/features/library/data/cover_repository.dart';
 import 'package:novel_voice_reader/features/playback/application/sleep_timer_controller.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
+import 'package:novel_voice_reader/features/playback/data/background_audio_session.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/domain/reader_content.dart';
+import 'package:novel_voice_reader/features/settings/application/theme_mode_controller.dart';
+import 'package:novel_voice_reader/features/settings/data/theme_mode_preference_store.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 
 final databaseProvider = Provider<AppDatabase?>((ref) => null);
 final playbackRuntimeProvider = Provider<PlaybackRuntime?>((ref) => null);
 final audioCacheRuntimeProvider = Provider<AudioCacheRuntime?>((ref) => null);
+
+/// Fetches and caches book covers from the self-hosted server. Assembled from
+/// the database plus a fresh HTTP client and the platform support directory
+/// (mirroring how other client-only services are built here). Null until a
+/// database is available — e.g. widget tests without a Riverpod scope — in
+/// which case the library page simply skips cover fetching.
+final coverRepositoryProvider = Provider<CoverRepository?>((ref) {
+  final database = ref.watch(databaseProvider);
+  if (database == null) {
+    return null;
+  }
+  return CoverRepository(
+    database: database,
+    dio: createSpeechDio(),
+    supportDirectory: getApplicationSupportDirectory,
+  );
+});
+
+/// File-backed store for the light/dark preference. `null` by default so widget
+/// tests never touch `path_provider`; [NovelVoiceReaderApp] injects a real one.
+final themeModePreferenceStoreProvider = Provider<ThemeModePreferenceStore?>(
+  (ref) => null,
+);
+
+/// The current app-wide light/dark mode, persisted when a store is present.
+final themeModeControllerProvider =
+    StateNotifierProvider<ThemeModeController, ThemeMode>((ref) {
+      final controller = ThemeModeController(
+        ref.watch(themeModePreferenceStoreProvider),
+      );
+      unawaited(controller.load());
+      return controller;
+    });
+
+/// The shared background audio session. Overridden in [NovelVoiceReaderApp]
+/// with the session created at startup; a no-op default keeps widgets and
+/// tests independent of platform audio.
+final backgroundAudioSessionProvider = Provider<BackgroundAudioSession?>(
+  (ref) => null,
+);
+
+/// Background-playback diagnostics sink. Overridden in [NovelVoiceReaderApp]
+/// with the real buffered/uploading implementation; a no-op by default so
+/// widgets and tests never depend on it being wired.
+final playbackTelemetryProvider = Provider<PlaybackTelemetry>(
+  (ref) => const NoopPlaybackTelemetry(),
+);
 
 /// Sleep timer shared across the reader and player pages. Stopping playback on
 /// expiry dismisses the media notification via [NovelAudioHandler.stop].
@@ -22,6 +79,14 @@ final sleepTimerControllerProvider = Provider<SleepTimerController>((ref) {
   final controller = SleepTimerController(
     onExpire: () async {
       await runtime?.handler.stop();
+      // The sleep timer expiring means the user is done listening. The
+      // sustainer pauses the inaudible keep-alive loop on stop, but it keeps
+      // the audio session active by design (for a quick resume). On iOS an
+      // active session with no output keeps the app in the running
+      // background-audio state and drains the battery; deactivate it so the OS
+      // can suspend the app. The next play request re-activates via
+      // BackgroundPlaybackSustainer.ensureActive.
+      await ref.read(backgroundAudioSessionProvider)?.deactivate();
     },
     currentChapterId: () => runtime?.currentCursor?.chapterId,
     cursorChanges: () =>
@@ -54,6 +119,17 @@ VoiceProfile? voiceProfileFromRecord(VoiceProfileRecord? record) {
           voice: record.voice!,
           speed: record.speed,
           outputFormat: record.outputFormat ?? 'mp3',
+        ),
+      'server'
+          when record.baseUrl != null &&
+              record.model != null &&
+              record.voice != null =>
+        VoiceProfile.server(
+          baseUrl: record.baseUrl!,
+          model: record.model!,
+          voice: record.voice!,
+          speed: record.speed,
+          outputFormat: record.outputFormat ?? 'wav',
         ),
       'mimo' => VoiceProfile.mimo(
         voice: record.voice ?? VoiceProfile.defaultMiMoVoice,
