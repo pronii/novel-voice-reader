@@ -49,3 +49,29 @@ git add docs/superpowers/specs/2026-08-24-reader-chapter-navigation-during-playb
 git commit -m "fix(reader): preserve chapter browsing during playback"
 git push origin HEAD
 ```
+
+### Task 2: Start Playback From a Double-Tapped Paragraph
+
+**Files:**
+- Modify: `lib/features/reader/presentation/reader_page.dart`
+- Test: `test/features/reader/reader_page_test.dart`
+
+**Interfaces:**
+- Consumes: `_play(ReaderParagraph paragraph)` and the existing `ReaderParagraph.chapterId` / `index` cursor fields.
+- Produces: Paragraph `InkWell.onDoubleTap` behavior that starts from the tapped paragraph while retaining neutral single-tap visuals.
+
+- [ ] **Step 1: Extend the single-tap regression**
+
+Attach `onPlayFrom` to the existing scroll paragraph tap test and assert it remains uncalled after one tap.
+
+- [ ] **Step 2: Add the double-tap regression**
+
+Tap the second paragraph twice within the double-tap interval, assert `onPlayFrom` receives that exact `ReaderParagraph`, and assert no scroll-mode active highlight or read-from-here button appears.
+
+- [ ] **Step 3: Connect the gesture**
+
+Set `InkWell.onDoubleTap` to `_play(paragraph)` unless `playbackStarting` is true. Keep the existing `onTap` callback unchanged.
+
+- [ ] **Step 4: Submit CI verification**
+
+Push the new commit and confirm GitHub Actions passes `flutter analyze` and `flutter test`.

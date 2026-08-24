@@ -12,6 +12,7 @@ When audio is playing, selecting another chapter from the reader directory must 
 - Programmatic scroll completion caused by the chapter jump must not re-enable playback-follow.
 - Starting playback explicitly from the reader re-enables playback-follow.
 - Scroll-mode paragraph taps remain visually neutral and do not change playback.
+- Double-tapping a paragraph starts playback from that paragraph's existing `chapterId + paragraphIndex` cursor; no character-level offset is introduced.
 - Paged modes receive no playback cursor while playback-follow is disabled and remount on an explicit navigation generation, so they initialize from the selected chapter instead of a stale page anchor.
 
 ## Implementation
@@ -21,3 +22,5 @@ When audio is playing, selecting another chapter from the reader directory must 
 ## Regression Coverage
 
 App navigation widget tests cover scroll and slide modes. Each starts playback in chapter 1, selects chapter 7 from the directory, advances time beyond the follow heartbeat, and verifies chapter 7 remains visible while the playback cursor remains in chapter 1.
+
+A reader widget test verifies that a single paragraph tap does not invoke playback while a double tap invokes playback exactly once with the tapped paragraph and does not restore scroll-mode highlighting.

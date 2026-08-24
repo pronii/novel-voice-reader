@@ -236,11 +236,13 @@ void main() {
   testWidgets('scroll paragraph taps only toggle the reader toolbar', (
     tester,
   ) async {
+    ReaderParagraph? played;
     await tester.pumpWidget(
       MaterialApp(
         home: _reader(
           paragraphs: _paragraphs(10, ['第一段。', '第二段。']),
           playbackActive: true,
+          onPlayFrom: (paragraph) => played = paragraph,
         ),
       ),
     );
@@ -259,17 +261,49 @@ void main() {
           .offset,
       Offset.zero,
     );
+    expect(played, isNull);
+  });
+
+  testWidgets('double tapping scroll text plays from that paragraph', (
+    tester,
+  ) async {
+    final played = <ReaderParagraph>[];
+    final paragraphs = _paragraphs(10, ['第一段。', '第二段。']);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: _reader(
+          paragraphs: paragraphs,
+          onPlayFrom: played.add,
+        ),
+      ),
+    );
+
+    final target = find.byKey(const ValueKey<String>('paragraph-101'));
+    await tester.tap(target);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(target);
+    await tester.pumpAndSettle();
+
+    expect(played, hasLength(1));
+    expect(played.single, same(paragraphs[1]));
+    expect(
+      find.byKey(const ValueKey<String>('active-paragraph-101')),
+      findsNothing,
+    );
+    expect(find.text('从这里朗读'), findsNothing);
   });
 
   testWidgets('disables playback commands while playback is starting', (
     tester,
   ) async {
+    final played = <ReaderParagraph>[];
     await tester.pumpWidget(
       MaterialApp(
         home: _reader(
           paragraphs: _paragraphs(10, ['第一段。']),
           playbackStarting: true,
           playbackActive: true,
+          onPlayFrom: played.add,
         ),
       ),
     );
@@ -279,6 +313,14 @@ void main() {
     );
     expect(tester.widget<IconButton>(playButton).onPressed, isNull);
     expect(find.text('从这里朗读'), findsNothing);
+
+    final paragraph = find.byKey(const ValueKey<String>('paragraph-100'));
+    expect(tester.widget<InkWell>(paragraph).onDoubleTap, isNull);
+    await tester.tap(paragraph);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(paragraph);
+    await tester.pumpAndSettle();
+    expect(played, isEmpty);
   });
 
   testWidgets('tapping a paragraph before listening does not highlight it or show read-from-here', (

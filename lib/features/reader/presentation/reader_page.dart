@@ -776,12 +776,9 @@ final class _ReaderPageState extends State<ReaderPage> {
   }
 
   Widget _buildParagraph(BuildContext context, ReaderParagraph paragraph) {
-    // Only light up paragraphs once the user is actually listening. Before
-    // entering listen mode the page is pure text: tapping a paragraph does
-    // not show an active highlight or a "从这里朗读" button — the only way
-    // into listening is the dedicated 听小说 button (which then shows the
-    // start-position picker). Inside listen mode, the active selection and
-    // its read-from-here button are how the user re-targets playback.
+    // A single tap never starts playback. Double-tapping a paragraph starts
+    // from that paragraph through [_play], using the existing chapter and
+    // paragraph cursor without introducing a character-offset model.
     //
     // In scroll mode there is no page-turn concept, so paragraph-tap selection
     // is suppressed entirely — taps on text stay visually neutral, and the
@@ -819,6 +816,9 @@ final class _ReaderPageState extends State<ReaderPage> {
               ? const WidgetStatePropertyAll<Color>(Colors.transparent)
               : null,
           onTap: () => _selectParagraph(paragraph),
+          onDoubleTap: widget.playbackStarting
+              ? null
+              : () => _play(paragraph),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
