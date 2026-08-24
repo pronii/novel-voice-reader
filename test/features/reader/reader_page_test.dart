@@ -356,6 +356,7 @@ void main() {
       findsNothing,
     );
     expect(find.text('从这里朗读'), findsNothing);
+  });
 
   testWidgets('highlights the currently playing paragraph independently', (
     tester,
