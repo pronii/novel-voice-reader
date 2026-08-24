@@ -233,7 +233,7 @@ void main() {
     );
   });
 
-  testWidgets('paragraph selection survives reader body tap detection', (
+  testWidgets('scroll paragraph taps only toggle the reader toolbar', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -250,8 +250,9 @@ void main() {
 
     expect(
       find.byKey(const ValueKey<String>('active-paragraph-101')),
-      findsOneWidget,
+      findsNothing,
     );
+    expect(find.text('从这里朗读'), findsNothing);
     expect(
       tester
           .widget<AnimatedSlide>(find.byKey(const Key('reader-toolbar')))
@@ -277,39 +278,7 @@ void main() {
       (widget) => widget is IconButton && widget.tooltip == '播放',
     );
     expect(tester.widget<IconButton>(playButton).onPressed, isNull);
-    expect(
-      tester
-          .widget<TextButton>(find.widgetWithText(TextButton, '从这里朗读'))
-          .onPressed,
-      isNull,
-    );
-  });
-
-  testWidgets('selects one paragraph and exposes read-from-here', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: _reader(
-          paragraphs: _paragraphs(10, ['第一段。', '第二段。']),
-          playbackActive: true,
-          initialPageMode: ReaderPageMode.slide,
-        ),
-      ),
-    );
-
-    await tester.tap(find.text('第二段。'));
-    await tester.pump();
-
-    expect(find.text('从这里朗读'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey<String>('active-paragraph-101')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey<String>('active-paragraph-100')),
-      findsNothing,
-    );
+    expect(find.text('从这里朗读'), findsNothing);
   });
 
   testWidgets('tapping a paragraph before listening does not highlight it or show read-from-here', (
@@ -655,8 +624,9 @@ void main() {
 
     expect(
       find.byKey(const ValueKey<String>('active-paragraph-15')),
-      findsOneWidget,
+      findsNothing,
     );
+    expect(find.byKey(const ValueKey<String>('paragraph-15')), findsOneWidget);
     await tester.drag(
       find.byType(ScrollablePositionedList),
       const Offset(0, -300),
@@ -677,8 +647,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The first paragraph starts selected, so its button is initially shown.
-    expect(find.text('从这里朗读'), findsOneWidget);
+    // Scroll mode never exposes paragraph selection, even at the saved cursor.
+    expect(find.text('从这里朗读'), findsNothing);
 
     // Scroll the selected paragraph well out of view and let the debounce run.
     await tester.drag(
@@ -752,7 +722,7 @@ void main() {
     expect(reported.last, isNot(15));
   });
 
-  testWidgets('does not report a stale paragraph after scrolling back', (
+  testWidgets('reports only the final paragraph after reversing a scroll', (
     tester,
   ) async {
     _useNarrowViewport(tester);
@@ -774,9 +744,28 @@ void main() {
     await tester.pump();
     await tester.drag(list, const Offset(0, 300));
     await tester.pump();
+
+    ReaderParagraph? finalVisibleParagraph;
+    var finalTop = double.infinity;
+    for (final paragraph in longParagraphs) {
+      final paragraphFinder = find.byKey(
+        ValueKey<String>('paragraph-${paragraph.id}'),
+      );
+      if (paragraphFinder.evaluate().isEmpty ||
+          tester.getBottom(paragraphFinder).dy <= 0) {
+        continue;
+      }
+      final top = tester.getTop(paragraphFinder).dy;
+      if (top < finalTop) {
+        finalTop = top;
+        finalVisibleParagraph = paragraph;
+      }
+    }
+    expect(finalVisibleParagraph, isNotNull);
+
     await tester.pump(const Duration(milliseconds: 600));
 
-    expect(reported, isEmpty);
+    expect(reported, [finalVisibleParagraph!.id]);
   });
 
   testWidgets('does not report progress after changing only font size', (
@@ -796,9 +785,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await _showReaderToolbar(tester);
-    // The helper tap selects the first visible paragraph, which reports it;
-    // clear the list so we only assert on reports caused by the font-size
-    // change itself.
+    // Clear any settled scroll report so this only covers the font-size change.
     reported.clear();
     await tester.tap(find.byTooltip('阅读设置'));
     await tester.pumpAndSettle();
@@ -812,7 +799,7 @@ void main() {
     expect(reported, isEmpty);
   });
 
-  testWidgets('reports a tapped paragraph immediately', (tester) async {
+  testWidgets('scroll paragraph taps do not report a new position', (tester) async {
     _useNarrowViewport(tester);
     final reported = <int>[];
     await tester.pumpWidget(
@@ -829,9 +816,9 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey<String>('paragraph-16')));
 
-    expect(reported, [16]);
+    expect(reported, isEmpty);
     await tester.pump(const Duration(milliseconds: 600));
-    expect(reported, [16]);
+    expect(reported, isEmpty);
   });
 
   testWidgets('reports a played paragraph immediately', (tester) async {
@@ -848,7 +835,9 @@ void main() {
     await tester.pumpAndSettle();
     reported.clear();
 
-    await tester.tap(find.text('从这里朗读'));
+    await _showReaderToolbar(tester);
+    reported.clear();
+    await tester.tap(find.byTooltip('播放'));
 
     expect(reported, [100]);
   });
@@ -1086,11 +1075,8 @@ Future<void> _showReaderToolbar(WidgetTester tester) async {
     matching: find.byType(IgnorePointer),
   );
   if (tester.widget<IgnorePointer>(pointerGate).ignoring) {
-    // Only a tap in the horizontal middle third reveals the chrome. Tap at
-    // the top of the body so the first visible paragraph is selected, not
-    // the paragraph at the centre of the viewport. This keeps the active
-    // paragraph aligned with the expected "first visible" paragraph in
-    // tests like "top play follows the first visible paragraph".
+    // Only a tap in the horizontal middle third reveals the chrome. Keeping
+    // the tap at the top avoids hitting controls layered over the body.
     final body = tester.getRect(find.byKey(const Key('reader-body')));
     await tester.tapAt(Offset(body.center.dx, body.top + 1));
     await tester.pumpAndSettle();
