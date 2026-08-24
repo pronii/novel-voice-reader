@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_voice_reader/app/design/paper_tokens.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/paginated_reader_view.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
@@ -406,13 +407,14 @@ void main() {
     expect(find.text('从这里朗读'), findsNothing);
   });
 
-  testWidgets('tracks playback without highlighting paragraphs in scroll mode', (
+  testWidgets('highlights only the currently playing paragraph in scroll mode', (
     tester,
   ) async {
     PlaybackCursor? playbackCursor = const PlaybackCursor(
       chapterId: 10,
       paragraphIndex: 0,
     );
+    var playbackActive = true;
     late StateSetter setHostState;
     await tester.pumpWidget(
       MaterialApp(
@@ -422,6 +424,7 @@ void main() {
             return _reader(
               paragraphs: _paragraphs(10, ['第一段。', '第二段。']),
               playbackCursor: playbackCursor,
+              playbackActive: playbackActive,
             );
           },
         ),
@@ -432,7 +435,10 @@ void main() {
       find.byKey(const ValueKey<String>('playing-paragraph-10-0')),
       findsOneWidget,
     );
-    expect(_paragraphBackground(tester, chapterId: 10, index: 0), isNull);
+    expect(
+      _paragraphBackground(tester, chapterId: 10, index: 0),
+      PaperPalette.highlightWash,
+    );
     setHostState(() {
       playbackCursor = const PlaybackCursor(chapterId: 10, paragraphIndex: 1);
     });
@@ -444,6 +450,18 @@ void main() {
     expect(
       find.byKey(const ValueKey<String>('playing-paragraph-10-1')),
       findsOneWidget,
+    );
+    expect(_paragraphBackground(tester, chapterId: 10, index: 0), isNull);
+    expect(
+      _paragraphBackground(tester, chapterId: 10, index: 1),
+      PaperPalette.highlightWash,
+    );
+
+    setHostState(() => playbackActive = false);
+    await tester.pump();
+    expect(
+      playbackCursor,
+      const PlaybackCursor(chapterId: 10, paragraphIndex: 1),
     );
     expect(_paragraphBackground(tester, chapterId: 10, index: 1), isNull);
 
@@ -1157,7 +1175,7 @@ Color? _paragraphBackground(
   required int index,
 }) {
   final paragraph = find.byKey(
-    ValueKey<String>('playing-paragraph-$chapterId-$index'),
+    ValueKey<String>('paragraph-${chapterId * 10 + index}'),
   );
   final container = find.descendant(
     of: paragraph,
