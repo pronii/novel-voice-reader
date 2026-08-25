@@ -362,13 +362,6 @@ final class _ReaderPageState extends State<ReaderPage> {
                             onPressed: widget.onOpenPlayer,
                             icon: const Icon(Icons.graphic_eq),
                           ),
-                          IconButton(
-                            tooltip: '播放',
-                            onPressed: widget.playbackStarting
-                                ? null
-                                : _playActive,
-                            icon: const Icon(Icons.play_arrow),
-                          ),
                         ],
                       ),
                     ),
@@ -1281,23 +1274,6 @@ final class _ReaderPageState extends State<ReaderPage> {
           paragraphIndex: 0,
         );
     widget.onListenFrom?.call(start);
-  }
-
-  void _playActive() {
-    final active = widget.sections
-        .expand((section) => section.paragraphs)
-        .where((paragraph) => paragraph.id == _activeParagraphId)
-        .firstOrNull;
-    // If the tapped paragraph is still on screen, play it. Otherwise the reader
-    // has scrolled away (scrolling no longer changes the selection), so start
-    // from the top of what they are currently reading instead of a stale,
-    // off-screen selection.
-    final target = (active != null && _isParagraphVisible(active.id))
-        ? active
-        : (_topVisibleParagraph() ?? active);
-    if (target != null) {
-      _play(target);
-    }
   }
 
   bool _isParagraphVisible(int paragraphId) {

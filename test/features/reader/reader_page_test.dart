@@ -376,10 +376,6 @@ void main() {
       ),
     );
 
-    final playButton = find.byWidgetPredicate(
-      (widget) => widget is IconButton && widget.tooltip == '播放',
-    );
-    expect(tester.widget<IconButton>(playButton).onPressed, isNull);
     expect(find.text('从这里朗读'), findsNothing);
 
     final paragraph = find.byKey(const ValueKey<String>('paragraph-100'));
@@ -798,7 +794,7 @@ void main() {
     expect(find.text('从这里朗读'), findsNothing);
   });
 
-  testWidgets('top play follows the first visible paragraph after scrolling', (
+  testWidgets('listening follows the first visible paragraph after scrolling', (
     tester,
   ) async {
     _useNarrowViewport(tester);
@@ -824,7 +820,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
     final visibleParagraphId = reported?.id;
     await _showReaderToolbar(tester);
-    await tester.tap(find.byTooltip('播放'));
+    await tester.tap(find.byTooltip('听小说'));
 
     expect(visibleParagraphId, isNotNull);
     expect(played?.id, visibleParagraphId);
@@ -968,7 +964,6 @@ void main() {
       MaterialApp(
         home: _reader(
           paragraphs: _paragraphs(10, ['第一段。']),
-          playbackActive: true,
           onReadingPositionChanged: (paragraph) => reported.add(paragraph.id),
         ),
       ),
@@ -978,7 +973,7 @@ void main() {
 
     await _showReaderToolbar(tester);
     reported.clear();
-    await tester.tap(find.byTooltip('播放'));
+    await tester.tap(find.byTooltip('听小说'));
 
     expect(reported, [100]);
   });
