@@ -15,16 +15,27 @@ final class ServerTtsClient implements CloudSpeechSynthesizer {
     required this.dio,
     required this.credentials,
     ServerTtsDelay? delay,
-    this.pollInterval = const Duration(milliseconds: 750),
-    this.maxPolls = 240,
+    this.pollIntervals = const [
+      Duration(milliseconds: 150),
+      Duration(milliseconds: 250),
+      Duration(milliseconds: 500),
+    ],
+    this.maxPolls = 360,
   }) : assert(maxPolls > 0),
+       assert(pollIntervals.isNotEmpty),
+       assert(pollIntervals.every((interval) => interval > Duration.zero)),
        _delay = delay ?? Future<void>.delayed;
 
   final Dio dio;
   final SecureCredentials credentials;
-  final Duration pollInterval;
+  final List<Duration> pollIntervals;
   final int maxPolls;
   final ServerTtsDelay _delay;
+
+  Duration _pollDelay(int poll) {
+    final index = poll < pollIntervals.length ? poll : pollIntervals.length - 1;
+    return pollIntervals[index];
+  }
 
   @override
   Future<Uint8List> synthesize(
@@ -72,7 +83,7 @@ final class ServerTtsClient implements CloudSpeechSynthesizer {
           final reason = data?['error'] as String?;
           throw AppFailure(_failureMessage(reason));
         }
-        await _delay(pollInterval);
+        await _delay(_pollDelay(poll));
       }
       throw const AppFailure('自建语音服务合成超时');
     } on DioException catch (error) {
