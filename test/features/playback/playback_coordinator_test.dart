@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
@@ -12,6 +13,46 @@ import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
 import '../../support/test_voice_profile.dart';
 
 void main() {
+  test('records audio prepare-to-play duration without sensitive fields', () async {
+    final telemetry = _RecordingTelemetry();
+    final coordinator = PlaybackCoordinator(
+      provider: FakeSpeechProvider(),
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource(const ['第一段']),
+      voiceProfile: testVoiceProfile(),
+      telemetry: telemetry,
+    );
+
+    await coordinator.playFrom(
+      const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+    );
+
+    final duration = telemetry.events.singleWhere(
+      (event) => event.$1 == 'playback.audio.prepare_to_play',
+    );
+    expect(duration.$2.keys, unorderedEquals(['elapsed_ms']));
+    expect(duration.$2['elapsed_ms'], isA<int>());
+    await coordinator.dispose();
+  });
+
+  test('telemetry failures do not affect prepare or playback', () async {
+    final coordinator = PlaybackCoordinator(
+      provider: FakeSpeechProvider(),
+      progress: FakeProgressRepository(),
+      paragraphs: FakeParagraphSource(const ['第一段']),
+      voiceProfile: testVoiceProfile(),
+      telemetry: _ThrowingTelemetry(),
+    );
+
+    await expectLater(
+      coordinator.playFrom(
+        const PlaybackCursor(chapterId: 1, paragraphIndex: 0),
+      ),
+      completes,
+    );
+    await coordinator.dispose();
+  });
+
   test('publishes the cursor when each paragraph starts playing', () async {
     final provider = FakeSpeechProvider();
     final coordinator = PlaybackCoordinator(
@@ -941,6 +982,28 @@ void main() {
     await subscription.cancel();
     await coordinator.dispose();
   });
+}
+
+final class _RecordingTelemetry implements PlaybackTelemetry {
+  final List<(String, Map<String, Object?>)> events = [];
+
+  @override
+  void record(String name, [Map<String, Object?> fields = const {}]) {
+    events.add((name, fields));
+  }
+
+  @override
+  Future<void> flush() async {}
+}
+
+final class _ThrowingTelemetry implements PlaybackTelemetry {
+  @override
+  void record(String name, [Map<String, Object?> fields = const {}]) {
+    throw StateError('telemetry failed');
+  }
+
+  @override
+  Future<void> flush() async {}
 }
 
 final class FakeParagraphSource implements PlaybackParagraphSource {

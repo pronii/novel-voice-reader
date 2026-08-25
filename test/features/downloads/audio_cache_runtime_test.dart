@@ -8,6 +8,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/downloads/application/audio_cache_runtime.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_task_dispatcher.dart';
@@ -282,7 +283,7 @@ void main() {
     expect(adapter.fetchCount, 0, reason: 'a corrupt entry must never synthesize');
   });
 
-  test('concurrent obtains reuse the same process-wide synthesis', () async {
+  test('reports created, joined in-flight, and cache-hit obtains', () async {
     final database = AppDatabase.forTesting(NativeDatabase.memory());
     final root = await Directory.systemTemp.createTemp('audio-cache-in-flight');
     addTearDown(() async {
@@ -318,22 +319,86 @@ void main() {
       partIndex: 0,
     );
 
-    final warm = runtime.obtain(
+    final telemetry = _RecordingTelemetry();
+    final warm = runtime.obtainTracked(
       bookId: bookId,
       segment: segment,
       profile: profile,
     );
     await adapter.waitForJobCreation();
-    final confirmed = runtime.obtain(
+    final confirmed = runtime.forBook(
+      bookId,
+      telemetry: telemetry,
+      recordManualSeek: true,
+    ).obtain(segment, profile);
+    adapter.releaseAudio();
+    final warmResult = await warm;
+    final confirmedFile = await confirmed;
+
+    expect(warmResult.source, AudioCacheObtainSource.created);
+    expect(warmResult.file.path, confirmedFile.path);
+    expect(adapter.jobCreations, 1);
+    expect(
+      telemetry.events.single.$2,
+      containsPair('source', AudioCacheObtainSource.joinedInFlight.name),
+    );
+
+    final cached = await runtime.obtainTracked(
       bookId: bookId,
       segment: segment,
       profile: profile,
     );
-    adapter.releaseAudio();
-    final files = await Future.wait([warm, confirmed]);
+    expect(cached.source, AudioCacheObtainSource.cacheHit);
 
-    expect(files[0].path, files[1].path);
+    final cachedTelemetry = _RecordingTelemetry();
+    final cachedConfirmed = await runtime.forBook(
+      bookId,
+      telemetry: cachedTelemetry,
+      recordManualSeek: true,
+    ).obtain(segment, profile);
+    expect(cachedConfirmed.path, warmResult.file.path);
+    expect(
+      cachedTelemetry.events.single.$2,
+      containsPair('source', AudioCacheObtainSource.cacheHit.name),
+    );
     expect(adapter.jobCreations, 1);
+  });
+
+  test('manual-seek telemetry failures do not block cache obtains', () async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    final root = await Directory.systemTemp.createTemp('audio-cache-telemetry');
+    addTearDown(() async {
+      await database.close();
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    final bookId = await database.createBookWithChapter(
+      title: '遥测隔离测试书',
+      chapterTitle: '第一章',
+      paragraphs: const ['第一段。'],
+    );
+    final runtime = AudioCacheRuntime(
+      database: database,
+      cacheDirectoryForBook: (id) => _bookDir(root, id),
+      dio: Dio()..httpClientAdapter = _CountingAudioAdapter(),
+      credentials: SecureCredentials(_MemorySecureStore()),
+      networkGate: const AllowAllDownloadNetworkGate(),
+    );
+    addTearDown(runtime.dispose);
+    const segment = SpeechSegment(
+      id: '1:0',
+      paragraphId: 1,
+      text: '第一段。',
+      partIndex: 0,
+    );
+
+    await expectLater(
+      runtime.forBook(
+        bookId,
+        telemetry: _ThrowingTelemetry(),
+        recordManualSeek: true,
+      ).obtain(segment, _cloudProfile()),
+      completes,
+    );
   });
 }
 
@@ -457,6 +522,28 @@ final class _CountingAudioAdapter implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) {}
+}
+
+final class _RecordingTelemetry implements PlaybackTelemetry {
+  final List<(String, Map<String, Object?>)> events = [];
+
+  @override
+  void record(String name, [Map<String, Object?> fields = const {}]) {
+    events.add((name, fields));
+  }
+
+  @override
+  Future<void> flush() async {}
+}
+
+final class _ThrowingTelemetry implements PlaybackTelemetry {
+  @override
+  void record(String name, [Map<String, Object?> fields = const {}]) {
+    throw StateError('telemetry failed');
+  }
+
+  @override
+  Future<void> flush() async {}
 }
 
 final class _ControllableServerAdapter implements HttpClientAdapter {

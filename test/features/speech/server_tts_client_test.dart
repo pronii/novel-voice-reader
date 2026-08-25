@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/speech/data/server_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/voice_profile.dart';
@@ -116,6 +117,36 @@ void main() {
     ]);
   });
 
+  test('records job creation-to-ready duration with safe fields', () async {
+    final telemetry = _RecordingTelemetry();
+    final client = ServerTtsClient(
+      dio: Dio()..httpClientAdapter = _ServerAdapter(),
+      credentials: SecureCredentials(_Store('secret')),
+      delay: (_) async {},
+      telemetry: telemetry,
+    );
+
+    await client.synthesize(_segment, _serverProfile);
+
+    final ready = telemetry.events.singleWhere(
+      (event) => event.$1 == 'speech.server.job.ready',
+    );
+    expect(ready.$2.keys, unorderedEquals(['elapsed_ms', 'poll_count']));
+    expect(ready.$2['elapsed_ms'], isA<int>());
+    expect(ready.$2['poll_count'], 1);
+  });
+
+  test('telemetry failures do not affect server synthesis', () async {
+    final client = ServerTtsClient(
+      dio: Dio()..httpClientAdapter = _ServerAdapter(),
+      credentials: SecureCredentials(_Store('secret')),
+      delay: (_) async {},
+      telemetry: _ThrowingTelemetry(),
+    );
+
+    await expectLater(client.synthesize(_segment, _serverProfile), completes);
+  });
+
   test('omits the Authorization header when no local key is configured', () async {
     final adapter = _ServerAdapter();
     final client = ServerTtsClient(
@@ -145,6 +176,20 @@ void main() {
   });
 }
 
+const _segment = SpeechSegment(
+  id: '1:0',
+  paragraphId: 1,
+  text: '正文',
+  partIndex: 0,
+);
+
+final _serverProfile = VoiceProfile.server(
+  baseUrl: 'https://tts.example.com',
+  model: 'tts-model',
+  voice: 'voice-a',
+  speed: 1,
+);
+
 final class _Store implements SecureKeyValueStore {
   _Store(this.value);
   final String? value;
@@ -154,6 +199,28 @@ final class _Store implements SecureKeyValueStore {
   Future<String?> read(String key) async => value;
   @override
   Future<void> write(String key, String value) async {}
+}
+
+final class _RecordingTelemetry implements PlaybackTelemetry {
+  final List<(String, Map<String, Object?>)> events = [];
+
+  @override
+  void record(String name, [Map<String, Object?> fields = const {}]) {
+    events.add((name, fields));
+  }
+
+  @override
+  Future<void> flush() async {}
+}
+
+final class _ThrowingTelemetry implements PlaybackTelemetry {
+  @override
+  void record(String name, [Map<String, Object?> fields = const {}]) {
+    throw StateError('telemetry failed');
+  }
+
+  @override
+  Future<void> flush() async {}
 }
 
 final class _ServerAdapter implements HttpClientAdapter {
