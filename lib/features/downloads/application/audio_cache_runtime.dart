@@ -412,11 +412,19 @@ final class _RuntimeBookAudioCache
     if (shouldRecord) {
       _manualSeekRecorded = true;
     }
-    final result = await _runtime.obtainTracked(
-      bookId: _bookId,
-      segment: segment,
-      profile: profile,
-    );
+    late final AudioCacheObtainResult result;
+    try {
+      result = await _runtime.obtainTracked(
+        bookId: _bookId,
+        segment: segment,
+        profile: profile,
+      );
+    } catch (_) {
+      if (shouldRecord) {
+        _manualSeekRecorded = false;
+      }
+      rethrow;
+    }
     if (shouldRecord) {
       recordPlaybackTelemetrySafely(
         telemetry,
