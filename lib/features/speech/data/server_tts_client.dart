@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_segmenter.dart';
 import 'package:novel_voice_reader/features/speech/domain/speech_text_normalizer.dart';
@@ -21,6 +22,7 @@ final class ServerTtsClient implements CloudSpeechSynthesizer {
       Duration(milliseconds: 500),
     ],
     this.maxPolls = 360,
+    this.telemetry = const NoopPlaybackTelemetry(),
   }) : assert(maxPolls > 0),
        assert(pollIntervals.isNotEmpty),
        assert(pollIntervals.every((interval) => interval > Duration.zero)),
@@ -30,6 +32,7 @@ final class ServerTtsClient implements CloudSpeechSynthesizer {
   final SecureCredentials credentials;
   final List<Duration> pollIntervals;
   final int maxPolls;
+  final PlaybackTelemetry telemetry;
   final ServerTtsDelay _delay;
 
   Duration _pollDelay(int poll) {
@@ -66,6 +69,7 @@ final class ServerTtsClient implements CloudSpeechSynthesizer {
       if (jobId == null || jobId.isEmpty) {
         throw const AppFailure('自建语音服务返回了无效任务');
       }
+      final readyTimer = Stopwatch()..start();
       for (var poll = 0; poll < maxPolls; poll++) {
         final status = await dio.get<Map<String, dynamic>>(
           '$baseUrl/v1/jobs/$jobId',
@@ -73,6 +77,14 @@ final class ServerTtsClient implements CloudSpeechSynthesizer {
         final data = status.data;
         final state = data?['status'] as String?;
         if (state == 'completed') {
+          recordPlaybackTelemetrySafely(
+            telemetry,
+            'speech.server.job.ready',
+            {
+              'elapsed_ms': readyTimer.elapsedMilliseconds,
+              'poll_count': poll + 1,
+            },
+          );
           final response = await dio.get<List<int>>(
             '$baseUrl/v1/jobs/$jobId/segments/0',
             options: Options(responseType: ResponseType.bytes),

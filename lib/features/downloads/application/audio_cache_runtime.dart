@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
+import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_repository.dart';
 import 'package:novel_voice_reader/features/downloads/data/audio_cache_task_dispatcher.dart';
 import 'package:novel_voice_reader/features/downloads/data/download_plan_store.dart';
@@ -28,6 +29,7 @@ final class AudioCacheRuntime {
     DownloadNetworkGate? networkGate,
     Future<VoiceProfile?> Function()? activeProfileLoader,
     Stream<List<ConnectivityResult>>? connectivityChanges,
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
   }) : _store = DriftDownloadPlanStore(database),
        _database = database,
        // Keep public constructor labels without exposing private field names.
@@ -42,7 +44,9 @@ final class AudioCacheRuntime {
        // ignore: prefer_initializing_formals
        _activeProfileLoader = activeProfileLoader,
        // ignore: prefer_initializing_formals
-       _connectivityChanges = connectivityChanges;
+       _connectivityChanges = connectivityChanges,
+       // ignore: prefer_initializing_formals
+       _telemetry = telemetry;
 
   final AppDatabase _database;
   final DriftDownloadPlanStore _store;
@@ -57,7 +61,8 @@ final class AudioCacheRuntime {
   final DownloadNetworkGate _networkGate;
   final Future<VoiceProfile?> Function()? _activeProfileLoader;
   final Stream<List<ConnectivityResult>>? _connectivityChanges;
-  final Map<String, Future<File>> _inFlight = {};
+  final PlaybackTelemetry _telemetry;
+  final Map<String, Future<AudioCacheObtainResult>> _inFlight = {};
   final Map<int, LinkedHashSet<String>> _recentKeysByBook = {};
   final Map<int, Future<void>> _reconcileTails = {};
   Future<void>? _resumeTail;
@@ -82,26 +87,48 @@ final class AudioCacheRuntime {
     required int bookId,
     required SpeechSegment segment,
     required VoiceProfile profile,
+  }) async {
+    final result = await obtainTracked(
+      bookId: bookId,
+      segment: segment,
+      profile: profile,
+    );
+    return result.file;
+  }
+
+  Future<AudioCacheObtainResult> obtainTracked({
+    required int bookId,
+    required SpeechSegment segment,
+    required VoiceProfile profile,
   }) {
     final cacheKey = CacheKey.forSegment(segment, profile);
     final key = '$bookId:$cacheKey';
     final existing = _inFlight[key];
     if (existing != null) {
-      return existing;
+      return existing.then(
+        (result) => AudioCacheObtainResult(
+          file: result.file,
+          source: AudioCacheObtainSource.joinedInFlight,
+        ),
+      );
     }
 
-    late final Future<File> operation;
-    operation = _obtainAndRecord(bookId, segment, profile, cacheKey)
-        .whenComplete(() {
-          if (identical(_inFlight[key], operation)) {
-            _inFlight.remove(key);
-          }
-        });
+    late final Future<AudioCacheObtainResult> operation;
+    operation = _obtainAndRecord(
+      bookId,
+      segment,
+      profile,
+      cacheKey,
+    ).whenComplete(() {
+      if (identical(_inFlight[key], operation)) {
+        _inFlight.remove(key);
+      }
+    });
     _inFlight[key] = operation;
     return operation;
   }
 
-  Future<File> _obtainAndRecord(
+  Future<AudioCacheObtainResult> _obtainAndRecord(
     int bookId,
     SpeechSegment segment,
     VoiceProfile profile,
@@ -135,7 +162,12 @@ final class AudioCacheRuntime {
         protectedKeys: _recentKeysForBook(bookId),
       );
     }
-    return file;
+    return AudioCacheObtainResult(
+      file: file,
+      source: cached == null
+          ? AudioCacheObtainSource.created
+          : AudioCacheObtainSource.cacheHit,
+    );
   }
 
   /// Returns the cached, validated audio file for [segment] if it is already on
@@ -153,7 +185,16 @@ final class AudioCacheRuntime {
     ).lookup(segment, profile);
   }
 
-  SpeechAudioCache forBook(int bookId) => _RuntimeBookAudioCache(this, bookId);
+  SpeechAudioCache forBook(
+    int bookId, {
+    PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
+    bool recordManualSeek = false,
+  }) => _RuntimeBookAudioCache(
+    this,
+    bookId,
+    telemetry: telemetry,
+    recordManualSeek: recordManualSeek,
+  );
 
   /// Restores persisted cache plans once at launch and whenever connectivity
   /// changes. A failed book must not prevent other books from resuming.
@@ -296,7 +337,9 @@ final class AudioCacheRuntime {
     }
     await _dispatcher.idle;
     while (_inFlight.isNotEmpty) {
-      final operations = List<Future<File>>.of(_inFlight.values);
+      final operations = List<Future<AudioCacheObtainResult>>.of(
+        _inFlight.values,
+      );
       try {
         await Future.wait(operations);
       } catch (_) {
@@ -338,6 +381,7 @@ final class AudioCacheRuntime {
       SpeechProviderType.server => ServerTtsClient(
         dio: _dio,
         credentials: _credentials,
+        telemetry: _telemetry,
       ),
       SpeechProviderType.mimo => MiMoTtsClient(
         dio: _dio,
@@ -349,14 +393,41 @@ final class AudioCacheRuntime {
 
 final class _RuntimeBookAudioCache
     implements SpeechAudioCache, LookupSpeechAudioCache {
-  const _RuntimeBookAudioCache(this._runtime, this._bookId);
+  _RuntimeBookAudioCache(
+    this._runtime,
+    this._bookId, {
+    required this.telemetry,
+    required this.recordManualSeek,
+  });
 
   final AudioCacheRuntime _runtime;
   final int _bookId;
+  final PlaybackTelemetry telemetry;
+  final bool recordManualSeek;
+  bool _manualSeekRecorded = false;
 
   @override
-  Future<File> obtain(SpeechSegment segment, VoiceProfile profile) {
-    return _runtime.obtain(bookId: _bookId, segment: segment, profile: profile);
+  Future<File> obtain(SpeechSegment segment, VoiceProfile profile) async {
+    final shouldRecord = recordManualSeek && !_manualSeekRecorded;
+    if (shouldRecord) {
+      _manualSeekRecorded = true;
+    }
+    final result = await _runtime.obtainTracked(
+      bookId: _bookId,
+      segment: segment,
+      profile: profile,
+    );
+    if (shouldRecord) {
+      recordPlaybackTelemetrySafely(
+        telemetry,
+        'playback.manual_seek.confirmed.cache',
+        {
+          'source': result.source.name,
+          'reused': result.source != AudioCacheObtainSource.created,
+        },
+      );
+    }
+    return result.file;
   }
 
   @override

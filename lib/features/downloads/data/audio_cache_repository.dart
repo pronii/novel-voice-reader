@@ -14,6 +14,15 @@ abstract interface class SpeechAudioCache {
   Future<File> obtain(SpeechSegment segment, VoiceProfile profile);
 }
 
+enum AudioCacheObtainSource { cacheHit, joinedInFlight, created }
+
+final class AudioCacheObtainResult {
+  const AudioCacheObtainResult({required this.file, required this.source});
+
+  final File file;
+  final AudioCacheObtainSource source;
+}
+
 /// A cache that can answer whether a segment's audio is already on disk without
 /// synthesizing it. Implemented by caches whose storage layout the reader
 /// controls, so lock-screen playback can prepare cache-only audio and never

@@ -48,16 +48,6 @@ Future<void> main() async {
   // used an older accessibility class, so it can safely happen after the UI
   // is already visible.
   unawaited(credentials.upgradeKeychainAccessibility());
-  final audioCacheRuntime = AudioCacheRuntime(
-    database: database,
-    cacheDirectoryForBook: (bookId) =>
-        audioCacheDirectoryForBook(supportDirectory, bookId),
-    dio: createSpeechDio(),
-    credentials: credentials,
-    activeProfileLoader: () => loadActiveVoiceProfile(database),
-    connectivityChanges: Connectivity().onConnectivityChanged,
-  );
-  await audioCacheRuntime.start();
   // Diagnostics: buffer background-playback events locally and upload them to a
   // user-configured collector when the app is alive (launch / foreground). The
   // lock-screen failure suspends the isolate, so live per-event upload would
@@ -102,6 +92,17 @@ Future<void> main() async {
       return results.any((result) => result != ConnectivityResult.none);
     },
   );
+  final audioCacheRuntime = AudioCacheRuntime(
+    database: database,
+    cacheDirectoryForBook: (bookId) =>
+        audioCacheDirectoryForBook(supportDirectory, bookId),
+    dio: createSpeechDio(),
+    credentials: credentials,
+    activeProfileLoader: () => loadActiveVoiceProfile(database),
+    connectivityChanges: Connectivity().onConnectivityChanged,
+    telemetry: telemetry,
+  );
+  await audioCacheRuntime.start();
   telemetry.record('session.start');
   final controller = AttachablePlaybackController();
   final audioSession = await BackgroundAudioSession.system(telemetry: telemetry);

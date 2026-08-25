@@ -47,12 +47,12 @@ destination is known.
 Replace the fixed 750 ms polling delay with a bounded schedule that checks quickly
 after job creation and backs off while the job remains pending:
 
-- initial interval: 150 ms;
-- next interval: 250 ms;
-- steady interval: 500 ms;
+- immediate first status GET after job creation;
+- 150 ms delay after the first pending response;
+- 250 ms delay after the second pending response;
+- 500 ms delay after subsequent pending responses;
 - retain the existing overall timeout budget and terminal-state handling.
 
-The first status check remains after a delay to avoid an immediate redundant request.
 The schedule only affects custom cloud synthesis and does not change other speech
 providers.
 

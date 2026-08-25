@@ -75,6 +75,20 @@ abstract interface class PlaybackTelemetry {
   Future<void> flush();
 }
 
+/// Records diagnostics defensively even when an injected implementation
+/// violates [PlaybackTelemetry]'s non-throwing contract.
+void recordPlaybackTelemetrySafely(
+  PlaybackTelemetry telemetry,
+  String name, [
+  Map<String, Object?> fields = const {},
+]) {
+  try {
+    telemetry.record(name, fields);
+  } catch (_) {
+    // Diagnostics must never affect synthesis, caching, or playback.
+  }
+}
+
 /// A [PlaybackTelemetry] that discards everything. The default wherever
 /// telemetry is optional, so instrumentation adds no behaviour unless a real
 /// implementation is injected (and keeps existing tests unaffected).

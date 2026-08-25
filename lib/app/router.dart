@@ -451,11 +451,14 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
     if (database == null || cacheRuntime == null) return;
     final prewarmer = ManualSeekPrewarmer(
       loadProfile: () => loadActiveVoiceProfile(database),
-      warmSegment: (segment, profile) => cacheRuntime.obtain(
-        bookId: widget.bookId,
-        segment: segment,
-        profile: profile,
-      ),
+      warmSegment: (segment, profile) async {
+        final result = await cacheRuntime.obtainTracked(
+          bookId: widget.bookId,
+          segment: segment,
+          profile: profile,
+        );
+        return result.source;
+      },
       telemetry: ref.read(playbackTelemetryProvider),
     );
     unawaited(prewarmer.warm(paragraph));
@@ -500,7 +503,11 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
             )
           : SpeechProviderFactory(
               cacheDirectory: cacheDirectory,
-              audioCache: audioCacheRuntime.forBook(widget.bookId),
+              audioCache: audioCacheRuntime.forBook(
+                widget.bookId,
+                telemetry: ref.read(playbackTelemetryProvider),
+                recordManualSeek: true,
+              ),
             );
       final provider = providerFactory.create(profile);
       final coordinator = PlaybackCoordinator(

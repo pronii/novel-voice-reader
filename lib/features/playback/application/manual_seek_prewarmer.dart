@@ -1,11 +1,15 @@
 import '../../diagnostics/domain/playback_telemetry.dart';
+import '../../downloads/data/audio_cache_repository.dart';
 import '../../reader/domain/reader_content.dart';
 import '../../speech/domain/speech_segmenter.dart';
 import '../../speech/domain/voice_profile.dart';
 
 typedef ManualSeekProfileLoader = Future<VoiceProfile> Function();
 typedef ManualSeekSegmentWarmer =
-    Future<void> Function(SpeechSegment segment, VoiceProfile profile);
+    Future<AudioCacheObtainSource> Function(
+      SpeechSegment segment,
+      VoiceProfile profile,
+    );
 
 final class ManualSeekPrewarmer {
   const ManualSeekPrewarmer({
@@ -44,10 +48,16 @@ final class ManualSeekPrewarmer {
         text: paragraph.text,
         maxCharacters: profile.maxSegmentCharacters,
       );
-      if (segments.isEmpty) return;
-      await _warmSegment(segments.first, profile);
+      if (segments.isEmpty) {
+        _record('playback.manual_seek.warm.skipped', paragraph, {
+          'reason': 'empty_text',
+        });
+        return;
+      }
+      final source = await _warmSegment(segments.first, profile);
       _record('playback.manual_seek.warm.success', paragraph, {
         'elapsed_ms': startedAt.elapsedMilliseconds,
+        'source': source.name,
       });
     } catch (error) {
       _record('playback.manual_seek.warm.failure', paragraph, {
@@ -62,11 +72,15 @@ final class ManualSeekPrewarmer {
     ReaderParagraph paragraph, [
     Map<String, Object?> fields = const {},
   ]) {
-    _telemetry.record(name, {
-      'paragraph_id': paragraph.id,
-      'chapter_id': paragraph.chapterId,
-      'paragraph_index': paragraph.index,
-      ...fields,
-    });
+    recordPlaybackTelemetrySafely(
+      _telemetry,
+      name,
+      {
+        'paragraph_id': paragraph.id,
+        'chapter_id': paragraph.chapterId,
+        'paragraph_index': paragraph.index,
+        ...fields,
+      },
+    );
   }
 }

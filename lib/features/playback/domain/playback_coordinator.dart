@@ -476,7 +476,11 @@ final class PlaybackCoordinator implements PlaybackController {
         return false;
       }
       if (ready) {
-        return _playPreparedSegmentLocked(continuationEpoch, segment);
+        return _playPreparedSegmentLocked(
+          continuationEpoch,
+          segment,
+          preparationStartedAt: startedAt,
+        );
       }
     }
 
@@ -493,15 +497,20 @@ final class PlaybackCoordinator implements PlaybackController {
     if (!_ownsContinuation(continuationEpoch)) {
       return false;
     }
-    return _playPreparedSegmentLocked(continuationEpoch, segment);
+    return _playPreparedSegmentLocked(
+      continuationEpoch,
+      segment,
+      preparationStartedAt: startedAt,
+    );
   }
 
   /// Shared tail for a freshly prepared segment: (re)enable the timeline, apply
   /// the current speed, start playback, and arm the completion watchdog.
   Future<bool> _playPreparedSegmentLocked(
     int continuationEpoch,
-    SpeechSegment segment,
-  ) async {
+    SpeechSegment segment, {
+    Stopwatch? preparationStartedAt,
+  }) async {
     _acceptTimeline = true;
     _timelineChanges.add(_enrichTimeline(PlaybackTimeline.zero));
     final provider = _provider;
@@ -523,6 +532,11 @@ final class PlaybackCoordinator implements PlaybackController {
     }
     final current = _ownsContinuation(continuationEpoch);
     if (current) {
+      if (preparationStartedAt != null) {
+        _record('playback.audio.prepare_to_play', {
+          'elapsed_ms': preparationStartedAt.elapsedMilliseconds,
+        });
+      }
       _record('playback.audio.play.success', {'segment_id': segment.id});
       _publishActivity(PlaybackActivity.playing);
       _armWatchdog(continuationEpoch, segment);
@@ -978,7 +992,7 @@ final class PlaybackCoordinator implements PlaybackController {
   }
 
   void _record(String name, [Map<String, Object?> fields = const {}]) {
-    _telemetry.record(name, fields);
+    recordPlaybackTelemetrySafely(_telemetry, name, fields);
   }
 
   PlaybackTimeline _enrichTimeline(PlaybackTimeline timeline) {
