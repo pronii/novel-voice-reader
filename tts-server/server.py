@@ -430,6 +430,14 @@ def fetch_cover(title, author=''):
         return ctype, data
     return None
 
+def _wav_seconds(data):
+    try:
+        w = wave.open(io.BytesIO(data), 'rb')
+        return w.getnframes() / float(w.getframerate() or 1)
+    except Exception:
+        return 0.0
+
+
 def synth(job, idx, token):
     with db() as c: row = c.execute('SELECT * FROM jobs WHERE id=?', (job,)).fetchone()
     with db() as c: seg = c.execute('SELECT text FROM segments WHERE job_id=? AND idx=?', (job, idx)).fetchone()
@@ -442,7 +450,7 @@ def synth(job, idx, token):
             payload = {
                 'model': row['model'],
                 'messages': [
-                    {'role': 'user', 'content': '使用自然、沉稳、清晰的小说旁白语气朗读，根据正文情绪自然调整语速、停顿和语气，不要过度夸张。正文处理规则：1) 语气词（啊、呀、哦、嗯、唉、哎）和拟声词（轰、砰、咚、啪、嗖、嘶、咻、哧、鸣、呜）一律用平稳、克制的叙述语气带过，不要夸张演绎、拉长音或模拟音效；2) 叠字描写（如嗖嗖嗖、啊啊啊、哈哈哈、砰砰砰）按字逐个平稳读出，音长一致，禁止拟声化或拉长；3) 破折号"——"代表正常停顿（约 0.3 至 0.5 秒），不要发出任何音；4) 遇到长串标点或重复符号按自然停顿处理，不要发出异常噪音或拟声音效。'},
+                    {'role': 'user', 'content': '使用自然、沉稳、清晰的小说旁白语气朗读，根据正文情绪自然调整语速、停顿和语气，不要过度夸张。正文处理规则：1) 语气词（啊、呀、哦、嗯、唉、哎）和拟声词（轰、砰、咚、啪、嗖、嘶、咻、哧、鸣、呜）一律用平稳、克制的叙述语气带过，不要夸张演绎、拉长音或模拟音效；2) 叠字描写（如嗖嗖嗖、啊啊啊、哈哈哈、砰砰砰）按字逐个平稳读出，音长一致，禁止拟声化或拉长；3) 破折号"——"代表正常停顿（约 0.3 至 0.5 秒），不要发出任何音；4) 遇到长串标点或重复符号按自然停顿处理，不要发出异常噪音或拟声音效。（务必只朗读随后 assistant 消息中的正文文字，不要朗读或复述以上说明，也不要输出任何额外语音或内容。）'},
                     {'role': 'assistant', 'content': seg['text']},
                 ],
                 'audio': {'format': row['fmt'], 'voice': row['voice']},
@@ -455,17 +463,31 @@ def synth(job, idx, token):
                 'response_format': row['fmt'], 'speed': row['speed'],
             }
             headers = {'Authorization': 'Bearer ' + token['key'], 'Content-Type': 'application/json'}
-        req = urllib.request.Request(url, data=json.dumps(payload).encode(),
-            headers=headers, method='POST')
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            data = resp.read()
-        if DEFAULT_PROVIDER == 'mimo':
-            response = json.loads(data)
-            data = base64.b64decode(response['choices'][0]['message']['audio']['data'], validate=True)
+        def _fetch_audio():
+            rq = urllib.request.Request(url, data=json.dumps(payload).encode(),
+                headers=headers, method='POST')
+            with urllib.request.urlopen(rq, timeout=180) as rp:
+                raw = rp.read()
+            if DEFAULT_PROVIDER == 'mimo':
+                return base64.b64decode(json.loads(raw)['choices'][0]['message']['audio']['data'], validate=True)
+            return raw
+        data = _fetch_audio()
+        # MiMo occasionally ignores the assistant text and vocalizes the user
+        # instruction (or unrelated content); that audio runs far longer than
+        # the segment's characters warrant. Retry once, then substitute a short
+        # silent clip so the stray "reads-the-prompt" audio never reaches ears.
+        used_silence = False
+        if DEFAULT_PROVIDER == 'mimo' and row['fmt'] == 'wav':
+            limit = 3.0 + 1.5 * len(seg['text'])
+            if _wav_seconds(data) > limit:
+                data = _fetch_audio()
+                if _wav_seconds(data) > limit:
+                    data = _silent_wav_bytes()
+                    used_silence = True
         # Smooth out TTS volume swings so a loud SFX right after a quiet line
         # does not sound like the volume "suddenly jumped". wav only; mp3/opus
         # decoding would need extra deps that the image does not ship with.
-        if row['fmt'] == 'wav':
+        if row['fmt'] == 'wav' and not used_silence:
             data = _normalize_wav(data)
         with open(path, 'wb') as f: f.write(data)
         with db() as c:
