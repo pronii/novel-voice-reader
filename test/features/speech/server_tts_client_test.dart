@@ -47,10 +47,11 @@ void main() {
 
   test('creates a server job, polls it, and downloads the audio', () async {
     final adapter = _ServerAdapter();
+    final delays = <Duration>[];
     final client = ServerTtsClient(
       dio: Dio()..httpClientAdapter = adapter,
       credentials: SecureCredentials(_Store('secret')),
-      delay: (_) async {},
+      delay: (duration) async => delays.add(duration),
     );
     const segment = SpeechSegment(
       id: '1:0',
@@ -82,6 +83,37 @@ void main() {
       'format': 'wav',
       'speed': 1.1,
     });
+    expect(delays, isEmpty);
+  });
+
+  test('front-loads pending job polls before settling at 500 ms', () async {
+    final delays = <Duration>[];
+    final adapter = _ServerAdapter()..runningResponsesRemaining = 3;
+    final client = ServerTtsClient(
+      dio: Dio()..httpClientAdapter = adapter,
+      credentials: SecureCredentials(_Store('secret')),
+      delay: (duration) async => delays.add(duration),
+    );
+    const segment = SpeechSegment(
+      id: '1:0',
+      paragraphId: 1,
+      text: '正文',
+      partIndex: 0,
+    );
+    final profile = VoiceProfile.server(
+      baseUrl: 'https://tts.example.com',
+      model: 'tts-model',
+      voice: 'voice-a',
+      speed: 1,
+    );
+
+    await client.synthesize(segment, profile);
+
+    expect(delays, const [
+      Duration(milliseconds: 150),
+      Duration(milliseconds: 250),
+      Duration(milliseconds: 500),
+    ]);
   });
 
   test('omits the Authorization header when no local key is configured', () async {
@@ -129,6 +161,7 @@ final class _ServerAdapter implements HttpClientAdapter {
   String? authorization;
   Object? createdJob;
   String? failedReason;
+  int runningResponsesRemaining = 0;
 
   @override
   Future<ResponseBody> fetch(
@@ -143,6 +176,10 @@ final class _ServerAdapter implements HttpClientAdapter {
       return _json({'id': 'job-1', 'status': 'running'});
     }
     if (options.path.endsWith('/job-1')) {
+      if (runningResponsesRemaining > 0) {
+        runningResponsesRemaining--;
+        return _json({'id': 'job-1', 'status': 'running'});
+      }
       if (failedReason != null) {
         return _json({
           'id': 'job-1',
