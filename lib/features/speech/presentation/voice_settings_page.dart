@@ -93,8 +93,7 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
     if (profile.providerType == SpeechProviderType.mimo) {
       _mimoVoice = profile.voice ?? VoiceProfile.defaultMiMoVoice;
       _mimoStyle.text = profile.style ?? '';
-    } else if (profile.providerType == SpeechProviderType.cloud ||
-        profile.providerType == SpeechProviderType.server) {
+    } else if (profile.providerType == SpeechProviderType.cloud) {
       // Restore the saved cloud endpoint config so reopening settings doesn't
       // silently revert to the hardcoded defaults.
       final baseUrl = profile.baseUrl;
@@ -142,8 +141,8 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
               DropdownMenuItem(
                 value: SpeechProviderType.server,
                 child: _ProviderOption(
-                  icon: Icons.dns_outlined,
-                  label: '自建服务端',
+                  icon: Icons.cloud_outlined,
+                  label: '官方服务器',
                 ),
               ),
               DropdownMenuItem(
@@ -236,15 +235,24 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   }
 
   List<Widget> _cloudFields() {
+    if (_provider == SpeechProviderType.server) {
+      return [
+        const SizedBox(height: 12),
+        const Text(
+          '官方服务器，无需额外配置',
+          style: TextStyle(color: Colors.grey),
+        ),
+        const SizedBox(height: 12),
+        _connectionButton(),
+      ];
+    }
     return [
       const SizedBox(height: 12),
       TextField(
         controller: _baseUrl,
         keyboardType: TextInputType.url,
-        decoration: InputDecoration(
-          labelText: _provider == SpeechProviderType.server
-              ? '服务端地址'
-              : 'Base URL',
+        decoration: const InputDecoration(
+          labelText: 'Base URL',
         ),
       ),
       const SizedBox(height: 12),
@@ -259,25 +267,15 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
       ),
       const SizedBox(height: 12),
       TextField(
-        controller: _provider == SpeechProviderType.server
-            ? _mimoApiKey
-            : _apiKey,
+        controller: _apiKey,
         obscureText: true,
         enableSuggestions: false,
         autocorrect: false,
         decoration: InputDecoration(
-          labelText: _provider == SpeechProviderType.server
-              ? 'MiMo API Key'
-              : 'API Key',
-          helperText: _provider == SpeechProviderType.server
-              ? '留空则使用服务器内置密钥'
-              : (widget.hasSavedCloudApiKey ? '已保存，留空则保持不变' : null),
+          labelText: 'API Key',
+          helperText: widget.hasSavedCloudApiKey ? '已保存，留空则保持不变' : null,
         ),
       ),
-      if (_provider == SpeechProviderType.server) ...[
-        const SizedBox(height: 12),
-        _connectionButton(),
-      ],
     ];
   }
 
@@ -340,15 +338,6 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
   void _selectProvider(SpeechProviderType provider) {
     setState(() {
       _provider = provider;
-      if (provider == SpeechProviderType.server &&
-          (_baseUrl.text.trim().isEmpty ||
-              _baseUrl.text.trim() == 'https://api.openai.com')) {
-        _baseUrl.text = _defaultServerUrl;
-      }
-      if (provider == SpeechProviderType.server) {
-        _model.text = VoiceProfile.mimoModel;
-        _voice.text = VoiceProfile.defaultMiMoVoice;
-      }
     });
   }
 
@@ -416,9 +405,9 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
         outputFormat: 'mp3',
       ),
       SpeechProviderType.server => VoiceProfile.server(
-        baseUrl: _baseUrl.text,
-        model: _model.text,
-        voice: _voice.text,
+        baseUrl: _defaultServerUrl,
+        model: VoiceProfile.mimoModel,
+        voice: VoiceProfile.defaultMiMoVoice,
         speed: _speed,
         outputFormat: 'wav',
       ),
