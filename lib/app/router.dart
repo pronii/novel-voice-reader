@@ -22,6 +22,7 @@ import 'package:novel_voice_reader/features/library/data/book_import_repository.
 import 'package:novel_voice_reader/features/library/data/epub_book_parser.dart';
 import 'package:novel_voice_reader/features/library/data/txt_book_parser.dart';
 import 'package:novel_voice_reader/features/library/presentation/library_page.dart';
+import 'package:novel_voice_reader/features/update/app_update.dart';
 import 'package:novel_voice_reader/features/playback/application/manual_seek_prewarmer.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
@@ -91,7 +92,13 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
   void initState() {
     super.initState();
     unawaited(_fetchMissingCovers());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(maybePromptUpdate(context));
+    });
   }
+
+  void _checkUpdate() =>
+      unawaited(maybePromptUpdate(context, announceNoUpdate: true));
 
   /// Kicks off a one-shot background pass to fetch covers for books that have
   /// none. The cover proxy lives on the self-hosted TTS server, so this only
@@ -121,6 +128,7 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
       return LibraryPage(
         books: const [],
         onImport: _importBook,
+        onCheckUpdate: _checkUpdate,
         onOpenVoiceSettings: () => context.push('/settings/voice'),
         themeMode: themeMode,
         onCycleThemeMode: cycleTheme,
@@ -132,6 +140,7 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
         books: const [],
         loading: true,
         onImport: _importBook,
+        onCheckUpdate: _checkUpdate,
         themeMode: themeMode,
         onCycleThemeMode: cycleTheme,
       ),
@@ -139,6 +148,7 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
         books: const [],
         errorMessage: '书架加载失败',
         onImport: _importBook,
+        onCheckUpdate: _checkUpdate,
         themeMode: themeMode,
         onCycleThemeMode: cycleTheme,
       ),
@@ -154,6 +164,7 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
         ],
         loading: _importing,
         onImport: _importBook,
+        onCheckUpdate: _checkUpdate,
         onOpenBook: (bookId) => context.push('/reader/$bookId'),
         onOpenVoiceSettings: () => context.push('/settings/voice'),
         onOpenCacheSettings: (bookId) =>

@@ -25,6 +25,7 @@ final class LibraryPage extends StatelessWidget {
     required this.onImport,
     this.onOpenBook,
     this.onOpenVoiceSettings,
+    this.onCheckUpdate,
     this.onOpenCacheSettings,
     this.themeMode,
     this.onCycleThemeMode,
@@ -36,6 +37,7 @@ final class LibraryPage extends StatelessWidget {
   final Future<void> Function() onImport;
   final ValueChanged<int>? onOpenBook;
   final VoidCallback? onOpenVoiceSettings;
+  final VoidCallback? onCheckUpdate;
   final ValueChanged<int>? onOpenCacheSettings;
 
   /// The current app theme mode. When supplied together with [onCycleThemeMode]
@@ -82,6 +84,12 @@ final class LibraryPage extends StatelessWidget {
               tooltip: _themeTooltip(mode),
               onPressed: onCycleThemeMode,
               icon: Icon(_themeIcon(mode)),
+            ),
+          if (onCheckUpdate != null)
+            IconButton(
+              tooltip: '检查更新',
+              onPressed: onCheckUpdate,
+              icon: const Icon(Icons.system_update_alt_outlined),
             ),
           IconButton(
             tooltip: '语音设置',
