@@ -266,15 +266,17 @@ void main() {
     expect(played, isNull);
   });
 
-  testWidgets('double tapping scroll text plays from that paragraph', (
+  testWidgets('first scroll tap warms and second tap plays without rewarming', (
     tester,
   ) async {
+    final warmed = <ReaderParagraph>[];
     final played = <ReaderParagraph>[];
     final paragraphs = _paragraphs(10, ['第一段。', '第二段。']);
     await tester.pumpWidget(
       MaterialApp(
         home: _reader(
           paragraphs: paragraphs,
+          onWarmFrom: warmed.add,
           onPlayFrom: played.add,
         ),
       ),
@@ -283,9 +285,18 @@ void main() {
     final target = find.byKey(const ValueKey<String>('paragraph-101'));
     await tester.tap(target);
     await tester.pump(const Duration(milliseconds: 50));
+
+    expect(warmed, [same(paragraphs[1])]);
+    expect(played, isEmpty);
+    expect(
+      find.byKey(const ValueKey<String>('active-paragraph-101')),
+      findsNothing,
+    );
+
     await tester.tap(target);
     await tester.pumpAndSettle();
 
+    expect(warmed, [same(paragraphs[1])]);
     expect(played, hasLength(1));
     expect(played.single, same(paragraphs[1]));
     expect(
@@ -293,6 +304,31 @@ void main() {
       findsNothing,
     );
     expect(find.text('从这里朗读'), findsNothing);
+  });
+
+  testWidgets('first taps on different scroll paragraphs warm each without playing', (
+    tester,
+  ) async {
+    final warmed = <ReaderParagraph>[];
+    final played = <ReaderParagraph>[];
+    final paragraphs = _paragraphs(10, ['第一段。', '第二段。']);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: _reader(
+          paragraphs: paragraphs,
+          onWarmFrom: warmed.add,
+          onPlayFrom: played.add,
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey<String>('paragraph-100')));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.byKey(const ValueKey<String>('paragraph-101')));
+    await tester.pumpAndSettle();
+
+    expect(warmed, [same(paragraphs[0]), same(paragraphs[1])]);
+    expect(played, isEmpty);
   });
 
   testWidgets('separated or cross-paragraph taps do not start playback', (
@@ -1134,6 +1170,7 @@ ReaderPage _reader({
   PlaybackCursor? playbackCursor,
   ValueChanged<int>? onChapterSelected,
   ValueChanged<ReaderParagraph>? onReadingPositionChanged,
+  ValueChanged<ReaderParagraph>? onWarmFrom,
   ValueChanged<ReaderParagraph>? onPlayFrom,
   ReaderPageMode initialPageMode = ReaderPageMode.scroll,
   ValueChanged<ReaderPageMode>? onPageModeChanged,
@@ -1157,6 +1194,7 @@ ReaderPage _reader({
     playbackActive: playbackActive ?? playbackCursor != null,
     onChapterSelected: onChapterSelected,
     onReadingPositionChanged: onReadingPositionChanged,
+    onWarmFrom: onWarmFrom,
     onPlayFrom: onPlayFrom,
     initialPageMode: initialPageMode,
     onPageModeChanged: onPageModeChanged,
