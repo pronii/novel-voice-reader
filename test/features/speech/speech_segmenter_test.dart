@@ -52,4 +52,40 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test('skips a lone onomatopoeia paragraph so it is not narrated', () {
+    for (final text in ['嗤！', '“嗤！”', '啊？', '哼。', '呃……']) {
+      expect(
+        const SpeechSegmenter().split(
+          paragraphId: 3,
+          text: text,
+          maxCharacters: 100,
+        ),
+        isEmpty,
+        reason: text,
+      );
+    }
+  });
+
+  test('still narrates a meaningful single-character line', () {
+    for (final text in ['好。', '是！', '对。']) {
+      final parts = const SpeechSegmenter().split(
+        paragraphId: 4,
+        text: text,
+        maxCharacters: 100,
+      );
+      expect(parts, hasLength(1), reason: text);
+      expect(parts.single.text, text);
+    }
+  });
+
+  test('does not skip a multi-character onomatopoeia paragraph', () {
+    final parts = const SpeechSegmenter().split(
+      paragraphId: 5,
+      text: '嗤嗤！',
+      maxCharacters: 100,
+    );
+    expect(parts, hasLength(1));
+    expect(parts.single.text, '嗤嗤！');
+  });
 }

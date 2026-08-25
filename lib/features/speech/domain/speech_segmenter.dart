@@ -30,6 +30,31 @@ final class SpeechSegmenter {
 
   static const _sentenceEndings = '。！？!?；;';
 
+  /// Single-character onomatopoeia / interjections that carry no narratable
+  /// meaning on their own (e.g. a lone "嗤！"). A paragraph whose only
+  /// meaningful character is one of these is not spoken: [split] returns no
+  /// segments, so playback advances past it. Meaningful one-character lines
+  /// (好, 是, 对 …) are deliberately absent so they are still read.
+  static const _skippableInterjections = <String>{
+    '嗤', '哼', '呵', '嘿', '哈', '嘻', '嗷', '啧', '切', '呸', '嘁',
+    '啊', '呀', '哦', '噢', '喔', '咦', '唉', '哎', '呃', '唔', '哟', '唷', '嚯',
+    '咚', '哐', '砰', '嘭', '咔', '嚓', '唰', '咻', '嗖', '嗒', '啪', '嘶', '叮',
+  };
+
+  static bool _isContentRune(int rune) =>
+      (rune >= 0x4E00 && rune <= 0x9FFF) || // CJK unified ideographs
+      (rune >= 0x41 && rune <= 0x5A) || // A-Z
+      (rune >= 0x61 && rune <= 0x7A) || // a-z
+      (rune >= 0x30 && rune <= 0x39); // 0-9
+
+  /// True when the paragraph's only meaningful character is a skippable
+  /// interjection. Punctuation, quotes and whitespace are ignored when
+  /// judging "single character", so "嗤！" and "“嗤！”" both qualify.
+  bool _isSkippableInterjection(String text) {
+    final core = String.fromCharCodes(text.runes.where(_isContentRune));
+    return core.runes.length == 1 && _skippableInterjections.contains(core);
+  }
+
   List<SpeechSegment> split({
     required int paragraphId,
     required String text,
@@ -41,6 +66,9 @@ final class SpeechSegmenter {
         'maxCharacters',
         'Must be positive.',
       );
+    }
+    if (_isSkippableInterjection(text)) {
+      return const [];
     }
     final chunks = <String>[];
     var buffer = '';
