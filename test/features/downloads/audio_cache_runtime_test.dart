@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:novel_voice_reader/core/errors/app_failure.dart';
 import 'package:novel_voice_reader/core/storage/app_database.dart';
 import 'package:novel_voice_reader/core/storage/secure_credentials.dart';
 import 'package:novel_voice_reader/features/diagnostics/domain/playback_telemetry.dart';
@@ -400,6 +401,54 @@ void main() {
       completes,
     );
   });
+
+  test('records a confirmed seek when an obtain retry succeeds', () async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    final root = await Directory.systemTemp.createTemp('audio-cache-retry');
+    addTearDown(() async {
+      await database.close();
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    final bookId = await database.createBookWithChapter(
+      title: '重试遥测测试书',
+      chapterTitle: '第一章',
+      paragraphs: const ['第一段。'],
+    );
+    final adapter = _FailOnceAudioAdapter();
+    final runtime = AudioCacheRuntime(
+      database: database,
+      cacheDirectoryForBook: (id) => _bookDir(root, id),
+      dio: Dio()..httpClientAdapter = adapter,
+      credentials: SecureCredentials(_MemorySecureStore()),
+      networkGate: const AllowAllDownloadNetworkGate(),
+    );
+    addTearDown(runtime.dispose);
+    final telemetry = _RecordingTelemetry();
+    final cache = runtime.forBook(
+      bookId,
+      telemetry: telemetry,
+      recordManualSeek: true,
+    );
+    const segment = SpeechSegment(
+      id: '1:0',
+      paragraphId: 1,
+      text: '第一段。',
+      partIndex: 0,
+    );
+
+    await expectLater(
+      cache.obtain(segment, _cloudProfile()),
+      throwsA(isA<AppFailure>()),
+    );
+    await expectLater(cache.obtain(segment, _cloudProfile()), completes);
+
+    expect(adapter.fetchCount, 2);
+    expect(telemetry.events, hasLength(1));
+    expect(
+      telemetry.events.single.$2,
+      containsPair('source', AudioCacheObtainSource.created.name),
+    );
+  });
 }
 
 AudioCacheRuntime _runtime({
@@ -506,6 +555,40 @@ final class _CountingAudioAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     fetchCount++;
+    return ResponseBody.fromBytes(const [
+      0x49,
+      0x44,
+      0x33,
+      0x04,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+    ], 200);
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+final class _FailOnceAudioAdapter implements HttpClientAdapter {
+  int fetchCount = 0;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    fetchCount++;
+    if (fetchCount == 1) {
+      throw DioException(
+        requestOptions: options,
+        type: DioExceptionType.connectionError,
+      );
+    }
     return ResponseBody.fromBytes(const [
       0x49,
       0x44,
