@@ -281,6 +281,60 @@ void main() {
     expect(await corrupt.exists(), isFalse);
     expect(adapter.fetchCount, 0, reason: 'a corrupt entry must never synthesize');
   });
+
+  test('concurrent obtains reuse the same process-wide synthesis', () async {
+    final database = AppDatabase.forTesting(NativeDatabase.memory());
+    final root = await Directory.systemTemp.createTemp('audio-cache-in-flight');
+    addTearDown(() async {
+      await database.close();
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    final bookId = await database.createBookWithChapter(
+      title: '并发缓存测试书',
+      chapterTitle: '第一章',
+      paragraphs: const ['第一段。'],
+    );
+    final adapter = _ControllableServerAdapter();
+    final dio = Dio()..httpClientAdapter = adapter;
+    final runtime = AudioCacheRuntime(
+      database: database,
+      cacheDirectoryForBook: (id) => _bookDir(root, id),
+      dio: dio,
+      credentials: SecureCredentials(_MemorySecureStore()),
+      networkGate: const AllowAllDownloadNetworkGate(),
+    );
+    addTearDown(runtime.dispose);
+    final profile = VoiceProfile.server(
+      baseUrl: 'https://example.com',
+      model: 'tts-model',
+      voice: 'voice-a',
+      speed: 1,
+      outputFormat: 'mp3',
+    );
+    const segment = SpeechSegment(
+      id: '1:0',
+      paragraphId: 1,
+      text: '第一段。',
+      partIndex: 0,
+    );
+
+    final warm = runtime.obtain(
+      bookId: bookId,
+      segment: segment,
+      profile: profile,
+    );
+    await adapter.waitForJobCreation();
+    final confirmed = runtime.obtain(
+      bookId: bookId,
+      segment: segment,
+      profile: profile,
+    );
+    adapter.releaseAudio();
+    final files = await Future.wait([warm, confirmed]);
+
+    expect(files[0].path, files[1].path);
+    expect(adapter.jobCreations, 1);
+  });
 }
 
 AudioCacheRuntime _runtime({
@@ -400,6 +454,62 @@ final class _CountingAudioAdapter implements HttpClientAdapter {
       0x00,
     ], 200);
   }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+final class _ControllableServerAdapter implements HttpClientAdapter {
+  final Completer<void> _jobCreated = Completer<void>();
+  final Completer<void> _audioReleased = Completer<void>();
+  int jobCreations = 0;
+
+  Future<void> waitForJobCreation() => _jobCreated.future;
+
+  void releaseAudio() => _audioReleased.complete();
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    if (options.method == 'POST' && options.path.endsWith('/v1/jobs')) {
+      jobCreations++;
+      if (!_jobCreated.isCompleted) _jobCreated.complete();
+      return _json('{"id":"job-1","status":"running"}');
+    }
+    if (options.path.endsWith('/v1/jobs/job-1')) {
+      return _json('{"id":"job-1","status":"completed"}');
+    }
+    await _audioReleased.future;
+    return ResponseBody.fromBytes(
+      const [
+        0x49,
+        0x44,
+        0x33,
+        0x04,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+      ],
+      200,
+      headers: {
+        Headers.contentTypeHeader: ['audio/mpeg'],
+      },
+    );
+  }
+
+  ResponseBody _json(String value) => ResponseBody.fromString(
+    value,
+    200,
+    headers: {
+      Headers.contentTypeHeader: ['application/json'],
+    },
+  );
 
   @override
   void close({bool force = false}) {}

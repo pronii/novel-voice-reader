@@ -45,6 +45,7 @@ final class ReaderPage extends StatefulWidget {
     this.onChapterSelected,
     this.onVisibleChapterChanged,
     this.onReadingPositionChanged,
+    this.onWarmFrom,
     this.onPlayFrom,
     this.onListenFrom,
     this.onStopPlayback,
@@ -70,6 +71,7 @@ final class ReaderPage extends StatefulWidget {
   final ValueChanged<int>? onChapterSelected;
   final ValueChanged<int>? onVisibleChapterChanged;
   final ValueChanged<ReaderParagraph>? onReadingPositionChanged;
+  final ValueChanged<ReaderParagraph>? onWarmFrom;
   final ValueChanged<ReaderParagraph>? onPlayFrom;
   /// Starts listening from the given position. The reader page shows a
   /// dedicated "listen" entry (instead of auto-entering playback) and lets
@@ -1203,6 +1205,9 @@ final class _ReaderPageState extends State<ReaderPage> {
     }
     _lastTappedParagraphId = now == null ? null : paragraph.id;
     _lastParagraphTapAt = now;
+    if (_pageMode == ReaderPageMode.scroll && now != null) {
+      widget.onWarmFrom?.call(paragraph);
+    }
     _selectParagraph(paragraph);
   }
 

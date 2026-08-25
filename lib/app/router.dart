@@ -22,6 +22,7 @@ import 'package:novel_voice_reader/features/library/data/book_import_repository.
 import 'package:novel_voice_reader/features/library/data/epub_book_parser.dart';
 import 'package:novel_voice_reader/features/library/data/txt_book_parser.dart';
 import 'package:novel_voice_reader/features/library/presentation/library_page.dart';
+import 'package:novel_voice_reader/features/playback/application/manual_seek_prewarmer.dart';
 import 'package:novel_voice_reader/features/playback/data/background_audio_handler.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_coordinator.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
@@ -317,6 +318,7 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
             unawaited(_persistReadingPosition(database, paragraph));
           },
           onOpenPlayer: () => context.push('/player/${widget.bookId}'),
+          onWarmFrom: _warmFrom,
           onPlayFrom: (paragraph) => unawaited(_playFrom(data, paragraph)),
           onListenFrom: (start) => unawaited(_listenFrom(data, start)),
           onStopPlayback: () {
@@ -441,6 +443,22 @@ final class _ReaderRoutePageState extends ConsumerState<_ReaderRoutePage> {
       return;
     }
     await _playFrom(data, paragraph);
+  }
+
+  void _warmFrom(ReaderParagraph paragraph) {
+    final database = ref.read(databaseProvider);
+    final cacheRuntime = ref.read(audioCacheRuntimeProvider);
+    if (database == null || cacheRuntime == null) return;
+    final prewarmer = ManualSeekPrewarmer(
+      loadProfile: () => loadActiveVoiceProfile(database),
+      warmSegment: (segment, profile) => cacheRuntime.obtain(
+        bookId: widget.bookId,
+        segment: segment,
+        profile: profile,
+      ),
+      telemetry: ref.read(playbackTelemetryProvider),
+    );
+    unawaited(prewarmer.warm(paragraph));
   }
 
   Future<void> _playFrom(ReaderPageData data, ReaderParagraph paragraph) async {

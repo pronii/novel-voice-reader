@@ -306,30 +306,31 @@ void main() {
     expect(find.text('从这里朗读'), findsNothing);
   });
 
-  testWidgets('first taps on different scroll paragraphs warm each without playing', (
-    tester,
-  ) async {
-    final warmed = <ReaderParagraph>[];
-    final played = <ReaderParagraph>[];
-    final paragraphs = _paragraphs(10, ['第一段。', '第二段。']);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: _reader(
-          paragraphs: paragraphs,
-          onWarmFrom: warmed.add,
-          onPlayFrom: played.add,
+  testWidgets(
+    'first taps on different scroll paragraphs warm each without playing',
+    (tester) async {
+      final warmed = <ReaderParagraph>[];
+      final played = <ReaderParagraph>[];
+      final paragraphs = _paragraphs(10, ['第一段。', '第二段。']);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: _reader(
+            paragraphs: paragraphs,
+            onWarmFrom: warmed.add,
+            onPlayFrom: played.add,
+          ),
         ),
-      ),
-    );
+      );
 
-    await tester.tap(find.byKey(const ValueKey<String>('paragraph-100')));
-    await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.byKey(const ValueKey<String>('paragraph-101')));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey<String>('paragraph-100')));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.byKey(const ValueKey<String>('paragraph-101')));
+      await tester.pumpAndSettle();
 
-    expect(warmed, [same(paragraphs[0]), same(paragraphs[1])]);
-    expect(played, isEmpty);
-  });
+      expect(warmed, [same(paragraphs[0]), same(paragraphs[1])]);
+      expect(played, isEmpty);
+    },
+  );
 
   testWidgets('separated or cross-paragraph taps do not start playback', (
     tester,
