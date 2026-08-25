@@ -586,7 +586,8 @@ final class _FailOnceAudioAdapter implements HttpClientAdapter {
     if (fetchCount == 1) {
       throw DioException(
         requestOptions: options,
-        type: DioExceptionType.connectionError,
+        type: DioExceptionType.badResponse,
+        response: Response<void>(requestOptions: options, statusCode: 400),
       );
     }
     return ResponseBody.fromBytes(const [
