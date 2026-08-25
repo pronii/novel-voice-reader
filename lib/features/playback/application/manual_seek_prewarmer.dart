@@ -13,9 +13,14 @@ final class ManualSeekPrewarmer {
     required ManualSeekSegmentWarmer warmSegment,
     PlaybackTelemetry telemetry = const NoopPlaybackTelemetry(),
     SpeechSegmenter segmenter = const SpeechSegmenter(),
+    // Named parameters back private fields, so initializing formals don't apply.
+    // ignore: prefer_initializing_formals
   }) : _loadProfile = loadProfile,
+       // ignore: prefer_initializing_formals
        _warmSegment = warmSegment,
+       // ignore: prefer_initializing_formals
        _telemetry = telemetry,
+       // ignore: prefer_initializing_formals
        _segmenter = segmenter;
 
   final ManualSeekProfileLoader _loadProfile;
