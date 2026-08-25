@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:novel_voice_reader/app/design/paper_tokens.dart';
-import 'package:novel_voice_reader/app/theme.dart';
 import 'package:novel_voice_reader/features/reader/application/auto_scroll_controller.dart';
 import 'package:novel_voice_reader/features/reader/application/reader_chapter_window_controller.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
@@ -370,122 +369,15 @@ final class _ReaderPageState extends State<ReaderPage> {
               ),
             ),
             _buildAutoScrollOverlay(context),
-            _buildModeBar(context),
           ],
         ),
       ),
     );
   }
 
-  // Height of the bottom control bar, per the design spec (52px of content;
-  // it rides just inside the body SafeArea, so any system-nav inset sits below
-  // it).
-  static const double _modeBarHeight = 52;
-
-  // The dark colour scheme the bottom bar and its dialog render against, so
-  // they stay unified with the dark reading theme even when the app itself is
-  // light ("弹窗样式适配深色阅读主题，和阅读器整体深色风格统一"). Uses the
-  // hand-authored warm-paper night palette rather than a seeded generic dark so
-  // the chrome matches the rest of the design system.
-  ColorScheme _readerBarScheme(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return scheme.brightness == Brightness.dark
-        ? scheme
-        : AppTheme.darkColorScheme;
-  }
-
-  /// The bottom control bar. It is NOT persistent: it shares the top toolbar's
-  /// visibility (`_toolbarVisible`) and slides in/out together with it, so it
-  /// never sits over the text while reading. It holds a single gear button
-  /// that opens the page-mode picker dialog — the three-way mode choice now
-  /// lives in that dialog rather than on the bar itself.
-  Widget _buildModeBar(BuildContext context) {
-    final barScheme = _readerBarScheme(context);
-    return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 0,
-      child: ClipRect(
-        child: AnimatedSlide(
-          key: const Key('reader-mode-bar'),
-          offset: _toolbarVisible ? Offset.zero : const Offset(0, 1),
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          child: IgnorePointer(
-            ignoring: !_toolbarVisible,
-            child: ExcludeSemantics(
-              excluding: !_toolbarVisible,
-              child: Material(
-                color: barScheme.surfaceContainerHighest,
-                child: SizedBox(
-                  height: _modeBarHeight,
-                  child: Center(
-                    child: IconButton(
-                      key: const Key('reader-mode-gear'),
-                      tooltip: '翻页模式',
-                      color: barScheme.onSurface,
-                      onPressed: _showPageModeDialog,
-                      icon: const Icon(Icons.settings),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Opens the modal page-mode picker: a dark-themed dialog titled 翻页模式
-  /// with one radio per [ReaderPageMode] (滚动模式 / 翻页模式 / 3D翻页模式),
-  /// bound to the currently-saved mode. Picking an option applies it
-  /// immediately — persisting via [_onPageModeSelected] — and closes the
-  /// dialog; no separate confirm step.
-  Future<void> _showPageModeDialog() async {
-    final theme = Theme.of(context);
-    final barScheme = _readerBarScheme(context);
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return Theme(
-          data: theme.copyWith(colorScheme: barScheme),
-          child: AlertDialog(
-            key: const Key('page-mode-dialog'),
-            backgroundColor: barScheme.surfaceContainerHigh,
-            title: const Text('翻页模式'),
-            contentPadding: const EdgeInsets.symmetric(vertical: 12),
-            content: RadioGroup<ReaderPageMode>(
-              groupValue: _pageMode,
-              onChanged: (selected) {
-                // `toggleable` means re-tapping the active option reports null;
-                // either way the pick is done, so close the dialog.
-                if (selected != null && selected != _pageMode) {
-                  _onPageModeSelected(selected);
-                }
-                Navigator.of(dialogContext).pop();
-              },
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (final mode in ReaderPageMode.values)
-                    RadioListTile<ReaderPageMode>(
-                      key: ValueKey('page-mode-option-${mode.storageKey}'),
-                      value: mode,
-                      toggleable: true,
-                      title: Text(mode.menuLabel),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // Applies a mode picked from the bottom bar. Switching takes effect
-  // immediately (no confirmation) and notifies the caller so it can persist.
+  // Applies a mode picked from the reading-settings sheet. Switching takes
+  // effect immediately (no confirmation) and notifies the caller so it can
+  // persist.
   void _onPageModeSelected(ReaderPageMode mode) {
     if (mode == _pageMode) {
       return;
@@ -527,8 +419,7 @@ final class _ReaderPageState extends State<ReaderPage> {
           final running = _autoScroll.isRunning;
           return SafeArea(
             child: Padding(
-              // Bottom inset clears the gear bar (they share visibility).
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12 + _modeBarHeight),
+              padding: const EdgeInsets.all(12),
               child: Align(
                 alignment: Alignment.bottomCenter,
                 child: Material(
@@ -1228,17 +1119,12 @@ final class _ReaderPageState extends State<ReaderPage> {
       return const SizedBox.shrink();
     }
     final playing = widget.playbackActive;
-    return Padding(
-      // Lift the button clear of the bottom mode bar: both share the toolbar's
-      // visibility, so without this the FAB would sit on top of the gear bar.
-      padding: const EdgeInsets.only(bottom: _modeBarHeight),
-      child: FloatingActionButton(
-        key: const Key('reader-listen-button'),
-        mini: true,
-        onPressed: playing ? (widget.onStopPlayback ?? () {}) : _startListening,
-        tooltip: playing ? '退出听书' : '听小说',
-        child: Icon(playing ? Icons.stop : Icons.headphones),
-      ),
+    return FloatingActionButton(
+      key: const Key('reader-listen-button'),
+      mini: true,
+      onPressed: playing ? (widget.onStopPlayback ?? () {}) : _startListening,
+      tooltip: playing ? '退出听书' : '听小说',
+      child: Icon(playing ? Icons.stop : Icons.headphones),
     );
   }
 
@@ -1552,6 +1438,7 @@ final class _ReaderPageState extends State<ReaderPage> {
         // modes, a full synchronous re-pagination — on every division tick. The
         // chosen size is applied to the page once, on release.
         var pendingFontSize = _fontSize;
+        var pendingMode = _pageMode;
         return StatefulBuilder(
           builder: (context, setSheetState) => SafeArea(
             child: SingleChildScrollView(
@@ -1575,6 +1462,32 @@ final class _ReaderPageState extends State<ReaderPage> {
                       if (value != _fontSize) {
                         setState(() => _fontSize = value);
                       }
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Text('翻页模式', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  SegmentedButton<ReaderPageMode>(
+                    showSelectedIcon: false,
+                    segments: [
+                      for (final mode in ReaderPageMode.values)
+                        ButtonSegment<ReaderPageMode>(
+                          value: mode,
+                          label: Text(
+                            switch (mode) {
+                              ReaderPageMode.scroll => '滚动',
+                              ReaderPageMode.slide => '翻页',
+                              ReaderPageMode.curl => '3D',
+                            },
+                            key: ValueKey('page-mode-option-${mode.storageKey}'),
+                          ),
+                        ),
+                    ],
+                    selected: {pendingMode},
+                    onSelectionChanged: (selection) {
+                      final mode = selection.first;
+                      setSheetState(() => pendingMode = mode);
+                      _onPageModeSelected(mode);
                     },
                   ),
                   const SizedBox(height: 8),

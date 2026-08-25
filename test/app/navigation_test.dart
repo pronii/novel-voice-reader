@@ -575,9 +575,12 @@ Future<void> _verifyChapterBrowsingDuringPlayback(
   await _pumpUntilFound(tester, find.byTooltip('章节目录'));
   await _showReaderToolbar(tester);
   if (mode != ReaderPageMode.scroll) {
-    await tester.tap(find.byKey(const Key('reader-mode-gear')));
+    await tester.tap(find.byTooltip('阅读设置'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(Key('page-mode-option-${mode.storageKey}')));
+    await tester.pumpAndSettle();
+    // Dismiss the reading-settings sheet by tapping the scrim above it.
+    await tester.tapAt(const Offset(400, 20));
     await tester.pumpAndSettle();
     await _showReaderToolbar(tester);
   }
