@@ -157,22 +157,81 @@ VoiceProfile? voiceProfileFromRecord(VoiceProfileRecord? record) {
   }
 }
 
-final libraryBooksProvider = StreamProvider<List<BookRecord>>((ref) {
-  final database = ref.watch(databaseProvider);
-  if (database == null) {
-    return Stream.value(const []);
-  }
-  final query = database.select(database.books)
-    ..orderBy([
-      (book) => OrderingTerm(
-        expression: book.lastReadAt,
-        mode: OrderingMode.desc,
-        nulls: NullsOrder.last,
-      ),
-      (book) => OrderingTerm.desc(book.importedAt),
-    ]);
-  return query.watch();
-});
+/// One shelf entry: the book row plus everything the library needs to render a
+/// real "第 x / y 章" label without per-book follow-up queries.
+final class LibraryBookSummary {
+  const LibraryBookSummary({
+    required this.id,
+    required this.title,
+    this.coverImagePath,
+    this.lastReadAt,
+    required this.chapterCount,
+    this.progressChapterIndex,
+  });
+
+  final int id;
+  final String title;
+  final String? coverImagePath;
+  final DateTime? lastReadAt;
+
+  /// Total chapters of the book; 0 before the first import finishes writing.
+  final int chapterCount;
+
+  /// 0-based index of the chapter the saved reading progress points at, or
+  /// null before reading starts.
+  final int? progressChapterIndex;
+}
+
+/// The library shelf, newest-read first, joined with its reading progress and
+/// chapter count. Watching the join (books ⋈ progress ⋈ chapters) re-emits on
+/// any of the three tables — so a label stays correct while the reader saves
+/// positions — and the grouped chapter count is then read in a cheap one-shot.
+final libraryBookSummariesProvider =
+    StreamProvider<List<LibraryBookSummary>>((ref) {
+      final database = ref.watch(databaseProvider);
+      if (database == null) {
+        return Stream.value(const []);
+      }
+      final books = database.books;
+      final progress = database.readingProgresses;
+      final chapters = database.chapters;
+      final query = database.select(books).join([
+        leftOuterJoin(
+          progress,
+          progress.bookId.equalsExp(books.id),
+        ),
+        leftOuterJoin(chapters, chapters.id.equalsExp(progress.chapterId)),
+      ])
+        ..orderBy([
+          OrderingTerm(
+            expression: books.lastReadAt,
+            mode: OrderingMode.desc,
+            nulls: NullsOrder.last,
+          ),
+          OrderingTerm.desc(books.importedAt),
+        ]);
+      return query.watch().asyncMap((rows) async {
+        final countsQuery = database.selectOnly(chapters)
+          ..addColumns([chapters.bookId, chapters.id.count()])
+          ..groupBy([chapters.bookId]);
+        final countByBook = <int, int>{
+          for (final row in await countsQuery.get())
+            row.read(chapters.bookId)!: row.read(chapters.id.count()) ?? 0,
+        };
+        return [
+          for (final row in rows)
+            if (row.readTable(books) case final book)
+              LibraryBookSummary(
+                id: book.id,
+                title: book.title,
+                coverImagePath: book.coverImagePath,
+                lastReadAt: book.lastReadAt,
+                chapterCount: countByBook[book.id] ?? 0,
+                progressChapterIndex: row.read(chapters.chapterIndex),
+              ),
+        ];
+      });
+    });
 
 final readerPageDataProvider = FutureProvider.autoDispose
     .family<ReaderPageData, ReaderPageRequest>((ref, request) async {

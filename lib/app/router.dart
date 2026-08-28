@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:novel_voice_reader/app/providers.dart';
 import 'package:novel_voice_reader/core/errors/app_failure.dart';
@@ -34,6 +35,7 @@ import 'package:novel_voice_reader/features/reader/data/reader_preferences_store
 import 'package:novel_voice_reader/features/reader/data/reading_progress_repository.dart';
 import 'package:novel_voice_reader/features/reader/domain/playback_cursor.dart';
 import 'package:novel_voice_reader/features/reader/presentation/reader_page.dart';
+import 'package:novel_voice_reader/features/settings/presentation/settings_page.dart';
 import 'package:novel_voice_reader/features/speech/data/speech_provider_factory.dart';
 import 'package:novel_voice_reader/features/speech/data/mimo_tts_client.dart';
 import 'package:novel_voice_reader/features/speech/data/server_tts_client.dart';
@@ -47,6 +49,10 @@ GoRouter createAppRouter() {
       GoRoute(
         path: '/library',
         builder: (context, state) => const _LibraryRoutePage(),
+      ),
+      GoRoute(
+        path: '/settings',
+        builder: (context, state) => const _SettingsRoutePage(),
       ),
       GoRoute(
         path: '/reader/:bookId',
@@ -97,16 +103,14 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
     });
   }
 
-  void _checkUpdate() =>
-      unawaited(maybePromptUpdate(context, announceNoUpdate: true));
-
   /// Kicks off a one-shot background pass to fetch covers for books that have
   /// none. The cover proxy lives on the self-hosted TTS server, so this only
   /// runs when the active voice profile points at such a server; MiMo / cloud
   /// users keep the generated placeholders. The repository is reentrancy-guarded
   /// and only requests books outside its retry window, so triggering it on each
   /// library visit is cheap. Fetched covers are written to the database and the
-  /// list refreshes itself through the watching [libraryBooksProvider] stream.
+  /// shelf refreshes itself through the watching [libraryBookSummariesProvider]
+  /// stream.
   Future<void> _fetchMissingCovers() async {
     final database = ref.read(databaseProvider);
     final repository = ref.read(coverRepositoryProvider);
@@ -122,57 +126,79 @@ final class _LibraryRoutePageState extends ConsumerState<_LibraryRoutePage> {
 
   @override
   Widget build(BuildContext context) {
-    final themeMode = ref.watch(themeModeControllerProvider);
-    void cycleTheme() => ref.read(themeModeControllerProvider.notifier).cycle();
     if (ref.watch(databaseProvider) == null) {
       return LibraryPage(
         books: const [],
         onImport: _importBook,
-        onCheckUpdate: _checkUpdate,
-        onOpenVoiceSettings: () => context.push('/settings/voice'),
-        themeMode: themeMode,
-        onCycleThemeMode: cycleTheme,
+        onOpenSettings: () => context.push('/settings'),
       );
     }
-    final books = ref.watch(libraryBooksProvider);
-    return books.when(
+    final summaries = ref.watch(libraryBookSummariesProvider);
+    return summaries.when(
       loading: () => LibraryPage(
         books: const [],
         loading: true,
         onImport: _importBook,
-        onCheckUpdate: _checkUpdate,
-        themeMode: themeMode,
-        onCycleThemeMode: cycleTheme,
+        onOpenSettings: () => context.push('/settings'),
       ),
       error: (_, _) => LibraryPage(
         books: const [],
         errorMessage: '书架加载失败',
         onImport: _importBook,
-        onCheckUpdate: _checkUpdate,
-        themeMode: themeMode,
-        onCycleThemeMode: cycleTheme,
+        onOpenSettings: () => context.push('/settings'),
       ),
-      data: (records) => LibraryPage(
-        books: [
-          for (final book in records)
-            LibraryBookItem(
-              id: book.id,
-              title: book.title,
-              progressLabel: book.lastReadAt == null ? '尚未开始' : '继续阅读',
-              coverImagePath: book.coverImagePath,
-            ),
-        ],
-        loading: _importing,
-        onImport: _importBook,
-        onCheckUpdate: _checkUpdate,
-        onOpenBook: (bookId) => context.push('/reader/$bookId'),
-        onOpenVoiceSettings: () => context.push('/settings/voice'),
-        onOpenCacheSettings: (bookId) =>
-            context.push('/settings/cache/$bookId'),
-        themeMode: themeMode,
-        onCycleThemeMode: cycleTheme,
-      ),
+      data: (records) {
+        // The list is newest-read first, so the first opened book is the
+        // "continue reading" candidate; it is featured in the hero card and
+        // excluded from the grid so the title is never shown twice.
+        final continueBook = records
+            .where((summary) => summary.lastReadAt != null)
+            .firstOrNull;
+        final shelfBooks = [
+          for (final summary in records)
+            if (summary.id != continueBook?.id) _libraryItem(summary),
+        ];
+        return LibraryPage(
+          books: shelfBooks,
+          continueBook: continueBook == null
+              ? null
+              : _libraryItem(continueBook),
+          continueProgress: _continueProgress(continueBook),
+          loading: _importing,
+          onImport: _importBook,
+          onOpenBook: (bookId) => context.push('/reader/$bookId'),
+          onListenBook: (bookId) => context.push('/player/$bookId'),
+          onOpenCacheSettings: (bookId) =>
+              context.push('/settings/cache/$bookId'),
+          onOpenSettings: () => context.push('/settings'),
+        );
+      },
     );
+  }
+
+  static LibraryBookItem _libraryItem(LibraryBookSummary summary) {
+    return LibraryBookItem(
+      id: summary.id,
+      title: summary.title,
+      coverImagePath: summary.coverImagePath,
+      progressLabel: _progressLabel(summary),
+    );
+  }
+
+  static String _progressLabel(LibraryBookSummary summary) {
+    final index = summary.progressChapterIndex;
+    if (index == null || summary.chapterCount == 0) {
+      return '尚未开始';
+    }
+    return '第 ${index + 1} / ${summary.chapterCount} 章';
+  }
+
+  static double? _continueProgress(LibraryBookSummary? summary) {
+    final index = summary?.progressChapterIndex;
+    if (summary == null || index == null || summary.chapterCount == 0) {
+      return null;
+    }
+    return (index + 1) / summary.chapterCount;
   }
 
   Future<void> _importBook() async {
@@ -677,6 +703,11 @@ final class _PlayerRoutePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final data = ref.watch(readerPageDataProvider(ReaderPageRequest(bookId)));
     final handler = ref.watch(playbackRuntimeProvider)?.handler;
+    // The "正在朗读" quote card: playback is not wired in degraded/test runs,
+    // in which case the card is simply absent.
+    final paragraphText = ref
+        .watch(currentParagraphTextProvider(bookId))
+        .valueOrNull;
     return data.when(
       loading: () =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
@@ -684,6 +715,8 @@ final class _PlayerRoutePage extends ConsumerWidget {
       data: (value) => PlayerPage(
         bookTitle: value.book.title,
         bookCoverPath: value.book.coverImagePath,
+        heroTag: 'book-cover-$bookId',
+        paragraphText: paragraphText,
         actions: const [SleepTimerButton()],
         chapterTitle:
             value.chapters
@@ -705,6 +738,73 @@ final class _PlayerRoutePage extends ConsumerWidget {
         onPrevious: handler?.skipToPrevious,
         onNext: handler?.skipToNext,
       ),
+    );
+  }
+}
+
+/// Streams the text of the paragraph playback is currently on, for the
+/// player's quote card. `cursorChanges` does not replay, so the current
+/// cursor's text is yielded first; the stream never closes while the runtime
+/// lives (the provider is autoDispose, tied to the player route).
+final currentParagraphTextProvider =
+    StreamProvider.autoDispose.family<String?, int>((ref, bookId) {
+      final database = ref.watch(databaseProvider);
+      final runtime = ref.watch(playbackRuntimeProvider);
+      if (database == null || runtime == null) {
+        return const Stream<String?>.empty();
+      }
+      final source = DriftPlaybackParagraphSource(database);
+      Future<String?> textAt(PlaybackCursor? cursor) async =>
+          cursor == null ? null : (await source.at(cursor))?.text;
+      return () async* {
+        yield await textAt(runtime.currentCursor);
+        await for (final cursor in runtime.cursorChanges) {
+          yield await textAt(cursor);
+        }
+      }();
+    });
+
+final class _SettingsRoutePage extends ConsumerStatefulWidget {
+  const _SettingsRoutePage();
+
+  @override
+  ConsumerState<_SettingsRoutePage> createState() =>
+      _SettingsRoutePageState();
+}
+
+final class _SettingsRoutePageState extends ConsumerState<_SettingsRoutePage> {
+  // Memoized so rebuilds never re-query the platform channel. Guarded so an
+  // unresolvable package_info (e.g. flutter_test) renders the update row
+  // without a version line. No .timeout(): the guard timer would outlive the
+  // route in fake-async tests even when the channel answers immediately.
+  late final Future<PackageInfo?> _packageInfo = () async {
+    try {
+      return await PackageInfo.fromPlatform();
+    } catch (_) {
+      return null;
+    }
+  }();
+
+  @override
+  Widget build(BuildContext context) {
+    final themeMode = ref.watch(themeModeControllerProvider);
+    return FutureBuilder<PackageInfo?>(
+      future: _packageInfo,
+      builder: (context, snapshot) {
+        final info = snapshot.data;
+        return SettingsPage(
+          themeMode: themeMode,
+          onThemeModeChanged: (mode) => unawaited(
+            ref.read(themeModeControllerProvider.notifier).setMode(mode),
+          ),
+          onOpenVoiceSettings: () => context.push('/settings/voice'),
+          onCheckUpdate: () =>
+              unawaited(maybePromptUpdate(context, announceNoUpdate: true)),
+          versionLabel: info == null
+              ? null
+              : '当前版本 ${info.version} (${info.buildNumber})',
+        );
+      },
     );
   }
 }

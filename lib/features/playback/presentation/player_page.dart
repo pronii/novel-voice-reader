@@ -11,6 +11,8 @@ final class PlayerPage extends StatefulWidget {
     super.key,
     required this.bookTitle,
     this.bookCoverPath,
+    this.heroTag,
+    this.paragraphText,
     required this.chapterTitle,
     this.onPrevious,
     this.onNext,
@@ -29,6 +31,16 @@ final class PlayerPage extends StatefulWidget {
 
   /// Local path of a fetched cover image, or null to show a generated cover.
   final String? bookCoverPath;
+
+  /// Shared-element tag matching the shelf's hero cover, so the artwork flies
+  /// into the player on open. Null skips the Hero (e.g. pushed from the
+  /// reader, which has no matching tag).
+  final String? heroTag;
+
+  /// Text of the paragraph narration is currently on, or null when playback
+  /// is not active; shown as the "正在朗读" quote card between the titles and
+  /// the progress bar.
+  final String? paragraphText;
 
   final String chapterTitle;
   final VoidCallback? onPrevious;
@@ -94,12 +106,7 @@ final class _PlayerPageState extends State<PlayerPage> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    BookCover(
-                      title: widget.bookTitle,
-                      imagePath: widget.bookCoverPath,
-                      width: coverWidth,
-                      height: coverHeight,
-                    ),
+                    _buildCover(coverWidth, coverHeight),
                     const SizedBox(height: 24),
                     Text(
                       widget.bookTitle,
@@ -118,6 +125,11 @@ final class _PlayerPageState extends State<PlayerPage> {
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
+                    if (widget.paragraphText
+                        case final text? when text.trim().isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      _NowReadingCard(text: text),
+                    ],
                     const SizedBox(height: 28),
                     _buildProgress(context, progress),
                     const SizedBox(height: 28),
@@ -143,6 +155,17 @@ final class _PlayerPageState extends State<PlayerPage> {
         ),
       ),
     );
+  }
+
+  Widget _buildCover(double coverWidth, double coverHeight) {
+    final cover = BookCover(
+      title: widget.bookTitle,
+      imagePath: widget.bookCoverPath,
+      width: coverWidth,
+      height: coverHeight,
+    );
+    final tag = widget.heroTag;
+    return tag == null ? cover : Hero(tag: tag, child: cover);
   }
 
   Widget _buildProgress(BuildContext context, PlaybackProgress progress) {
@@ -238,4 +261,80 @@ final class _PlayerPageState extends State<PlayerPage> {
     });
   }
 
+}
+
+/// The "正在朗读" quote card: a paper block with an accent rule and the current
+/// paragraph in serif, fading between paragraphs so progress is visible even
+/// with the screen off-and-on glanceable.
+class _NowReadingCard extends StatelessWidget {
+  const _NowReadingCard({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final paper = context.paper;
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: Insets.lg,
+            vertical: Insets.md,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 3,
+                margin: const EdgeInsets.only(top: 2, bottom: 2, right: 12),
+                decoration: BoxDecoration(
+                  color: paper.accent,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '正在朗读',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: paper.accent,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    // Keyed on the text so a new paragraph fades in; the
+                    // AnimatedSize above absorbs the height change.
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: animation,
+                        child: child,
+                      ),
+                      child: Text(
+                        text,
+                        key: ValueKey<String>(text),
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodyLarge?.copyWith(
+                          fontFamily: PaperFonts.serif,
+                          height: 1.8,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

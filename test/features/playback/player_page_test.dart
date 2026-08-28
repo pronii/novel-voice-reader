@@ -190,6 +190,50 @@ void main() {
     expect(find.text('已听 02:30'), findsOneWidget);
     expect(find.text('本章剩余 01:40'), findsOneWidget);
   });
+  testWidgets('shows the narrated paragraph and fades to the next one', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: PlayerPage(
+          bookTitle: '测试书',
+          chapterTitle: '第一章',
+          paragraphText: '山有小口，仿佛若有光。',
+        ),
+      ),
+    );
+
+    expect(find.text('正在朗读'), findsOneWidget);
+    expect(find.text('山有小口，仿佛若有光。'), findsOneWidget);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: PlayerPage(
+          bookTitle: '测试书',
+          chapterTitle: '第一章',
+          paragraphText: '便舍船，从口入。初极狭，才通人。',
+        ),
+      ),
+    );
+    // pumpAndSettle never settles here: the indeterminate progress bar (no
+    // timeline) animates forever, so pump past the fade instead.
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('便舍船，从口入。初极狭，才通人。'), findsOneWidget);
+    expect(find.text('山有小口，仿佛若有光。'), findsNothing);
+  });
+
+  testWidgets('hides the quote card when nothing is being narrated', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: PlayerPage(bookTitle: '测试书', chapterTitle: '第一章'),
+      ),
+    );
+
+    expect(find.text('正在朗读'), findsNothing);
+  });
 }
 
 Set<double> _selectedSpeed(WidgetTester tester) => tester

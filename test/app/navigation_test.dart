@@ -474,8 +474,7 @@ void main() {
         );
 
     await tester.pumpWidget(NovelVoiceReaderApp(database: database));
-    await _pumpUntilFound(tester, find.byTooltip('语音设置'));
-    await tester.tap(find.byTooltip('语音设置'));
+    await _openVoiceSettings(tester);
     await _pumpUntilFound(tester, find.text('MiMo API Key'));
 
     expect(find.text('Dean（英文男声）'), findsOneWidget);
@@ -724,9 +723,16 @@ Future<int> _createChapteredBook(
   return bookId;
 }
 
+/// Voice settings now live one hop away, behind the unified settings screen.
+Future<void> _openVoiceSettings(WidgetTester tester) async {
+  await _pumpUntilFound(tester, find.byTooltip('设置'));
+  await tester.tap(find.byTooltip('设置'));
+  await _pumpUntilFound(tester, find.text('语音设置'));
+  await tester.tap(find.text('语音设置'));
+}
+
 Future<void> _openMiMoSettings(WidgetTester tester) async {
-  await _pumpUntilFound(tester, find.byTooltip('语音设置'));
-  await tester.tap(find.byTooltip('语音设置'));
+  await _openVoiceSettings(tester);
   await _selectVoiceProvider(tester, 'MiMo');
 }
 

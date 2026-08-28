@@ -7,9 +7,9 @@ void main() {
     test('prefers the chapter estimate over the segment duration', () {
       const timeline = PlaybackTimeline(
         position: Duration(seconds: 5),
-        duration: const Duration(seconds: 10),
-        chapterElapsed: const Duration(seconds: 30),
-        chapterRemaining: const Duration(seconds: 70),
+        duration: Duration(seconds: 10),
+        chapterElapsed: Duration(seconds: 30),
+        chapterRemaining: Duration(seconds: 70),
       );
 
       final progress = PlaybackProgress.of(timeline);
@@ -17,15 +17,17 @@ void main() {
       expect(progress.value, 0.3);
     });
 
-    test('is indeterminate when the chapter total is zero', () {
+    test('falls back to segment progress when the chapter total is zero', () {
       const timeline = PlaybackTimeline(
         position: Duration.zero,
-        duration: const Duration(seconds: 10),
+        duration: Duration(seconds: 10),
         chapterElapsed: Duration.zero,
         chapterRemaining: Duration.zero,
       );
 
-      expect(PlaybackProgress.of(timeline).value, isNull);
+      // A zero-length chapter estimate is unusable, so the readout falls back
+      // to the segment: 0 s of 10 s.
+      expect(PlaybackProgress.of(timeline).value, 0.0);
     });
   });
 
@@ -33,7 +35,7 @@ void main() {
     test('falls back to position over duration without a chapter estimate', () {
       const timeline = PlaybackTimeline(
         position: Duration(seconds: 25),
-        duration: const Duration(seconds: 100),
+        duration: Duration(seconds: 100),
       );
 
       expect(PlaybackProgress.of(timeline).value, 0.25);

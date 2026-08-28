@@ -83,6 +83,57 @@ void main() {
     await tester.tap(find.text('活着'));
     expect(openedBookId, 5);
   });
+
+  testWidgets('shows the continue-reading hero with a listen shortcut', (
+    tester,
+  ) async {
+    int? listenedBookId;
+    int? openedBookId;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LibraryPage(
+          books: const [
+            LibraryBookItem(id: 7, title: '测试书', progressLabel: '第 3 / 120 章'),
+          ],
+          continueBook: const LibraryBookItem(
+            id: 7,
+            title: '测试书',
+            progressLabel: '第 3 / 120 章',
+          ),
+          continueProgress: 3 / 120,
+          onImport: _noopImport,
+          onOpenBook: (bookId) => openedBookId = bookId,
+          onListenBook: (bookId) => listenedBookId = bookId,
+        ),
+      ),
+    );
+
+    expect(find.text('继续阅读'), findsOneWidget);
+    expect(find.text('继续听'), findsOneWidget);
+
+    await tester.tap(find.text('继续听'));
+    expect(listenedBookId, 7);
+
+    // 网格里的书本体仍走打开阅读页的路径（.last 取网格单元格中的标题）。
+    await tester.tap(find.text('测试书').last);
+    expect(openedBookId, 7);
+  });
+
+  testWidgets('opens settings from the app bar', (tester) async {
+    var openedSettings = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LibraryPage(
+          books: const [],
+          onImport: _noopImport,
+          onOpenSettings: () => openedSettings = true,
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('设置'));
+    expect(openedSettings, isTrue);
+  });
 }
 
 Future<void> _noopImport() async {}

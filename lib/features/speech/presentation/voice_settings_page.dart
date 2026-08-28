@@ -124,53 +124,90 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
         _provider == SpeechProviderType.cloud ||
         _provider == SpeechProviderType.server;
     final mimo = _provider == SpeechProviderType.mimo;
+    final isServer = _provider == SpeechProviderType.server;
     return Scaffold(
       appBar: AppBar(title: const Text('语音设置')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          DropdownButtonFormField<SpeechProviderType>(
-            key: const Key('tts-provider-dropdown'),
-            initialValue: _provider,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: '语音服务'),
-            items: const [
-              DropdownMenuItem(
-                value: SpeechProviderType.cloud,
-                child: _ProviderOption(icon: Icons.cloud_outlined, label: '兼容'),
+          SectionCard(
+            title: '语音服务',
+            caption: '选择合成方式，并调整全局语速',
+            children: [
+              DropdownButtonFormField<SpeechProviderType>(
+                key: const Key('tts-provider-dropdown'),
+                initialValue: _provider,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: '语音服务'),
+                items: const [
+                  DropdownMenuItem(
+                    value: SpeechProviderType.cloud,
+                    child: _ProviderOption(
+                      icon: Icons.cloud_outlined,
+                      label: '兼容',
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: SpeechProviderType.server,
+                    child: _ProviderOption(
+                      icon: Icons.dns_outlined,
+                      label: '自建服务端',
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: SpeechProviderType.mimo,
+                    child: _ProviderOption(
+                      icon: Icons.auto_awesome_outlined,
+                      label: 'MiMo',
+                    ),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) _selectProvider(value);
+                },
               ),
-              DropdownMenuItem(
-                value: SpeechProviderType.server,
-                child: _ProviderOption(
-                  icon: Icons.dns_outlined,
-                  label: '自建服务端',
-                ),
+              const SizedBox(height: 20),
+              Text('语速 ${_speed.toStringAsFixed(1)}x'),
+              Slider(
+                value: _speed,
+                min: 0.5,
+                max: 2,
+                divisions: 15,
+                label: _speed.toStringAsFixed(1),
+                onChanged: (value) => setState(() => _speed = value),
               ),
-              DropdownMenuItem(
-                value: SpeechProviderType.mimo,
-                child: _ProviderOption(
-                  icon: Icons.auto_awesome_outlined,
-                  label: 'MiMo',
-                ),
-              ),
+              const SizedBox(height: 4),
             ],
-            onChanged: (value) {
-              if (value != null) _selectProvider(value);
-            },
           ),
-          const SizedBox(height: 24),
-          Text('语速 ${_speed.toStringAsFixed(1)}x'),
-          Slider(
-            value: _speed,
-            min: 0.5,
-            max: 2,
-            divisions: 15,
-            label: _speed.toStringAsFixed(1),
-            onChanged: (value) => setState(() => _speed = value),
-          ),
-          if (cloud) ..._cloudFields(),
-          if (mimo) ..._mimoFields(),
-          if (widget.onSaveDiagnosticsEndpoint != null) ..._diagnosticsFields(),
+          if (cloud) ...[
+            const SizedBox(height: 16),
+            SectionCard(
+              title: isServer ? '自建服务端' : '兼容接口',
+              caption: isServer
+                  ? '自托管 TTS 代理，密钥可由服务端代管'
+                  : 'OpenAI 兼容的 /v1/audio/speech 接口',
+              children: _cloudFields(),
+            ),
+          ],
+          if (mimo) ...[
+            const SizedBox(height: 16),
+            SectionCard(
+              title: 'MiMo 音色',
+              caption: '支持预置中英文音色与自然语言朗读风格',
+              children: _mimoFields(),
+            ),
+          ],
+          if (widget.onSaveDiagnosticsEndpoint != null) ...[
+            const SizedBox(height: 16),
+            SectionCard(
+              title: '诊断上报',
+              caption: '锁屏播放诊断事件会先存在本机，回到前台时上传到下面的地址'
+                  '(任何能接收 POST JSON 的服务/临时 webhook 都行)。已内置默认上报'
+                  '地址,无需填写;如需改到自己的服务器可覆盖此地址。',
+              children: _diagnosticsFields(),
+            ),
+          ],
+          const SizedBox(height: 8),
         ],
       ),
       bottomNavigationBar: StickyActionBar(
@@ -185,18 +222,6 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
 
   List<Widget> _diagnosticsFields() {
     return [
-      const SizedBox(height: 24),
-      const Divider(),
-      const SizedBox(height: 8),
-      Text('诊断上报', style: Theme.of(context).textTheme.titleMedium),
-      const SizedBox(height: 4),
-      const Text(
-        '锁屏播放诊断事件会先存在本机，回到前台时上传到下面的地址(任何能接收 '
-        'POST JSON 的服务/临时 webhook 都行)。已内置默认上报地址,无需填写;'
-        '如需改到自己的服务器可覆盖此地址。',
-        style: TextStyle(fontSize: 12),
-      ),
-      const SizedBox(height: 12),
       TextField(
         key: const Key('diagnostics-endpoint-field'),
         controller: _diagnosticsEndpoint,
@@ -237,7 +262,6 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
 
   List<Widget> _cloudFields() {
     return [
-      const SizedBox(height: 12),
       TextField(
         controller: _baseUrl,
         keyboardType: TextInputType.url,
@@ -283,7 +307,6 @@ final class _VoiceSettingsPageState extends State<VoiceSettingsPage> {
 
   List<Widget> _mimoFields() {
     return [
-      const SizedBox(height: 12),
       DropdownButtonFormField<String>(
         initialValue: _mimoVoice,
         isExpanded: true,

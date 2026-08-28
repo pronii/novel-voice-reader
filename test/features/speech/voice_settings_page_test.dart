@@ -403,6 +403,8 @@ void main() {
       ),
     );
 
+    await tester.ensureVisible(find.text('测试连接'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('测试连接'));
     await tester.pumpAndSettle();
 
@@ -417,4 +419,11 @@ Future<void> _selectVoiceProvider(WidgetTester tester, String label) async {
   await tester.pumpAndSettle();
   await tester.tap(find.text(label).last);
   await tester.pumpAndSettle();
+  // The provider card sits below the fold on the default 800x600 surface;
+  // scroll the connection button into view so later taps land.
+  final connection = find.text('测试连接');
+  if (tester.any(connection)) {
+    await tester.ensureVisible(connection);
+    await tester.pumpAndSettle();
+  }
 }
