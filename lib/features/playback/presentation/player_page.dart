@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:novel_voice_reader/app/design/paper_tokens.dart';
 import 'package:novel_voice_reader/app/widgets/book_cover.dart';
+import 'package:novel_voice_reader/features/playback/domain/playback_progress.dart';
 import 'package:novel_voice_reader/features/playback/domain/playback_timeline.dart';
 
 final class PlayerPage extends StatefulWidget {
@@ -86,6 +86,7 @@ final class _PlayerPageState extends State<PlayerPage> {
             // 800x600 test surface). Scrolls only under extreme text scaling.
             final coverHeight = (constraints.maxHeight * 0.32).clamp(150.0, 240.0);
             final coverWidth = coverHeight * 0.72;
+            final progress = PlaybackProgress.of(_timeline, speed: _speed);
             return SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
               child: ConstrainedBox(
@@ -118,7 +119,7 @@ final class _PlayerPageState extends State<PlayerPage> {
                       ),
                     ),
                     const SizedBox(height: 28),
-                    _buildProgress(context),
+                    _buildProgress(context, progress),
                     const SizedBox(height: 28),
                     _buildTransport(context),
                     const SizedBox(height: 28),
@@ -144,7 +145,7 @@ final class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  Widget _buildProgress(BuildContext context) {
+  Widget _buildProgress(BuildContext context, PlaybackProgress progress) {
     final theme = Theme.of(context);
     final labelStyle = theme.textTheme.labelMedium;
     return Column(
@@ -152,7 +153,7 @@ final class _PlayerPageState extends State<PlayerPage> {
         ClipRRect(
           borderRadius: BorderRadius.circular(999),
           child: LinearProgressIndicator(
-            value: _progress,
+            value: progress.value,
             minHeight: 6,
             color: context.paper.accent,
             backgroundColor: theme.colorScheme.surfaceContainerHighest,
@@ -161,8 +162,8 @@ final class _PlayerPageState extends State<PlayerPage> {
         const SizedBox(height: 10),
         Row(
           children: [
-            Expanded(child: Text(_elapsedLabel, style: labelStyle)),
-            Text(_remainingLabel, style: labelStyle),
+            Expanded(child: Text(progress.elapsedLabel, style: labelStyle)),
+            Text(progress.remainingLabel, style: labelStyle),
           ],
         ),
       ],
@@ -237,56 +238,4 @@ final class _PlayerPageState extends State<PlayerPage> {
     });
   }
 
-  double? get _progress {
-    // Prefer chapter-level progress so the bar reflects the whole chapter,
-    // not the short current TTS segment.
-    final elapsed = _timeline.chapterElapsed;
-    final chapterRemaining = _timeline.chapterRemaining;
-    if (elapsed != null && chapterRemaining != null) {
-      final total = elapsed + chapterRemaining;
-      if (total > Duration.zero) {
-        return (elapsed.inMicroseconds / total.inMicroseconds).clamp(0, 1);
-      }
-    }
-    final duration = _timeline.duration;
-    if (duration == null || duration <= Duration.zero) return null;
-    return (_timeline.position.inMicroseconds / duration.inMicroseconds).clamp(
-      0,
-      1,
-    );
-  }
-
-  String get _elapsedLabel {
-    final elapsed = _timeline.chapterElapsed;
-    if (elapsed != null) {
-      final adjusted = Duration(
-        microseconds: (max(0, elapsed.inMicroseconds) / _speed).round(),
-      );
-      return '已听 ${_formatDuration(adjusted)}';
-    }
-    final duration = _timeline.duration;
-    if (duration == null || duration <= Duration.zero) return '已听 --:--';
-    return '已听 ${_formatDuration(_timeline.position)}';
-  }
-
-  String get _remainingLabel {
-    final duration = _timeline.duration;
-    final chapterRemaining = _timeline.chapterRemaining;
-    if (chapterRemaining == null &&
-        (duration == null || duration <= Duration.zero)) {
-      return '本章剩余 --:--';
-    }
-    final remaining = chapterRemaining ?? duration! - _timeline.position;
-    final adjusted = Duration(
-      microseconds: (max(0, remaining.inMicroseconds) / _speed).round(),
-    );
-    return '本章剩余 ${_formatDuration(adjusted)}';
-  }
-
-  static String _formatDuration(Duration duration) {
-    final totalSeconds = duration.inSeconds.clamp(0, 359999);
-    final minutes = totalSeconds ~/ 60;
-    final seconds = totalSeconds % 60;
-    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-  }
 }

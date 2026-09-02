@@ -160,6 +160,9 @@ class _CenteredNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
+    // Local copy so the optional subtitle type-promotes without an assertion:
+    // a field is never promoted, only a local is.
+    final detail = subtitle;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(Insets.xxl),
@@ -169,10 +172,10 @@ class _CenteredNotice extends StatelessWidget {
             Icon(icon, size: 56, color: scheme.onSurfaceVariant),
             const SizedBox(height: Insets.lg),
             Text(title, textAlign: TextAlign.center, style: textTheme.titleMedium),
-            if (subtitle != null) ...[
+            if (detail != null) ...[
               const SizedBox(height: Insets.sm),
               Text(
-                subtitle!,
+                detail,
                 textAlign: TextAlign.center,
                 style: textTheme.bodyMedium?.copyWith(
                   color: scheme.onSurfaceVariant,
